@@ -1,0 +1,79 @@
+# .gitignore for Modern Python (uv + Ruff)
+
+### --- Python Core --- ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.python-version
+
+### --- uv & Environments --- ###
+# uv creates a .venv folder by default
+.venv/
+# If you use other environment managers
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+### --- Environment Variables (Secrets) --- ###
+# EXTREMELY IMPORTANT: Never commit these
+.env
+.env.local
+.env.shared
+.env.*.local
+.flaskenv
+
+### --- Linting & Testing --- ###
+# Ruff
+.ruff_cache/
+# Pytest
+.pytest_cache/
+.cache/
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+.noseresults
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.typeguard_cache/
+
+### --- IDEs & Editors --- ###
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+### --- OS Specific --- ###
+.DS_Store
+Thumbs.db
