@@ -6,7 +6,7 @@
 - All workflows must be idempotent and safe to rerun.
 - New documents must never overwrite existing local files.
 - Focus on new PDFs only.
-- All extracted file numbers from an email remain in the report for traceability and must be validated as belonging to the same LC/SC family before processing can continue.
+- All extracted file numbers from an email remain in the report for traceability and must be validated as belonging to the same LC/SC family before processing can continue. Family consistency is determined by LC/SC number, normalized buyer, and LC/SC date.
 
 ## File storage rules
 
@@ -46,6 +46,8 @@ A duplicate PDF is defined only by identical filename.
 - Headers are read from row 2 of sheet 1.
 - Duplicate ERP rows for the same file number may be treated as interchangeable; any one may be selected when they are true duplicates.
 - When multiple file numbers are extracted from one email, each must be validated against ERP and all resolved rows must be consistent with the same LC/SC family.
+- Duplicate ERP rows may use any one row when they are true duplicates for family validation.
+- Any partial family match is a hard block.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
 
 ## Master workbook rules
@@ -102,9 +104,15 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Initial exception-handling rule
 - Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment.
+- Business-approved exceptions should be implemented only inside workflow-specific rule-pack modules and should run after standard validation rules.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against the configured subject keywords.
+- Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code.
+
+## Outlook post-processing rule
+- Blocked emails remain in `working`.
+- Successfully processed export-team emails move to `UD and LC`.
+- Successfully processed import-team emails move to `Import`.
 
 ## Open questions that remain intentionally unresolved
-- Any business-approved exceptions to the documented value/quantity matching constraints or naming conventions.
+- Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.

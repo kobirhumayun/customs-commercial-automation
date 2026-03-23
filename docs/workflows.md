@@ -22,7 +22,9 @@ Every CLI workflow should follow the same control shape:
 - parse subject into document type, LC/SC end sequence, buyer, and optional suffix
 - extract all body file numbers matching `P/<yy>/<nnnn>`
 - validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
-- hard-block if the extracted file numbers do not resolve to the same LC/SC family
+- define LC/SC family consistency using LC/SC number, normalized buyer, and LC/SC date
+- duplicate ERP rows may use any one row when they are true duplicates
+- hard-block if the extracted file numbers do not resolve to the same LC/SC family; any partial family match is a hard block
 - normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
 - hard-block if normalized subject buyer and LC/SC number do not exactly match ERP-derived values
 - identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
@@ -47,9 +49,14 @@ Use ERP fields to populate:
 ### No-write rules
 - subject mismatch
 - any extracted file number is missing its required ERP row
+- any partial family match across LC/SC number, normalized buyer, and LC/SC date
 - duplicate file number already present when workflow expects skip
 - ambiguous document identity not resolved by rules
 - any incomplete validation needed for append/skip decision
+
+### Post-processing
+- blocked emails remain in `working`
+- successfully processed export-team emails move to `UD and LC`
 
 ## UD / IP / EXP processing
 
@@ -86,7 +93,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 
 ### Inputs
 - Outlook folder: `working` after operator triage from `temp-import`; process all messages in the folder when the CLI is triggered
-- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject
+- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list stored in code
 
 ### Extraction targets
 - BTB LC number
@@ -101,6 +108,10 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - BTB LC target field blank
 - choose the first row where BTB LC value is between 40% and 80% of export LC value
 - one import LC maps to one row only
+
+### Post-processing
+- blocked emails remain in `working`
+- successfully processed import-team emails move to `Import`
 
 ## Bangladesh Bank dashboard verification
 
@@ -117,7 +128,7 @@ Rows where:
 
 ## Printing
 - only newly saved PDFs are printed
-- print groups are organized by originating mail
+- print groups are organized by originating mail from the current folder contents of the active run
 - group order follows workbook row sequence
 - insert one blank page between mail groups
 - any print failure must be reported with retry/review metadata

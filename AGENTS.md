@@ -42,7 +42,7 @@ Read these documents before changing code or planning major work:
 
 ## Current clarification gaps to preserve
 If implementation starts before these are answered, treat them as open questions rather than fixed rules:
-- Any file naming exceptions that break the documented naming conventions.
+- Any future business-approved exceptions that have not yet been encoded into workflow-specific rule-pack modules.
 
 ## Confirmed phase 1 exclusions
 - Buyer-type inference for UD/IP/EXP stays out of phase 1 entirely unless explicitly reintroduced by a later business decision.
