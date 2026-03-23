@@ -27,7 +27,7 @@ Goal: establish the monolithic modular foundation without workflow-specific comp
 - Structured logging and JSON report writer.
 - Job identity, idempotency keys, rerun semantics, and local state tracking.
 - Shared adapters/contracts for Outlook, file storage, Excel, PDF extraction, OCR, Playwright, and printing.
-- Human-review checkpoint contract.
+- Discrepancy reporting contract and future human-review checkpoint hooks.
 
 ### Phase 2 — Export LC/SC intake workflow
 Goal: support manual export email processing with strict validation and safe workbook append/skip logic.

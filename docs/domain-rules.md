@@ -6,7 +6,7 @@
 - All workflows must be idempotent and safe to rerun.
 - New documents must never overwrite existing local files.
 - Focus on new PDFs only.
-- All extracted file numbers from an email remain in the report for traceability.
+- All extracted file numbers from an email remain in the report for traceability and must be validated as belonging to the same LC/SC family before processing can continue.
 
 ## File storage rules
 
@@ -45,6 +45,7 @@ A duplicate PDF is defined only by identical filename.
 - ERP report is `rptDateWiseLCRegister`.
 - Headers are read from row 2 of sheet 1.
 - Duplicate ERP rows for the same file number may be treated as interchangeable; any one may be selected when they are true duplicates.
+- When multiple file numbers are extracted from one email, each must be validated against ERP and all resolved rows must be consistent with the same LC/SC family.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
 
 ## Master workbook rules
@@ -97,7 +98,13 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Confirmed phase 1 exclusions
 - Buyer-type inference for UD/IP/EXP is excluded entirely from phase 1.
+- Human-review routing is excluded from the initial live-deployment path; unspecified failures default to hard block with comprehensive reporting until recurring issue categories are formally classified.
+
+## Initial exception-handling rule
+- Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment.
+
+## Import relevance rule
+- Fabric-related import emails are identified by case-insensitive substring matching against the configured subject keywords.
 
 ## Open questions that remain intentionally unresolved
-- Exact definition of borderline cases requiring human approval.
 - Any business-approved exceptions to the documented value/quantity matching constraints or naming conventions.

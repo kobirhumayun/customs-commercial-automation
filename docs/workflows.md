@@ -3,25 +3,26 @@
 ## Shared workflow contract
 Every CLI workflow should follow the same control shape:
 1. capture operator execution context
-2. collect source emails/documents from the relevant manual intake location
+2. collect all source emails/documents from the relevant manual intake location
 3. save only new attachments/documents
 4. extract and normalize entities
 5. run workflow rule pack
-6. either block, request review, or write safely
+6. either hard-block or write safely during the initial live-deployment phase
 7. emit JSON report
 8. print only when the workflow completed successfully and printing applies
 
 ## Export LC/SC intake
 
 ### Inputs
-- Outlook folder: `working` after operator triage from `temp-export`
+- Outlook folder: `working` after operator triage from `temp-export`; process all messages in the folder when the CLI is triggered
 - ERP report: `rptDateWiseLCRegister`
 - Attachments: LC/SC PDFs and PI PDFs
 
 ### Deterministic checks
 - parse subject into document type, LC/SC end sequence, buyer, and optional suffix
 - extract all body file numbers matching `P/<yy>/<nnnn>`
-- choose one file number for ERP lookup and pathing while retaining all file numbers for audit
+- validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
+- hard-block if the extracted file numbers do not resolve to the same LC/SC family
 - normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
 - hard-block if normalized subject buyer and LC/SC number do not exactly match ERP-derived values
 - identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
@@ -45,15 +46,17 @@ Use ERP fields to populate:
 
 ### No-write rules
 - subject mismatch
-- missing ERP row for selected file number
+- any extracted file number is missing its required ERP row
 - duplicate file number already present when workflow expects skip
 - ambiguous document identity not resolved by rules
 - any incomplete validation needed for append/skip decision
 
 ## UD / IP / EXP processing
 
+During the initial live-deployment phase, any mismatch, unknown exception, or incomplete rule condition should hard-block with a comprehensive report rather than route to human review.
+
 ### Inputs
-- Outlook folder: `working`
+- Outlook folder: `working`; process all messages in the folder when the CLI is triggered
 - PDF attachments for UD, EXP, and/or IP
 - Existing master workbook rows for the same LC/SC family
 
@@ -82,8 +85,8 @@ Use ERP fields to populate:
 ## Import / BTB LC processing
 
 ### Inputs
-- Outlook folder: `working` after operator triage from `temp-import`
-- Fabric-related import/back-to-back LC emails
+- Outlook folder: `working` after operator triage from `temp-import`; process all messages in the folder when the CLI is triggered
+- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject
 
 ### Extraction targets
 - BTB LC number

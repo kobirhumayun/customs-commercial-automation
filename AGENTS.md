@@ -23,8 +23,9 @@ Read these documents before changing code or planning major work:
 - Record unresolved ambiguities in the appropriate docs instead of silently inventing business rules.
 - Preserve the distinction between:
   - **hard block**: no write, produce discrepancy report
-  - **human review**: operator approval required before write
+  - **human review**: reserved for a later phase after common failure patterns are categorized
   - **successful write**: validations passed, report emitted, downstream print sequencing updated
+- During early live deployment, any case that fails to satisfy all specified parameters should default to a hard block with a comprehensive report rather than a review workflow.
 - When planning code, design for reusable shared services plus workflow-specific rule packs.
 - Any future implementation should use `uv` as the package manager and keep Windows desktop integrations explicit.
 
@@ -41,8 +42,8 @@ Read these documents before changing code or planning major work:
 
 ## Current clarification gaps to preserve
 If implementation starts before these are answered, treat them as open questions rather than fixed rules:
-- Exact list of borderline cases that require operator approval instead of automatic blocking.
 - Any file naming exceptions that break the documented naming conventions.
 
 ## Confirmed phase 1 exclusions
 - Buyer-type inference for UD/IP/EXP stays out of phase 1 entirely unless explicitly reintroduced by a later business decision.
+- Human-review routing is not part of the initial live-deployment decision path; unspecified failures default to hard block until common issue categories are formally defined.

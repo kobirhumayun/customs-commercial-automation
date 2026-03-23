@@ -31,7 +31,7 @@ The architecture must optimize for:
    - manages job lifecycle, checkpoints, and no-write guarantees
 3. **Outlook adapter**
    - inbox subfolder access
-   - selected-mail intake from `working`
+   - all-message intake from `working`
    - mail metadata and attachment extraction
 4. **Document storage manager**
    - destination folder resolution
@@ -40,7 +40,7 @@ The architecture must optimize for:
 5. **ERP downloader**
    - Playwright login/navigation
    - `rptDateWiseLCRegister` retrieval
-   - normalization and row selection per file number
+   - normalization and row selection across all extracted file numbers
 6. **Parsing and normalization layer**
    - subject parsing
    - email body file-number extraction
@@ -54,7 +54,7 @@ The architecture must optimize for:
 8. **Rule and validation engine**
    - hard-block rules
    - soft-warning rules
-   - human-review checkpoints
+   - future human-review checkpoints
    - versioned rule packs by workflow
 9. **Matching and reconciliation engine**
    - ERP-to-email matching
@@ -86,11 +86,11 @@ The architecture must optimize for:
 
 ### Export LC/SC intake CLI
 - Operator moves eligible emails from `temp-export` to `working`.
-- CLI retrieves selected/eligible emails from `working`.
+- CLI processes all messages currently present in `working`.
 - Body parser extracts all file numbers matching `P/<yy>/<nnnn>`.
-- Exactly one file number is used for ERP lookup, subject validation, and folder-path construction.
-- ERP downloader retrieves `rptDateWiseLCRegister`, normalizes row-2 headers, and selects one row for the chosen file number.
-- Subject validation compares normalized buyer name and LC/SC number; mismatch is a hard block.
+- Every extracted file number is used for ERP lookup, subject validation, and folder-path verification to confirm they all belong to the same LC/SC family.
+- ERP downloader retrieves `rptDateWiseLCRegister`, normalizes row-2 headers, and validates that the resulting ERP rows remain internally consistent for the same family.
+- Subject validation compares normalized buyer name and LC/SC number against the verified family; any mismatch is a hard block.
 - Attachment classifier identifies LC/SC and PI PDFs using naming conventions, clauses, amendment context, and ERP PI references.
 - Storage manager saves only new PDFs into export folder hierarchy:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`.
@@ -99,7 +99,7 @@ The architecture must optimize for:
 
 ### UD / IP / EXP CLI
 - Shares intake, storage, and parsing services with export workflow.
-- Processes only the LC/SC family indicated by the email body file number.
+- Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
 - Extraction pipeline captures document numbers, dates, LC/SC references, quantities, and units.
 - Matching engine locates candidate workbook rows and applies UD combination logic or IP/EXP total matching rules.
@@ -108,7 +108,7 @@ The architecture must optimize for:
 
 ### Import / BTB LC CLI
 - Operator moves fabric-relevant emails from `temp-import` to `working`.
-- Relevance is determined from subject keyword indicating fabric.
+- Relevance is determined by case-insensitive substring matching against the configured fabric subject keywords.
 - New PDFs are saved into the designated import folder organized by year.
 - Extraction returns BTB LC number/date/value, PI yarn quantity, and related export LC number from clauses.
 - Candidate workbook rows are filtered by matching export LC with blank `UP No.` and blank BTB LC field.
@@ -163,7 +163,7 @@ Rules should be represented as explicit, versioned rule packs keyed by workflow.
 ### Rule outcome classes
 - **Hard block**: no write; discrepancy report required.
 - **Soft warning**: processing may continue but report must retain warning.
-- **Human review**: operator approval checkpoint before any write.
+- **Human review**: deferred capability for a later phase after common issue categories are understood and explicitly documented.
 
 ### Examples of hard blocks
 - subject validation mismatch against ERP buyer name and LC/SC number
@@ -172,12 +172,8 @@ Rules should be represented as explicit, versioned rule packs keyed by workflow.
 - workbook row eligibility not satisfied
 - duplicate-save or duplicate-write invariants violated
 
-### Review-triggering cases
-The architecture should support review checkpoints for cases such as:
-- ambiguous document identification among multiple attachments
-- extraction confidence too low to trust deterministic parsing
-- multiple equally valid workbook match candidates
-- business rules that are known but not fully specified in the docs
+### Initial live-deployment decision policy
+During early live deployment, the system should treat any failure to satisfy specified parameters as a hard block with a comprehensive discrepancy report. Human-review checkpoints remain a future extension once recurring issue categories have been observed and codified.
 
 ## 6. Excel integration design
 - Use one master workbook per year.
@@ -223,11 +219,14 @@ This allows deterministic review of why a value was accepted or blocked.
 - **Desktop dependency fragility** → adapter abstraction and environment readiness checklist.
 
 ## 11. Open questions needing business clarification
-- Which exact borderline cases should go to operator approval instead of immediate blocking?
 - Are there approved exceptions to subject and attachment naming conventions that must be modeled now? If so, they should be added as explicit exception rules instead of ad hoc parsing behavior.
 
 ## 12. Confirmed phase 1 decisions
 - Buyer-type inference for UD/IP/EXP is intentionally out of scope for phase 1 and must not be used as a dependency in deterministic workflow logic.
+- Initial live deployment should default to hard block plus comprehensive reporting for any case that does not satisfy all specified parameters.
+- Outlook-driven workflows process all messages currently in the `working` folder when the operator triggers the CLI.
+- Export-family verification should validate every extracted file number against ERP data rather than selecting a single primary file number.
+- Import relevance uses case-insensitive substring matching on configured fabric subject keywords.
 
 ## 13. Recommended documentation set
 The architecture should continue to be split across:
