@@ -42,5 +42,7 @@ Read these documents before changing code or planning major work:
 ## Current clarification gaps to preserve
 If implementation starts before these are answered, treat them as open questions rather than fixed rules:
 - Exact list of borderline cases that require operator approval instead of automatic blocking.
-- Whether buyer-type inference for UD/IP/EXP stays out of phase 1 entirely.
 - Any file naming exceptions that break the documented naming conventions.
+
+## Confirmed phase 1 exclusions
+- Buyer-type inference for UD/IP/EXP stays out of phase 1 entirely unless explicitly reintroduced by a later business decision.

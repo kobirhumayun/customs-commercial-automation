@@ -95,7 +95,9 @@ Verification uses:
 
 The dashboard column is verification-only and should not be used to drive other writes in phase 1.
 
+## Confirmed phase 1 exclusions
+- Buyer-type inference for UD/IP/EXP is excluded entirely from phase 1.
+
 ## Open questions that remain intentionally unresolved
 - Exact definition of borderline cases requiring human approval.
-- Whether buyer-type inference for UD/IP/EXP is excluded entirely from phase 1.
-- Any business-approved exceptions to the documented value/quantity matching constraints.
+- Any business-approved exceptions to the documented value/quantity matching constraints or naming conventions.

@@ -224,10 +224,12 @@ This allows deterministic review of why a value was accepted or blocked.
 
 ## 11. Open questions needing business clarification
 - Which exact borderline cases should go to operator approval instead of immediate blocking?
-- Should buyer-type inference for UD/IP/EXP remain entirely out of phase 1?
-- Are there approved exceptions to subject and attachment naming conventions that must be modeled now?
+- Are there approved exceptions to subject and attachment naming conventions that must be modeled now? If so, they should be added as explicit exception rules instead of ad hoc parsing behavior.
 
-## 12. Recommended documentation set
+## 12. Confirmed phase 1 decisions
+- Buyer-type inference for UD/IP/EXP is intentionally out of scope for phase 1 and must not be used as a dependency in deterministic workflow logic.
+
+## 13. Recommended documentation set
 The architecture should continue to be split across:
 - `docs/architecture.md`
 - `docs/workflows.md`
