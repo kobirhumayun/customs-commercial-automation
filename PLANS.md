@@ -1,0 +1,88 @@
+# PLANS.md
+
+## Objective
+Translate the customs/commercial automation architecture into a durable, modular delivery plan that supports safe incremental implementation inside a monolithic Python codebase.
+
+## Target delivery shape
+- Single repository
+- Python + `uv`
+- Separate manually triggered CLI tools
+- Shared core services and workflow-specific rule packs
+- JSON-first reporting in phase 1
+- Windows desktop integrations for Outlook, Excel, Acrobat, Playwright, and local file storage
+
+## Phase roadmap
+
+### Phase 0 — Architecture baseline and durable guidance
+Goal: make the repository self-describing before implementation begins.
+- Maintain architecture docs for system context, workflows, business rules, and operating model.
+- Define canonical entities, reports, and failure categories.
+- Freeze the phase 1 boundaries: no scheduler, no dashboard, no AI dependency.
+- Capture open questions explicitly so they are resolved before sensitive write logic is built.
+
+### Phase 1 — Core platform skeleton
+Goal: establish the monolithic modular foundation without workflow-specific complexity.
+- CLI entrypoints and command dispatcher.
+- Configuration and secrets management.
+- Structured logging and JSON report writer.
+- Job identity, idempotency keys, rerun semantics, and local state tracking.
+- Shared adapters/contracts for Outlook, file storage, Excel, PDF extraction, OCR, Playwright, and printing.
+- Human-review checkpoint contract.
+
+### Phase 2 — Export LC/SC intake workflow
+Goal: support manual export email processing with strict validation and safe workbook append/skip logic.
+- Outlook working-folder intake.
+- Attachment deduplicated storage.
+- ERP `rptDateWiseLCRegister` download and normalization.
+- Subject/body parsing and file-number extraction.
+- LC/SC + PI identification and reconciliation.
+- Master workbook append/skip behavior with discrepancy blocking.
+- Print batch creation for newly saved PDFs.
+
+### Phase 3 — UD / IP / EXP workflow
+Goal: support shared-column population and quantity/value matching rules.
+- UD/IP/EXP PDF extraction.
+- Matching candidate workbook rows for a single LC/SC family.
+- Combination-based UD allocation logic.
+- Ordered shared-column writing rules for UD/EXP/IP values and dates.
+- Discrepancy and human-review paths for under-specified cases.
+
+### Phase 4 — Import / BTB LC workflow
+Goal: process fabric-related import emails and map validated BTB LC data to a single eligible workbook row.
+- Subject-based relevance filtering.
+- Save and iterate all new import PDFs.
+- Extract import LC number/date/value, PI yarn quantity, and related export LC.
+- Candidate-row filtering and 40%-80% validation rule.
+- One import LC mapped to exactly one row.
+
+### Phase 5 — Bangladesh Bank dashboard verification
+Goal: implement verification-only workflow with workbook status results.
+- Dashboard login via Playwright.
+- Candidate-row filtering from master workbook.
+- ERP amendment aggregation and dashboard comparison.
+- Status writeback of `OK`, `OK (Kgs)`, or descriptive discrepancy string.
+
+### Phase 6 — Hardening, operations, and future-ready extensions
+Goal: productionize the operator experience while preserving deterministic behavior.
+- Retry/resume tooling.
+- Recovery playbooks for partial failures.
+- Validation/rule test suites.
+- Packaging and Windows deployment model.
+- Optional persistence foundation for PostgreSQL.
+- AI-assisted extraction/review extension points that remain off the critical path.
+
+## Cross-cutting implementation tracks
+These tracks progress in parallel with the phases above:
+- **Rule management:** represent business rules as versioned, testable rule packs.
+- **Excel safety:** preserve formulas, formatting, validation, comments, filters, merges, and protection exactly.
+- **Auditability:** every workflow emits machine-readable JSON artifacts with source provenance and write decisions.
+- **Idempotency:** no duplicate saves, writes, prints, or conflicting reruns.
+- **Operator trust:** anything ambiguous becomes a discrepancy or review checkpoint, never a silent guess.
+
+## Ready-for-build checklist
+Before coding a workflow, confirm:
+- the workflow contract is documented in `docs/workflows.md`
+- required business rules are captured in `docs/domain-rules.md`
+- write/no-write conditions are explicit
+- idempotency keys and report outputs are defined
+- open questions affecting the workflow are resolved or intentionally gated behind review
