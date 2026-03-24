@@ -1,6 +1,7 @@
 # Report Schemas (Normative)
 
 All workflows must emit versioned JSON payloads using the schema contracts in this document.
+All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 
 ## 1) Schema versioning policy
 - Every payload includes `schema_id` and `schema_version`.
@@ -65,6 +66,11 @@ All workflows must emit versioned JSON payloads using the schema contracts in th
 - `rule_id` (nullable if not rule-derived)
 - `details` (object)
 - `created_at_utc` (ISO-8601 UTC)
+
+### Discrepancy code requirements
+- `code` must exist in `docs/discrepancy-codes.md`.
+- `severity` must match the catalog entry for that code.
+- If `rule_id` is null, `details` must include `non_rule_source` describing the emitting subsystem.
 
 ## 5) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`

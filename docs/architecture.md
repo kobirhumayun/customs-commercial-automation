@@ -96,6 +96,36 @@ Each manually triggered CLI run should follow one explicit execution contract:
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
+### Workbook contention protocol (normative)
+Before any write-capable phase transitions to target pre-validation, the orchestrator must run workbook contention preflight checks:
+1. verify workbook path exists and is writable by the current operator context
+2. verify workbook is not opened in a conflicting write session (read-only fallback is treated as contention)
+3. verify Excel adapter session is healthy and save-capable
+4. persist preflight evidence in run metadata
+
+If contention is detected, outcome is `hard_block` (no write attempt), with deterministic discrepancy coding and zero downstream print/mail-move execution.
+
+#### Contention retry envelope
+- Retries are allowed only for transient adapter/session initialization failures.
+- Default retry policy for transient checks:
+  - max attempts: 3
+  - backoff: fixed 5 seconds
+- Lock/read-only/share violations are not retried in the same run; they hard-block immediately.
+
+#### Required discrepancy codes for contention events
+- `workbook_lock_conflict`
+- `workbook_open_readonly`
+- `excel_adapter_unavailable`
+- `workbook_save_conflict`
+
+#### Decision table (normative)
+| Scenario | Immediate action | Run outcome |
+|---|---|---|
+| workbook locked by another process/user | stop before pre-validation | `hard_block` |
+| workbook opens read-only | stop before pre-validation | `hard_block` |
+| Excel adapter unavailable after retry envelope | stop before pre-validation | `hard_block` |
+| save conflict detected during write phase | set uncertain state | `uncertain_not_committed` + recovery gate |
+
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
