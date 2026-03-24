@@ -58,14 +58,27 @@ Recovery checks require all of the following persisted artifacts from the prior 
 1. **Backup hash**
    - cryptographic hash of the run-start workbook backup artifact (`run_start_backup_hash`)
    - cryptographic hash of the active workbook at recovery time (`current_workbook_hash`)
+   - algorithm: **SHA-256**
+   - encoding: lowercase hexadecimal (64 chars)
 2. **Staged write plan**
    - ordered staged write operations, including sheet, row, column, expected pre-write value, and intended value
-   - persisted plan checksum/hash (`staged_write_plan_hash`)
+   - canonical serialization is required before hashing:
+     - UTF-8 bytes
+     - LF (`\n`) line endings only
+     - stable object key order (lexicographic ascending)
+     - deterministic operation ordering by `(mail_iteration_order, operation_index_within_mail)`
+   - persisted plan hash (`staged_write_plan_hash`) uses SHA-256 over canonical serialized bytes
+   - encoding: lowercase hexadecimal (64 chars)
 3. **Run metadata**
    - run id, workflow id, tool version/rule-pack version
    - persisted `mail_iteration_order`
    - persisted `print_group_order` (if computed before interruption)
    - phase checkpoints (`write_phase_status`, `print_phase_status`, `mail_move_phase_status`)
+   - required hash metadata fields:
+     - `hash_algorithm` = `sha256`
+     - `run_start_backup_hash`
+     - `current_workbook_hash`
+     - `staged_write_plan_hash`
 4. **Workbook probe results**
    - deterministic probe of all staged target cells against expected post-write values and expected pre-write values from the staged write plan
    - derived probe classification per target: `matches_post_write`, `matches_pre_write`, or `mismatch_unknown`
@@ -120,10 +133,10 @@ function recover_or_block(prior_run_id):
     if artifacts.missing_or_invalid:
         return HARD_BLOCK("missing/invalid artifact set")
 
-    if hash(artifacts.backup_file) != artifacts.run_start_backup_hash:
+    if sha256_hex(artifacts.backup_file_bytes) != artifacts.run_start_backup_hash:
         return HARD_BLOCK("backup hash mismatch")
 
-    if hash(artifacts.staged_write_plan) != artifacts.staged_write_plan_hash:
+    if compute_staged_plan_hash(artifacts.staged_write_plan) != artifacts.staged_write_plan_hash:
         return HARD_BLOCK("staged write plan hash mismatch")
 
     probe = probe_workbook_targets(
@@ -154,6 +167,19 @@ function recover_or_block(prior_run_id):
         return SAFE_RESUME
 
     return HARD_BLOCK("mixed target states require manual recovery")
+```
+
+Helper reference:
+```text
+function compute_staged_plan_hash(plan):
+    canonical_bytes = canonical_serialize_staged_plan(
+        plan,
+        key_order="lexicographic_asc",
+        line_endings="lf",
+        encoding="utf-8",
+        operation_order=("mail_iteration_order", "operation_index_within_mail")
+    )
+    return sha256_hex(canonical_bytes)
 ```
 
 ## Export LC/SC intake
