@@ -220,7 +220,13 @@ These fields are required so discrepancy reports can be replayed and audited aga
 #### Rule-pack discovery and loading at runtime
 The orchestrator should resolve the active workflow name from the invoked CLI command, then load the mapped workflow rule-pack module via a deterministic registry (preferred) or explicit config mapping.
 - Unknown workflow or missing mapping is a startup hard failure (no processing).
-- Rule-pack version resolution must be explicit and recorded in run metadata.
+- Rule-pack version must come from a canonical module constant named `RULE_PACK_VERSION` in the resolved workflow rule-pack module.
+- Startup must hard-fail if `RULE_PACK_VERSION` is missing, empty, non-string, or not a valid semantic version string (no processing).
+- Required lineage metadata fields for both run-level and mail-level reports:
+  - `workflow_id`
+  - `rule_pack_id`
+  - `rule_pack_version`
+  - `applied_rule_ids` (ordered list, including shared-core and workflow-specific rule IDs)
 - Dynamic loading should be constrained to known module paths in-repo; no ad hoc external module discovery.
 
 ### Rule outcome classes
