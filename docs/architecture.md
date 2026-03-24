@@ -346,6 +346,10 @@ This allows deterministic review of why a value was accepted or blocked.
 ### Deterministic list location
 - Workflow keyword/rule lists that directly influence write/no-write decisions (including import relevance keywords) must live in **in-repo Python constants**, not operator-editable external config files, in phase 1.
 - Rationale: keeps behavior deterministic, code-reviewed, and tied to explicit release artifacts.
+- Import relevance keyword constants must use the canonical module path `project/workflows/import_btb_lc/keywords.py` (import path `project.workflows.import_btb_lc.keywords`) so startup validation and lineage stamping are deterministic across environments.
+- The module must export both required constants:
+  - `IMPORT_SUBJECT_KEYWORDS`
+  - `IMPORT_KEYWORD_REVISION`
 
 ### Ownership and update workflow
 - **Owner**: automation engineering maintains list definitions in code.
@@ -355,11 +359,17 @@ This allows deterministic review of why a value was accepted or blocked.
 
 ### Version stamping requirements
 - Each deterministic list/rule set must expose a stable revision identifier (for example semantic version or date+sequence token).
+- For import relevance keywords, revision format is required: `YYYY-MM-DD.N` (`N` is a positive integer sequence for that date).
 - The orchestrator must capture the active revision identifier in run metadata and discrepancy/report outputs.
+- For import workflows, the orchestrator must stamp `IMPORT_KEYWORD_REVISION` into both:
+  - run-level report/metadata payloads
+  - mail-level report/discrepancy payloads for every processed mail
+- Field name must be stable as `import_keyword_revision` so report consumers can join run/mail lineage without per-tool remapping.
 - Report consumers must be able to reconstruct which exact list revision produced each relevance or validation decision.
 
 ### Missing/malformed configuration behavior
 - If required deterministic list constants cannot be loaded, are empty when marked mandatory, or fail schema/shape validation at startup, the CLI must terminate with a **startup hard failure** before snapshot side effects.
+- Import keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`.
 - Phase 1 must not silently fall back to permissive defaults for missing/malformed decision-driving lists.
 
 ## 10. Windows deployment and operations
