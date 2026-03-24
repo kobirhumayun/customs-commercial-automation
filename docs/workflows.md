@@ -235,6 +235,105 @@ function compute_staged_plan_hash(plan):
     return sha256_hex(canonical_bytes)
 ```
 
+### Deterministic rule aggregation contract (shared, normative)
+Rule outcomes must be aggregated in a deterministic way across shared core rules and workflow-specific rules.
+
+#### Execution order
+1. Run shared core rules in ascending `rule_id` lexical order.
+2. Run workflow-specific standard rules in ascending `rule_id` lexical order.
+3. Run workflow-specific exception rules in ascending `rule_id` lexical order.
+4. Persist `applied_rule_ids` exactly in execution order.
+
+#### Allowed per-rule outcomes
+- `pass`
+- `warning`
+- `hard_block`
+
+Any unknown outcome value is a startup hard failure for that run.
+
+#### Aggregation precedence
+Final decision precedence is strict:
+1. Any `hard_block` present => final decision `hard_block`.
+2. Else any `warning` present => final decision `warning`.
+3. Else => final decision `pass`.
+
+#### Discrepancy merge semantics
+- Deduplication key: `(discrepancy_code, subject_scope, target_ref)`.
+- If duplicates exist, keep the first by execution order and append later emitting `rule_id`s to `source_rule_ids`.
+- Final discrepancy list must be sorted by:
+  1) severity (`hard_block` before `warning`), then
+  2) first-emitting rule execution order, then
+  3) discrepancy code lexical order.
+
+#### Aggregation pseudocode
+```text
+function aggregate_rule_results(rule_results):
+    applied_rule_ids = []
+    discrepancies = OrderedMap()  # key=(code, scope, target_ref)
+    seen_warning = false
+    seen_hard_block = false
+
+    for result in rule_results_in_execution_order:
+        applied_rule_ids.append(result.rule_id)
+        if result.outcome == warning:
+            seen_warning = true
+        if result.outcome == hard_block:
+            seen_hard_block = true
+
+        for d in result.discrepancies:
+            key = (d.code, d.subject_scope, d.target_ref)
+            if key not in discrepancies:
+                discrepancies[key] = d.with_source_rule_ids([result.rule_id])
+            else:
+                discrepancies[key].source_rule_ids.append(result.rule_id)
+
+    final_decision = hard_block if seen_hard_block else warning if seen_warning else pass
+    return aggregated_payload(applied_rule_ids, sort_discrepancies(discrepancies.values()), final_decision)
+```
+
+#### Worked examples
+1. Core warning + workflow pass => final `warning`.
+2. Core warning + workflow hard_block => final `hard_block` and no write/print/mail-move.
+
+### Workbook write failure strategy (shared, normative)
+Because Excel desktop adapters may fail mid-apply, write-capable workflows must use the following deterministic failure playbook.
+
+#### Failure decision table
+| Failure point | Required write state | Same-run action | Next-run recovery eligibility |
+|---|---|---|---|
+| target pre-validation fails | `hard_blocked_no_write` | stop; zero writes | new run allowed without recovery resume |
+| first write throws before save | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+| post-write probe mismatch | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+| save failure after successful apply | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+
+#### Rollback policy
+- No in-memory rollback is trusted as proof of safety.
+- No automatic same-run backup restore is allowed.
+- The only permitted post-failure path is persisted uncertain state + recovery gate evaluation in a subsequent run.
+- Manual/operator backup restoration remains an out-of-band recovery operation and must be recorded before rerun.
+
+### Canonical report field set for downstream consumers (shared, normative)
+Run-level reports and mail-level reports must include these required fields:
+
+Run-level:
+- `report_schema_version`
+- `run_id`, `workflow_id`
+- `rule_pack_id`, `rule_pack_version`
+- `mail_iteration_order`, `print_group_order`
+- `write_phase_status`, `print_phase_status`, `mail_move_phase_status`
+- `hash_algorithm`, `run_start_backup_hash`, `staged_write_plan_hash`
+
+Mail-level:
+- `report_schema_version`
+- `run_id`, `mail_id`, `workflow_id`
+- `rule_pack_id`, `rule_pack_version`
+- `applied_rule_ids`, `final_decision`
+- `discrepancies`
+- `saved_documents`
+- `staged_write_operations`
+- `print_group_id` (if eligible)
+- `mail_move_operation_id` (if eligible)
+
 ## Export LC/SC intake
 
 ### Inputs

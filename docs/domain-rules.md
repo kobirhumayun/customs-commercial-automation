@@ -219,3 +219,35 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.
+
+## Import keyword lifecycle and release gate (normative)
+To keep import relevance deterministic and auditable, keyword changes must follow a documented lifecycle.
+
+### Change control checklist
+Every pull request that modifies `project/workflows/import_btb_lc/keywords.py` must include:
+1. updated `IMPORT_KEYWORD_REVISION` matching `YYYY-MM-DD.N`
+2. rationale for each added/removed keyword
+3. business-domain approval note
+4. test evidence for positive and negative subject matches
+5. impact statement for potential over-broad keyword collisions
+
+### Minimum validation test matrix
+At minimum, tests must cover:
+- expected-match subjects for every newly added keyword
+- expected-non-match subjects that are lexically similar but should not match
+- case-insensitive matching behavior
+- duplicate keyword normalization behavior
+- startup hard-fail paths for missing/malformed `IMPORT_SUBJECT_KEYWORDS`
+- startup hard-fail path for malformed `IMPORT_KEYWORD_REVISION`
+
+Suggested fixture location for implementation: `tests/workflows/import_btb_lc/fixtures/`.
+
+### Overlap and breadth policy
+- Substring overlaps are allowed only when both keywords are intentionally retained and tested.
+- Any newly added generic token (for example, one-word high-frequency terms) requires an explicit false-positive risk note in PR description.
+- If risk cannot be mitigated by deterministic keyword constraints, change must be deferred and treated as unresolved requirement.
+
+### Release gate requirements
+- Keyword changes become active only after merge + deployment release boundary.
+- Runtime/manual editing on operator machines is prohibited.
+- Run-level and mail-level outputs must stamp `import_keyword_revision` for every relevance decision, including blocked mails.
