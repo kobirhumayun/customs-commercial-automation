@@ -50,6 +50,59 @@ Batch atomicity applies only to mails with approved staged write operations, not
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
 Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 
+### Write transaction protocol and `write_phase_status` transitions (shared, normative)
+
+#### Staged write application protocol
+All write-capable workflows must execute this protocol exactly:
+1. Build one deterministic staged write plan ordered by `(mail_iteration_order, operation_index_within_mail)`.
+2. Persist `write_phase_status=prevalidating_targets`.
+3. Pre-validate **all** staged targets before any write:
+   - target address resolvable (sheet/row/column)
+   - row-eligibility predicates satisfied
+   - expected pre-write values satisfy staged constraints
+4. If any target fails pre-validation, persist `write_phase_status=hard_blocked_no_write`, emit discrepancy report, and perform zero writes.
+5. If all targets pass, persist `write_phase_status=prevalidated`.
+6. Apply writes in the same deterministic staged order; while writing, persist `write_phase_status=applying`.
+7. Run post-write probes at target-cell granularity and save workbook.
+8. If probes and save succeed for all targets, create commit marker and persist `write_phase_status=committed`.
+9. Any runtime interruption after `prevalidated` but before `committed` must persist `write_phase_status=uncertain_not_committed`.
+
+#### Commit marker creation point and required metadata
+Create the commit marker **only after** all staged writes are applied, post-write probes confirm expected values for all targets, and workbook save succeeds.
+Commit marker payload must include at least:
+- `run_id`, `workflow_id`, `tool_version`, `rule_pack_version`
+- `committed_at_utc` (ISO-8601 UTC timestamp)
+- `operation_count`
+- `staged_write_plan_hash` (SHA-256 over canonical plan serialization)
+- `run_start_backup_hash`
+- `post_write_probe_summary` with counts for `matches_post_write`, `matches_pre_write`, `mismatch_unknown`
+
+#### Failure window behavior (normative)
+- If interruption occurs **before** commit marker creation (`prevalidating_targets`, `prevalidated`, `applying`, or `uncertain_not_committed`), recovery must treat the write as not yet committed and decide via per-target probes whether safe reapply is allowed.
+- If interruption occurs **after** commit marker creation (`committed`), recovery must treat workbook writes as committed intent and only evaluate safe resume of print/mail-move via idempotency markers.
+- Metadata/probe contradictions are always `hard_block`.
+
+#### Minimum probe granularity (normative)
+Recovery and commit validation must probe every staged target cell individually. Minimum probe record fields:
+- `sheet_name`
+- `row_index`
+- `column_key` (or canonical column index)
+- `expected_pre_write_value`
+- `expected_post_write_value`
+- `observed_value`
+- `classification` (`matches_pre_write`, `matches_post_write`, `mismatch_unknown`)
+
+Workbook-level or row-level aggregate probes are not sufficient to classify partial writes safely.
+
+#### Numbered transition flow for `write_phase_status` (normative)
+1. `not_started` → `prevalidating_targets`
+2. `prevalidating_targets` → `hard_blocked_no_write` (any target pre-validation failure)
+3. `prevalidating_targets` → `prevalidated` (all targets pass)
+4. `prevalidated` → `applying` (first cell write attempt begins)
+5. `applying` → `uncertain_not_committed` (interruption/error before commit marker creation)
+6. `applying` → `committed` (all writes applied, post-write probes pass, workbook save succeeds, commit marker persisted)
+7. `committed` is terminal for workbook-write phase; only print/mail-move phases may continue/resume.
+
 ### Recovery Decision Matrix (shared, normative)
 This section defines the mandatory recovery contract when a prior run is uncertain/incomplete and a new write-capable run attempts to start.
 
