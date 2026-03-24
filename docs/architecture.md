@@ -224,8 +224,19 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 
 ### Rule outcome classes
 - **Hard block**: no write; discrepancy report required.
-- **Soft warning**: processing may continue but report must retain warning.
+- **Soft warning**: permitted in phase 1 as a non-blocking decision class for fully specified, low-risk anomalies; processing may continue and reports must retain warning lineage.
 - **Human review**: deferred capability for a later phase after common issue categories are understood and explicitly documented.
+
+### Warning behavior policy (phase 1)
+- Warnings are allowed only when all mandatory validation parameters are satisfied and no hard-block condition is present.
+- A warning-only mail may still proceed through staged downstream actions: workbook write (if write-capable workflow), print, and post-run mail move.
+- Warning decisions must be preserved in mail-level and run-level reports with rule IDs and rationale.
+- If both `warning` and `hard_block` decisions are emitted for the same mail, **`hard_block` takes precedence** and write/print/mail-move are disallowed for that mail.
+
+### Examples of warning-only cases (phase 1)
+- Attachment filename contains a non-critical cosmetic variation (for example extra separator characters) but document classification and required extracted fields validate successfully.
+- Parsed buyer display text differs only by case/punctuation from ERP-normalized buyer while normalized canonical values match.
+- A duplicate informational attachment (not selected for extraction/write) is present in the email, while at least one required document is valid and all write-gating checks pass.
 
 ### Examples of hard blocks
 - subject validation mismatch against ERP buyer name and LC/SC number
@@ -235,7 +246,7 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 - duplicate-save or duplicate-write invariants violated
 
 ### Initial live-deployment decision policy
-During early live deployment, the system should treat any failure to satisfy specified parameters as a hard block with a comprehensive discrepancy report. Human-review checkpoints remain a future extension once recurring issue categories have been observed and codified.
+During early live deployment, the system should treat any failure to satisfy specified parameters as a hard block with a comprehensive discrepancy report. Warning decisions are still permitted only for explicitly encoded non-blocking rule outcomes that do not violate required parameters. Human-review checkpoints remain a future extension once recurring issue categories have been observed and codified.
 
 ## 7. Excel integration design
 - Use one master workbook per year.

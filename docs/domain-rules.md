@@ -116,6 +116,14 @@ The dashboard column is verification-only and should not be used to drive other 
 ## Initial exception-handling rule
 - Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment.
 - Business-approved exceptions should be implemented only inside workflow-specific rule-pack modules and should run after standard validation rules.
+- `warning` decisions are permitted in phase 1 only for explicitly defined, non-blocking exceptions where all required validation parameters still pass.
+- Warning-only outcomes may continue through downstream stages (workbook write when applicable, print, and post-run mail move) and must be captured in discrepancy/audit reporting with rule IDs and rationale.
+- If both `warning` and `hard_block` are present for the same mail, hard-block takes precedence and no write/print/mail-move is allowed for that mail.
+
+### Warning-only examples (phase 1)
+- Subject/attachment token formatting differs cosmetically (such as extra separators) but required identifiers and normalized entities match ERP/workbook context.
+- Buyer text includes harmless punctuation/case variation while canonical normalization confirms an exact business-entity match.
+- Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
 
 ## Import relevance rule
 - Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code.
