@@ -46,7 +46,8 @@ Goal: support shared-column population and quantity/value matching rules.
 - Matching candidate workbook rows for a single LC/SC family.
 - Combination-based UD allocation logic.
 - Ordered shared-column writing rules for UD/EXP/IP values and dates.
-- Discrepancy and human-review paths for under-specified cases.
+- Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).
+- Human-review routing is explicitly deferred to a later phase after recurring issue categories are formalized.
 
 ### Phase 4 — Import / BTB LC workflow
 Goal: process fabric-related import emails and map validated BTB LC data to a single eligible workbook row.
@@ -79,7 +80,7 @@ These tracks progress in parallel with the phases above:
 - **Excel safety:** preserve formulas, formatting, validation, comments, filters, merges, and protection exactly.
 - **Auditability:** every workflow emits machine-readable JSON artifacts with source provenance and write decisions.
 - **Idempotency:** no duplicate saves, writes, prints, or conflicting reruns.
-- **Operator trust:** anything ambiguous becomes a discrepancy or review checkpoint, never a silent guess.
+- **Operator trust:** anything ambiguous becomes a hard-block discrepancy in phase 1, never a silent guess.
 
 ## Ready-for-build checklist
 Before coding a workflow, confirm:

@@ -227,6 +227,7 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 - **Hard block**: no write; discrepancy report required.
 - **Soft warning**: permitted in phase 1 as a non-blocking decision class for fully specified, low-risk anomalies; processing may continue and reports must retain warning lineage.
 - **Human review**: deferred capability for a later phase after common issue categories are understood and explicitly documented.
+- **Phase-1 precedence**: unspecified, ambiguous, or incompletely satisfied rule conditions must resolve to `hard_block` (not human review) with comprehensive discrepancy reporting.
 
 ### Warning behavior policy (phase 1)
 - Warnings are allowed only when all mandatory validation parameters are satisfied and no hard-block condition is present.
