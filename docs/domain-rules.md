@@ -101,6 +101,47 @@ Column `UD No. & IP No.` stores:
 - EXP listed before IP when both exist
 - multiple values separated by line breaks
 
+## UD candidate combination determinism rule
+When multiple valid UD row combinations satisfy the same extracted quantity, selection must be deterministic and fully reportable.
+
+### Tie-break key order (normative)
+Apply keys in this exact order:
+1. **Row-index key (ascending):**
+   - Compare each candidate by lexicographically sorted row indexes; smallest wins.
+2. **Amendment recency key (older first):**
+   - Compare normalized amendment tuples (`L/C Amnd Date` asc with blank oldest, then `L/C Amnd No.` asc with blank = `0`).
+3. **Blank-field priority key:**
+   - Prefer higher count of pre-write blank UD target cells; if tied, prefer fewer non-target populated optional cells.
+4. **Stable candidate-id key:**
+   - Candidate id is `"-"`-joined sorted row indexes; lexicographically smallest id wins.
+
+### Equal-score outcome rule
+- If all tie-break keys are equal between two or more candidates, the outcome is `hard_block` (no write).
+- Required discrepancy code: `ud_candidate_tie_after_full_tiebreak`.
+- The discrepancy report must include compared candidates and key values for operator traceability.
+
+### Required report fields for candidate selection
+Mail-level report payload must include:
+- required quantity + unit
+- total candidate count
+- per-candidate row list, matched quantities, and each tie-break key value
+- selected/non-selected status per candidate and rejection reasons
+- final decision + final decision reason
+
+### Worked example (duplicated quantities, non-sequential matches)
+For extracted UD quantity `3000 YDS`, candidate rows:
+- row 11 (`1000`, amnd date `2026-01-02`, amnd no `1`)
+- row 14 (`1000`, amnd date `2026-01-02`, amnd no `1`)
+- row 19 (`2000`, amnd date `2026-02-10`, amnd no `2`)
+- row 27 (`2000`, amnd date `2026-02-10`, amnd no `2`)
+
+Valid non-sequential combinations are `[11,19]`, `[14,19]`, `[11,27]`, `[14,27]`.
+Applying keys in order selects `[11,19]` because:
+1. row-index key eliminates `[14,*]`,
+2. amendment key ties between `[11,19]` and `[11,27]`,
+3. blank-field priority assumed tie,
+4. stable candidate id `11-19` sorts before `11-27`.
+
 ## Bangladesh Bank rules
 Verification uses:
 - workbook LC/SC number and master LC number
