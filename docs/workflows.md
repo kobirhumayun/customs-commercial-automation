@@ -18,6 +18,45 @@ Every CLI workflow should follow the same control shape:
 
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
 
+### Shared decision and phase-state enums (normative)
+
+#### Decision enum
+- Allowed values: `pass`, `warning`, `hard_block`.
+- `hard_block` is terminal for the affected mail in the active run (no staged write, no print eligibility, no mail move eligibility).
+
+#### Warning-to-action decision table
+| Mail discrepancy profile | Staged write allowed | Print allowed | Mail move allowed |
+|---|---:|---:|---:|
+| no discrepancies | yes | yes (if workflow has print phase) | yes |
+| warning-only discrepancies | yes | yes (if workflow has print phase) | yes |
+| any hard-block discrepancy | no | no | no |
+
+`warning` never overrides any explicit hard-block rule. If both warning and hard-block discrepancies are present, final decision is `hard_block`.
+
+#### `write_phase_status` enum
+- Allowed values: `not_started`, `prevalidating_targets`, `prevalidated`, `applying`, `hard_blocked_no_write`, `uncertain_not_committed`, `committed`.
+- Transition rules are defined in the **Numbered transition flow for `write_phase_status`** section below.
+
+#### `print_phase_status` enum
+- Allowed values: `not_started`, `planned`, `printing`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Allowed transitions:
+  1. `not_started` → `planned`
+  2. `planned` → `printing`
+  3. `printing` → `completed`
+  4. `planned` or `printing` → `uncertain_incomplete` (runtime interruption)
+  5. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
+
+#### `mail_move_phase_status` enum
+- Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Allowed transitions:
+  1. `not_started` → `moving`
+  2. `moving` → `completed`
+  3. `moving` → `uncertain_incomplete` (runtime interruption)
+  4. `not_started` → `hard_blocked` (cross-phase gate not satisfied or eligibility failure)
+
+Any attempted state transition not listed above is a hard-block with discrepancy code `invalid_phase_state_transition`.
+
+
 ### Rule-pack discovery and lineage contract (shared, normative)
 - The active workflow rule-pack module must publish a canonical version constant named `RULE_PACK_VERSION`.
 - Startup is a hard failure if `RULE_PACK_VERSION` is missing, empty, non-string, or not a valid semantic version.
@@ -726,3 +765,19 @@ Mail-level move records must include source/destination EntryIDs and move operat
 
 ## Report schema reference
 Versioned JSON schema definitions for run-level, mail-level, discrepancy, and recovery/idempotency artifacts are defined in `docs/report-schemas.md` and are normative for all workflow outputs.
+
+### Import workflow keyword-governance contract (normative)
+For `import_btb_lc`, the fabric-subject keyword list must be managed as versioned rule data rather than ad hoc constants.
+
+- Canonical source path: `rules/import_btb_lc/keywords.yaml`.
+- The file must contain:
+  - `revision` (string, required)
+  - `include_keywords` (array of case-insensitive substrings, required)
+  - `exclude_keywords` (array, optional; evaluated after include match)
+- Matching policy:
+  1. subject is normalized by trim + whitespace collapse + ASCII case-folding to lowercase
+  2. include pass requires at least one include keyword hit
+  3. any exclude hit after include pass makes the mail ineligible
+- `mail_report.import_keyword_revision` must equal `revision` from the loaded keyword file for every processed import mail.
+- Loader failures (missing file, invalid schema, empty include list) are startup hard failures for `import_btb_lc`.
+

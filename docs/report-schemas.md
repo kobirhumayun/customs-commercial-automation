@@ -33,6 +33,14 @@ All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 - `staged_write_plan_hash` (64-char lowercase hex)
 - `summary` (object with pass/warning/hard_block counts)
 
+### Canonical enum sets (normative)
+- `final_decision`: `pass` | `warning` | `hard_block`
+- `write_phase_status`: `not_started` | `prevalidating_targets` | `prevalidated` | `applying` | `hard_blocked_no_write` | `uncertain_not_committed` | `committed`
+- `print_phase_status`: `not_started` | `planned` | `printing` | `completed` | `hard_blocked` | `uncertain_incomplete`
+- `mail_move_phase_status`: `not_started` | `moving` | `completed` | `hard_blocked` | `uncertain_incomplete`
+
+Any undeclared enum value is schema-invalid and must be treated as a hard-block recovery/reporting condition.
+
 ## 3) Mail-level report schema
 - `schema_id`: `mail_report`
 - `schema_version`: `1.0.0`
