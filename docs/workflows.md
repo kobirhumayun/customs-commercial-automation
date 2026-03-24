@@ -18,6 +18,33 @@ Every CLI workflow should follow the same control shape:
 
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
 
+### Rule-pack discovery and lineage contract (shared, normative)
+- The active workflow rule-pack module must publish a canonical version constant named `RULE_PACK_VERSION`.
+- Startup is a hard failure if `RULE_PACK_VERSION` is missing, empty, non-string, or not a valid semantic version.
+- Every run-level and mail-level report must include:
+  - `workflow_id`
+  - `rule_pack_id`
+  - `rule_pack_version`
+  - `applied_rule_ids` (ordered list of rule IDs applied from shared-core + workflow-specific packs)
+
+Example mail/run report fragment:
+
+```json
+{
+  "run_id": "run-2026-03-24T09-30-00Z",
+  "mail_id": "00000000A1B2C3D4",
+  "workflow_id": "export_lc_sc",
+  "rule_pack_id": "export_lc_sc.default",
+  "rule_pack_version": "1.4.0",
+  "applied_rule_ids": [
+    "core.subject.buyer_lc_match.v1",
+    "core.extraction.required_fields.v2",
+    "export_lc_sc.exception.filename_cosmetic_variation.v1"
+  ],
+  "final_decision": "warning"
+}
+```
+
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
