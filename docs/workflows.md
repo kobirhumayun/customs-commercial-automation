@@ -530,3 +530,105 @@ Rows where:
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
 - any print failure must be reported with retry/review metadata
+
+## Rule-pack loading contract (shared, normative)
+To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.
+
+### Required package layout
+- Shared core rules: `project/rules/core/`
+- Workflow rules: `project/rules/workflows/<workflow_id>/`
+- Optional exceptions: `project/rules/workflows/<workflow_id>/exceptions/`
+
+### Required module exports
+Every loadable rule-pack module must export:
+- `RULE_PACK_ID` (non-empty string)
+- `RULE_PACK_VERSION` (semantic version string)
+- `RULE_DEFINITIONS` (ordered sequence of rule descriptors)
+
+Each rule descriptor must provide:
+- `rule_id` (stable string)
+- `stage` (`core`, `workflow_standard`, or `workflow_exception`)
+- deterministic callable/entrypoint
+
+### Loader behavior
+1. Resolve active `workflow_id`.
+2. Load shared core rules from `project.rules.core`.
+3. Load workflow rules from `project.rules.workflows.<workflow_id>`.
+4. Load exceptions from `project.rules.workflows.<workflow_id>.exceptions` when present.
+5. Validate that all `rule_id` values are unique across the resolved set.
+6. Sort execution order according to deterministic aggregation contract.
+7. Persist `rule_pack_id`, `rule_pack_version`, and ordered `applied_rule_ids`.
+
+### Startup hard-fail cases
+Startup must hard-fail if any of these occur:
+- missing required exports
+- empty or invalid semantic version
+- duplicate `RULE_PACK_ID` or duplicate `rule_id`
+- unknown rule `stage`
+- import/discovery error for required core/workflow modules
+
+## Excel transaction procedure (write-capable workflows, normative)
+Write-capable workflows must apply the following desktop Excel procedure.
+
+1. **Session preflight**
+   - Confirm workbook path exists and is writable.
+   - Acquire exclusive write intent lock (process-level + run metadata lock).
+   - Record `excel_session_id`, host, pid, and timestamp in run metadata.
+
+2. **Open + verify baseline**
+   - Open workbook in one controlled session.
+   - Validate sheet/header expectations and staged target resolvability.
+   - If baseline validation fails, set `write_phase_status=hard_blocked_no_write` and close without saving.
+
+3. **Apply staged writes**
+   - Transition status to `applying`.
+   - Apply staged operations strictly in deterministic order.
+   - Capture per-target operation receipts in memory for probe correlation.
+
+4. **Probe + save gate**
+   - Run per-target post-write probes.
+   - If any probe mismatches expected post-write values, set `write_phase_status=uncertain_not_committed`, do not create commit marker, close session, and hard-block recovery-required state.
+   - If probes pass, save workbook in the active session.
+
+5. **Commit marker creation**
+   - Only after save success + probe success, persist commit marker and set `write_phase_status=committed`.
+
+6. **Close + release lock**
+   - Close workbook session and release lock.
+   - Persist close outcome and lock-release evidence.
+
+### Save failure behavior
+- If save fails after any write attempt, state is `uncertain_not_committed`.
+- No print or mail move is allowed.
+- Next write-capable run must execute recovery decision matrix before any new writes.
+
+### Prohibited behavior
+- Multiple concurrent write sessions to the same yearly workbook.
+- Commit marker creation before successful post-write probes + save.
+- Silent retry loops that mutate workbook after uncertain state without recovery gate.
+
+## Outlook folder identity and resolution contract (shared, normative)
+Folder routing must use stable identifiers, not display names alone.
+
+### Folder mapping requirements
+Each workflow configuration must declare:
+- `source_working_folder_entry_id`
+- destination folder entry id(s) per success path (for example `destination_success_entry_id`)
+- optional display-name hints for diagnostics only
+
+### Resolution behavior
+1. Resolve folders by EntryID first.
+2. If EntryID resolution fails and policy allows fallback, resolve by exact configured display name and record fallback mode.
+3. If multiple folders share the same display name, hard-fail startup.
+4. If any required folder is missing/inaccessible, hard-fail startup.
+
+### Audit fields
+Run metadata must include resolved folder identity fields:
+- `resolved_source_folder_entry_id`
+- `resolved_destination_folder_entry_id`
+- `folder_resolution_mode` (`entry_id` or `display_name_fallback`)
+
+Mail-level move records must include source/destination EntryIDs and move operation id.
+
+## Report schema reference
+Versioned JSON schema definitions for run-level, mail-level, discrepancy, and recovery/idempotency artifacts are defined in `docs/report-schemas.md` and are normative for all workflow outputs.

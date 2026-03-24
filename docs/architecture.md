@@ -516,3 +516,68 @@ All JSON report payloads must include `report_schema_version` using semantic ver
 
 Canonical serialization for any hash/signature-relevant report variant must use UTF-8, LF line endings, deterministic key order (lexicographic), and deterministic array ordering where identities are ordered.
 Implementation should keep schema definitions in `project/reporting/schemas/` so report writers and validators share one source of truth.
+
+## 8. Phase 1 configuration and secrets contract (normative)
+To keep CLI behavior deterministic across operator machines, all workflows must use one explicit configuration and secrets contract.
+
+### Configuration sources and precedence
+Configuration values are resolved in this order (highest to lowest):
+1. CLI arguments
+2. Environment variables
+3. Local configuration file
+4. In-code defaults (allowed only for non-sensitive optional settings)
+
+If a required value is missing after resolution, startup must hard-fail before run snapshot and before any side effects.
+
+### Required shared configuration keys
+At minimum, the configuration layer must expose these keys:
+- `workflow_id`
+- `state_timezone` (IANA name; phase-1 deployment basis is `Asia/Dhaka`)
+- `report_root`
+- `run_artifact_root`
+- `backup_root`
+- `outlook_profile`
+- `master_workbook_root`
+- `erp_base_url`
+- `playwright_browser_channel` (if applicable)
+
+Write-capable workflows must also provide:
+- `master_workbook_path_template`
+- `excel_lock_timeout_seconds`
+- `print_enabled`
+
+### Workflow-specific required keys
+Workflow modules must declare their own required key list (for example import keyword controls, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
+
+### Secrets handling (Windows-first)
+- Credentials must not be hard-coded in source files.
+- Credentials must not be committed in local config files tracked by git.
+- Preferred phase-1 secret source is environment variables or OS-protected credential storage configured by deployment scripts.
+- Report payloads and logs must never include raw credential values.
+
+### Startup validation contract
+Before processing a run snapshot, startup must validate:
+- presence/type/shape of all required configuration values
+- path existence/permissions for configured roots
+- timezone parseability and canonicalization
+- destination Outlook folder mapping completeness for the active workflow
+
+Any failure is a startup hard failure with structured diagnostics.
+
+### Example local config file (illustrative)
+```toml
+workflow_id = "export_lc_sc"
+state_timezone = "Asia/Dhaka"
+report_root = "C:/customs-automation/reports"
+run_artifact_root = "C:/customs-automation/state/runs"
+backup_root = "C:/customs-automation/state/backups"
+outlook_profile = "Operations"
+master_workbook_root = "C:/customs-automation/workbooks"
+erp_base_url = "https://erp.example.local"
+playwright_browser_channel = "msedge"
+print_enabled = true
+excel_lock_timeout_seconds = 120
+```
+
+## 9. Artifact storage layout reference
+Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.
