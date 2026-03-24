@@ -9,6 +9,7 @@ The architecture must optimize for:
 - exact preservation of master workbook fidelity
 - structured JSON reporting instead of dashboards in phase 1
 - independent rollout of workflow-specific CLI tools within one codebase
+- staged run execution so extraction/validation completes before workbook writes, printing, and mail moves
 
 ## 2. System context and module boundaries
 
@@ -82,11 +83,21 @@ The architecture must optimize for:
 14. **Future AI extension seam**
     - optional classifier/extractor interfaces that can be introduced without changing deterministic phase 1 flows
 
-## 3. Workflow architecture
+## 3. Staged execution model
+Each manually triggered CLI run should follow one explicit execution contract:
+1. **Run-level snapshot** — capture the complete set of messages currently in `working` for that workflow and bind them to the run id.
+2. **Mail-level validation** — iterate the snapshotted mails, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
+3. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
+4. **Batch print** — build print batches only from newly saved PDFs attached to successful mails in the run, ordered by workbook row sequence and grouped by originating mail.
+5. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
+
+This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
+
+## 4. Workflow architecture
 
 ### Export LC/SC intake CLI
 - Operator moves eligible emails from `temp-export` to `working`.
-- CLI processes all messages currently present in `working`.
+- CLI snapshots all messages currently present in `working` and binds them to the active run before any side effects occur.
 - Body parser extracts all file numbers matching `P/<yy>/<nnnn>`.
 - Every extracted file number is used for ERP lookup, subject validation, and folder-path verification to confirm they all belong to the same LC/SC family.
 - ERP downloader retrieves `rptDateWiseLCRegister`, normalizes row-2 headers, and validates family consistency using LC/SC number, normalized buyer, and LC/SC date. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
@@ -95,8 +106,9 @@ The architecture must optimize for:
 - Storage manager saves only new PDFs into export folder hierarchy:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`.
 - Excel adapter appends or skips based on file number existence and amendment matching rules.
-- Reporting engine emits structured results; printing runs only for newly saved PDFs after successful processing.
-- Successfully processed export-team emails move from `working` to the Outlook folder `UD and LC`, while blocked emails remain in `working`.
+- Reporting engine emits structured results for each mail and the overall run.
+- Validated export write operations are staged and applied during the batch workbook-write phase.
+- Successfully processed export-team emails move from `working` to the Outlook folder `UD and LC` only during the post-run mail-move phase; blocked emails remain in `working`.
 
 ### UD / IP / EXP CLI
 - Shares intake, storage, and parsing services with export workflow.
@@ -115,7 +127,7 @@ The architecture must optimize for:
 - Candidate workbook rows are filtered by matching export LC with blank `UP No.` and blank BTB LC field.
 - Strict validation selects the first row where BTB LC value falls between 40% and 80% of export LC value.
 - One import LC populates exactly one workbook row.
-- Successfully processed import-team emails move from `working` to the Outlook folder `Import`, while blocked emails remain in `working`.
+- Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
 
 ### Bangladesh Bank dashboard verification CLI
 - Reads candidate rows where `UP No.` is blank, UD exists, and dashboard status is blank or not already compliant.
@@ -125,13 +137,13 @@ The architecture must optimize for:
 - Does not populate any additional fields.
 
 ### Printing CLI/service
-- Triggered automatically after successful processing in write-capable workflows.
-- Prints only newly saved PDFs.
-- Batches are grouped by originating mail and ordered by workbook row sequence, based on the current folder contents for the active run but including only newly saved PDF documents.
+- Triggered automatically after the batch workbook-write phase succeeds for at least one mail in a write-capable workflow.
+- Prints only newly saved PDFs from successful mails in the active run snapshot.
+- Batches are grouped by originating mail and ordered by workbook row sequence captured from the staged write outcomes.
 - Inserts one blank page between mail groups.
 - Records retries, failures, and operator review requirements in JSON reports.
 
-## 4. Canonical data model
+## 5. Canonical data model
 Key entities that should exist in architecture and later in code contracts:
 - `ProcessingJob`
 - `EmailMessage`
@@ -156,10 +168,10 @@ Key entities that should exist in architecture and later in code contracts:
 - `PrintBatch`
 
 ### Persistence split
-- **Phase 1 local JSON**: jobs, extraction results, validation outputs, saved file paths, row targets, write decisions, print metadata, operator context.
+- **Phase 1 local JSON**: jobs, run snapshots, extraction results, validation outputs, saved file paths, staged row targets, write decisions, print metadata, mail-move decisions, and operator context.
 - **Future PostgreSQL**: searchable historical jobs, reconciliation indexes, rule/version lineage, cross-workflow analytics.
 
-## 5. Rule engine and validation design
+## 6. Rule engine and validation design
 Rules should be represented as explicit, versioned rule packs keyed by workflow.
 
 ### Rule outcome classes
@@ -177,7 +189,7 @@ Rules should be represented as explicit, versioned rule packs keyed by workflow.
 ### Initial live-deployment decision policy
 During early live deployment, the system should treat any failure to satisfy specified parameters as a hard block with a comprehensive discrepancy report. Human-review checkpoints remain a future extension once recurring issue categories have been observed and codified.
 
-## 6. Excel integration design
+## 7. Excel integration design
 - Use one master workbook per year.
 - Assume exclusive access during writes.
 - Read headers from row 2 of sheet 1.
@@ -185,10 +197,10 @@ During early live deployment, the system should treat any failure to satisfy spe
 - For export LC/SC, append new rows only after skip-if-file-number-exists and same-file/amendment checks.
 - Preserve formulas, styles, merged cells, conditional formatting, filters, comments, validations, and protection exactly.
 - Apply selective number-format override only for `Quantity of Fabrics (Yds/Mtr)` when the ERP unit is `MTR`, using `#,###.00 "Mtr"`.
-- Capture before/after row references and write operations in reports as compensating controls.
-- If a partial failure occurs after a save but before a workbook write, mark the job incomplete and prevent printing until rerun/resolution.
+- Capture before/after row references and batched write operations in reports as compensating controls.
+- If a partial failure occurs after validation but before or during the batch workbook-write phase, mark the run incomplete and prevent printing and mail moves until rerun/resolution.
 
-## 7. Document extraction strategy
+## 8. Document extraction strategy
 Use a layered extraction pipeline:
 1. detect whether PDF is text, scanned, or hybrid
 2. extract embedded text first with PyMuPDF/pdfplumber
@@ -199,40 +211,40 @@ Use a layered extraction pipeline:
 
 This allows deterministic review of why a value was accepted or blocked.
 
-## 8. Storage, audit, and reporting
+## 9. Storage, audit, and reporting
 - Local filesystem remains the primary store in phase 1.
 - Duplicate PDF detection is by filename only.
 - Export files follow the hierarchy `Year / Buyer / LC-or-SC / All Attachments`.
 - Import files live under the designated import root organized by year.
-- JSON reports must include job id, workflow name, source emails, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, targeted rows, write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
+- JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
 
-## 9. Windows deployment and operations
+## 10. Windows deployment and operations
 - Package and manage the environment with `uv`.
 - Keep Outlook, Excel, Acrobat, Playwright, OCR tools, and Python runtime as documented desktop prerequisites.
 - Use local secrets storage appropriate for Windows operator machines.
 - Standardize report/log locations so operators can retrieve discrepancy reports without a dashboard.
 - Publish workflow-specific runbooks for command usage, recovery, and reruns.
 
-## 10. Risks and mitigation themes
+## 11. Risks and mitigation themes
 - **Excel corruption risk** → constrain writes to surgical adapter operations and require pre-write validation.
 - **Unreliable document extraction** → layered extraction, provenance, and human-review thresholds.
-- **Duplicate processing on rerun** → job ids, filename dedupe, workbook existence checks, and print-state tracking.
+- **Duplicate processing on rerun** → run snapshots, job ids, filename dedupe, workbook existence checks, staged side effects, and print-state tracking.
 - **Rule ambiguity** → explicit open questions and review checkpoints instead of silent inference.
 - **Desktop dependency fragility** → adapter abstraction and environment readiness checklist.
 
-## 11. Open questions needing business clarification
+## 12. Open questions needing business clarification
 - Which future business-approved exceptions need to be added to workflow-specific rule-pack modules once they are identified in production?
 
-## 12. Confirmed phase 1 decisions
+## 13. Confirmed phase 1 decisions
 - Buyer-type inference for UD/IP/EXP is intentionally out of scope for phase 1 and must not be used as a dependency in deterministic workflow logic.
 - Initial live deployment should default to hard block plus comprehensive reporting for any case that does not satisfy all specified parameters.
-- Outlook-driven workflows process all messages currently in the `working` folder when the operator triggers the CLI.
+- Outlook-driven workflows snapshot all messages currently in the `working` folder when the operator triggers the CLI.
 - Export-family verification should validate every extracted file number against ERP data rather than selecting a single primary file number. Family consistency is defined by LC/SC number, buyer, and LC/SC date; duplicate ERP rows may use any one duplicate row, and any partial family match is a hard block.
 - Import relevance uses case-insensitive substring matching on fabric subject keywords stored in code.
-- Successfully processed export-team emails move to `UD and LC`; successfully processed import-team emails move to `Import`; blocked emails remain in `working`.
-- Print grouping is based on the current folder contents for the active run, but only newly saved PDF documents are included in each batch.
+- Successfully processed export-team emails move to `UD and LC`; successfully processed import-team emails move to `Import`; blocked emails remain in `working`, and mail moves occur only after batched writes and printing finish.
+- Print grouping is based on the active run snapshot and staged successful write outcomes, but only newly saved PDF documents are included in each batch.
 
-## 13. Recommended documentation set
+## 14. Recommended documentation set
 The architecture should continue to be split across:
 - `docs/architecture.md`
 - `docs/workflows.md`

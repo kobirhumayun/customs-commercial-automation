@@ -10,6 +10,7 @@ Translate the customs/commercial automation architecture into a durable, modular
 - Shared core services and workflow-specific rule packs
 - JSON-first reporting in phase 1
 - Windows desktop integrations for Outlook, Excel, Acrobat, Playwright, and local file storage
+- Staged workflow execution per run: snapshot first, validate per mail, then apply batched writes, printing, and mail moves
 
 ## Phase roadmap
 
@@ -24,7 +25,7 @@ Goal: make the repository self-describing before implementation begins.
 Goal: establish the monolithic modular foundation without workflow-specific complexity.
 - CLI entrypoints and command dispatcher.
 - Configuration and secrets management.
-- Structured logging and JSON report writer.
+- Structured logging, run snapshots, and JSON report writer.
 - Job identity, idempotency keys, rerun semantics, and local state tracking.
 - Shared adapters/contracts for Outlook, file storage, Excel, PDF extraction, OCR, Playwright, and printing.
 - Discrepancy reporting contract and future human-review checkpoint hooks.
@@ -32,7 +33,7 @@ Goal: establish the monolithic modular foundation without workflow-specific comp
 ### Phase 2 — Export LC/SC intake workflow
 Goal: support manual export email processing with strict validation and safe workbook append/skip logic.
 - Outlook working-folder intake.
-- Attachment deduplicated storage.
+- Attachment deduplicated storage plus per-run mail snapshots.
 - ERP `rptDateWiseLCRegister` download and normalization.
 - Subject/body parsing and file-number extraction.
 - LC/SC + PI identification and reconciliation.

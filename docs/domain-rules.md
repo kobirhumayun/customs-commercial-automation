@@ -4,6 +4,7 @@
 - Never modify the master workbook unless all required validation rules pass.
 - If rules are incomplete, contradictory, or not satisfied, do not write; produce a discrepancy report instead.
 - All workflows must be idempotent and safe to rerun.
+- Each run must begin from a fixed snapshot of the messages currently present in `working` for that workflow.
 - New documents must never overwrite existing local files.
 - Focus on new PDFs only.
 - All extracted file numbers from an email remain in the report for traceability and must be validated as belonging to the same LC/SC family before processing can continue. Family consistency is determined by LC/SC number, normalized buyer, and LC/SC date.
@@ -57,7 +58,7 @@ A duplicate PDF is defined only by identical filename.
 - Before appending, check whether the same file number already exists.
 - If the same file number exists, skip that file.
 - If required, first attempt to locate an existing row for the same file/amendment to avoid duplicate insertion.
-- Operational ordering is row sequence and drives reporting and print ordering.
+- Operational ordering is row sequence and drives staged write ordering, reporting, and print ordering.
 
 ## Workbook preservation rules
 These must remain exactly as-is after writes:
@@ -109,10 +110,15 @@ The dashboard column is verification-only and should not be used to drive other 
 ## Import relevance rule
 - Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code.
 
+## Staged run execution rule
+- A run snapshots all candidate emails before validation and side effects begin.
+- Validation outcomes are decided per mail, but workbook writes, printing, and email moves execute in controlled post-validation phases.
+- One blocked mail does not invalidate unrelated successful mails in the same run.
+
 ## Outlook post-processing rule
 - Blocked emails remain in `working`.
-- Successfully processed export-team emails move to `UD and LC`.
-- Successfully processed import-team emails move to `Import`.
+- Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
+- Successfully processed import-team emails move to `Import` only after batch workbook writes and printing complete.
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.

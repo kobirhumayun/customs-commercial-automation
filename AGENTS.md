@@ -9,6 +9,7 @@ This repository stores the durable architecture and execution guidance for the c
 - Deterministic, rule-based automation comes first. AI is a **future extension point only**.
 - Auditability, idempotency, discrepancy reporting, and safe Excel writes are non-negotiable.
 - The system must preserve workbook fidelity exactly when writing to the yearly master workbook.
+- Workflow execution should follow a staged run model: **run-level snapshot → mail-level validation → batch workbook write → batch print → post-run mail moves**.
 
 ## Canonical architecture documents
 Read these documents before changing code or planning major work:
