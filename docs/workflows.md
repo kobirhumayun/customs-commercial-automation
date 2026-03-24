@@ -4,13 +4,17 @@
 Every CLI workflow should follow the same control shape:
 1. capture operator execution context
 2. capture a run-level snapshot of all source emails/documents from the relevant manual intake location
-3. save only new attachments/documents while iterating the snapshotted mails
-4. extract and normalize entities per mail
-5. run workflow rule packs and stage per-mail write/print/move outcomes
-6. apply a controlled batch workbook-write phase for successful mails only
-7. emit JSON reports for both the run and each mail outcome
-8. batch print only after the workbook-write phase completes successfully for the eligible mails
-9. perform post-run mail moves for successful mails only
+3. determine deterministic mail iteration order for the snapshot by:
+   - primary key: `ReceivedTime` converted to the workflow state timezone configured for operations (current deployment basis: Bangladesh Standard Time, UTC+06:00)
+   - tie-breaker: ascending Outlook `EntryID`
+4. save only new attachments/documents while iterating the snapshotted mails in that order
+5. extract and normalize entities per mail
+6. run workflow rule packs and stage per-mail write/print/move outcomes
+7. apply a controlled batch workbook-write phase for successful mails only
+8. derive deterministic print-group order from the successful mail groups using the earliest master-workbook row sequence assigned to each group
+9. emit JSON reports for both the run and each mail outcome, including persisted `mail_iteration_order` and final `print_group_order`
+10. batch print only after the workbook-write phase completes successfully for the eligible mails
+11. perform post-run mail moves for successful mails only
 
 ## Export LC/SC intake
 
@@ -136,6 +140,8 @@ Rows where:
 ## Printing
 - only newly saved PDFs are printed
 - print groups are organized by originating mail from the active run snapshot
-- group order follows workbook row sequence
-- insert one blank page between mail groups
+- group order follows master-workbook row sequence across mail groups
+- within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
+- insert exactly one blank page between consecutive mail groups
+- persist final print group order in run JSON metadata
 - any print failure must be reported with retry/review metadata

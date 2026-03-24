@@ -86,11 +86,12 @@ The architecture must optimize for:
 ## 3. Staged execution model
 Each manually triggered CLI run should follow one explicit execution contract:
 1. **Run-level snapshot + workbook backup** — capture the complete set of messages currently in `working` for that workflow, bind them to the run id, and create a backup copy of the target yearly master workbook before any write-capable phase can proceed.
-2. **Mail-level validation** — iterate the snapshotted mails, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
-3. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
-4. **Batch print** — build print batches only from newly saved PDFs attached to successful mails in the run, ordered by workbook row sequence and grouped by originating mail.
-5. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
-6. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed.
+2. **Deterministic mail ordering** — sort the snapshotted messages by `ReceivedTime` converted to the configured workflow state timezone (current deployment basis: Bangladesh Standard Time, UTC+06:00), then tie-break by ascending Outlook `EntryID`; persist this ordered list in run metadata before mail processing starts.
+3. **Mail-level validation** — iterate the ordered snapshot, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
+4. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
+5. **Batch print planning + print** — derive mail-group print order from master-workbook row sequence (group key = originating mail, group rank = earliest row sequence written for that mail), persist final print-group order in run metadata, then print only newly saved PDFs for each group without extra intra-group sorting and insert exactly one blank page between consecutive groups.
+6. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
+7. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed.
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
@@ -140,8 +141,10 @@ This model is intentionally **run-level staged, but mail-level selective**: one 
 ### Printing CLI/service
 - Triggered automatically after the batch workbook-write phase succeeds for at least one mail in a write-capable workflow.
 - Prints only newly saved PDFs from successful mails in the active run snapshot.
-- Batches are grouped by originating mail and ordered by workbook row sequence captured from the staged write outcomes.
-- Inserts one blank page between mail groups.
+- Batches are grouped by originating mail and ordered by master-workbook row sequence captured from the staged write outcomes.
+- Within each mail group, all newly saved PDFs are printed in saved/staged order with no extra intra-group sorting.
+- Inserts exactly one blank page between consecutive mail groups.
+- Persists both mail-iteration order and final print-group order in run JSON metadata for audit replay.
 - Records retries, failures, and operator review requirements in JSON reports.
 
 ## 5. Canonical data model
@@ -223,6 +226,7 @@ This allows deterministic review of why a value was accepted or blocked.
 - Export files follow the hierarchy `Year / Buyer / LC-or-SC / All Attachments`.
 - Import files live under the designated import root organized by year.
 - JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
+- Run-level JSON metadata must persist deterministic `mail_iteration_order` (timezone-normalized `ReceivedTime` + `EntryID`) and final `print_group_order` (mail-group ids ranked by workbook row sequence).
 
 ## 10. Windows deployment and operations
 - Package and manage the environment with `uv`.
