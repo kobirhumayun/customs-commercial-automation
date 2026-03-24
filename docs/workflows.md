@@ -16,6 +16,8 @@ Every CLI workflow should follow the same control shape:
 10. batch print only after the workbook-write phase completes successfully for the eligible mails
 11. perform post-run mail moves for successful mails only
 
+Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
+
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
