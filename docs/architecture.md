@@ -101,6 +101,55 @@ Batch atomicity applies only to mails with approved staged write operations, not
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
 Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 
+### Explicit write transaction strategy (normative)
+Write-capable workflows must execute workbook mutations using one staged protocol so recovery and audit logic can unambiguously classify run state.
+
+#### 1) Staged write application protocol
+Before any cell mutation, the orchestrator must:
+1. assemble the full staged write set for all approved mails in deterministic operation order `(mail_iteration_order, operation_index_within_mail)`
+2. pre-validate every target cell against staged preconditions (sheet exists, row/column address exists, expected pre-write value constraints, and row-eligibility constraints)
+3. persist pre-write phase metadata and target manifest hashes
+
+If any target pre-validation fails, no cell writes are allowed and the batch is hard-blocked.
+
+When pre-validation passes, the Excel adapter must:
+1. apply writes strictly in the same deterministic order used for staging
+2. persist phase markers as the run advances (`write_phase_status`)
+3. persist deterministic target probes sufficient to classify each target as pre-write/post-write/unknown during recovery
+
+#### 2) Commit marker creation point and required metadata
+The commit marker must be written only after:
+- all staged operations were applied without adapter/runtime error
+- post-write probes for all staged targets confirm expected post-write values
+- workbook save/sync for the active write session returns success
+
+At that point, set `write_phase_status=committed` and persist a commit marker record with at least:
+- `run_id`, `workflow_id`, `tool_version`, `rule_pack_version`
+- `committed_at_utc` (ISO-8601 UTC timestamp)
+- `operation_count`
+- `mail_iteration_order` digest/reference
+- `staged_write_plan_hash` (SHA-256, canonical serialization contract)
+- `run_start_backup_hash`
+- `post_write_probe_summary` (counts for `matches_post_write`, `matches_pre_write`, `mismatch_unknown`)
+
+#### 3) Failure window behavior and recovery interpretation
+- **Failure before commit marker**: treat as uncommitted (`write_phase_status` in `not_started`, `prevalidated`, `applying`, or `uncertain_not_committed`). Recovery must require target probes and may allow only `safe reapply staged writes` when all targets still match pre-write expectations.
+- **Failure after commit marker**: treat as committed write intent. Recovery must require all staged targets to probe as post-write and then only resume downstream phases (print/mail-move) via idempotency gates.
+- **Any contradiction** between marker/phase metadata and probe evidence is a hard block requiring manual recovery.
+
+#### 4) Minimum required probe granularity
+Probe granularity must be **per staged target cell** (not per row, per sheet, or aggregate-only).
+Each staged target probe record must include:
+- `sheet_name`
+- `row_index`
+- `column_key` (or canonical column index)
+- `expected_pre_write_value`
+- `expected_post_write_value`
+- `observed_value`
+- derived classification (`matches_pre_write`, `matches_post_write`, `mismatch_unknown`)
+
+Row-level or workbook-level checksum-only probes are insufficient for recovery safety.
+
 ## 4. Workflow architecture
 
 ### Export LC/SC intake CLI
