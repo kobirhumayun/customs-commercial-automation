@@ -167,7 +167,11 @@ The dashboard column is verification-only and should not be used to drive other 
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code.
+- Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code constants (phase 1), not operator-editable external files.
+- The import subject keyword list is owned by automation engineering and requires both technical and business-domain review before merge.
+- Keyword-list updates take effect only through normal code release boundaries (merged change + deployment/package release), never through ad hoc runtime edits.
+- The active keyword-list revision identifier must be stamped into run metadata and discrepancy/report outputs for every processed mail.
+- If the keyword list is missing, malformed, or invalid at startup (including mandatory-empty cases), processing must stop with a startup hard failure; no permissive safe-default matching is allowed.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
