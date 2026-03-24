@@ -168,10 +168,19 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Import relevance rule
 - Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code constants (phase 1), not operator-editable external files.
+- The import keyword constants must be defined in the workflow module path `project/workflows/import_btb_lc/keywords.py` (module import path: `project.workflows.import_btb_lc.keywords`).
+- Required constants in that module:
+  - `IMPORT_SUBJECT_KEYWORDS`: non-empty sequence of non-empty strings used for case-insensitive subject substring checks.
+  - `IMPORT_KEYWORD_REVISION`: revision string for the active keyword list.
+- `IMPORT_KEYWORD_REVISION` format is mandatory: `YYYY-MM-DD.N` where date is zero-padded Gregorian calendar date and `N` is a positive integer sequence (`1`, `2`, ... ) for same-day revisions.
 - The import subject keyword list is owned by automation engineering and requires both technical and business-domain review before merge.
 - Keyword-list updates take effect only through normal code release boundaries (merged change + deployment/package release), never through ad hoc runtime edits.
-- The active keyword-list revision identifier must be stamped into run metadata and discrepancy/report outputs for every processed mail.
-- If the keyword list is missing, malformed, or invalid at startup (including mandatory-empty cases), processing must stop with a startup hard failure; no permissive safe-default matching is allowed.
+- Startup must hard-fail before run snapshot/side effects if `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, empty when mandatory, wrong type/shape, or fails revision-format validation.
+- The active `IMPORT_KEYWORD_REVISION` must be stamped in:
+  - run-level metadata/report payload (for run lineage),
+  - every mail-level report/discrepancy payload (including blocked and warning outcomes),
+  - any relevance-decision audit record tied to import-mail processing.
+- Stamped field name should be stable across reports: `import_keyword_revision`.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
