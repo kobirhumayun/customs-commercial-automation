@@ -91,7 +91,7 @@ Each manually triggered CLI run should follow one explicit execution contract:
 4. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
 5. **Batch print planning + print** — derive mail-group print order from master-workbook row sequence (group key = originating mail, group rank = earliest row sequence written for that mail), persist final print-group order in run metadata, then print only newly saved PDFs for each group without extra intra-group sorting and insert exactly one blank page between consecutive groups.
 6. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
-7. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed.
+7. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed, using the shared **Recovery Decision Matrix** contract defined in `docs/workflows.md` (required artifacts, exact outcomes, idempotency checks, and pseudocode flow).
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
