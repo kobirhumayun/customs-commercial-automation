@@ -5,9 +5,15 @@
 - If rules are incomplete, contradictory, or not satisfied, do not write; produce a discrepancy report instead.
 - All workflows must be idempotent and safe to rerun.
 - Each run must begin from a fixed snapshot of the messages currently present in `working` for that workflow.
+- At the start of any write-capable tool run, create a backup of the target yearly master workbook.
 - New documents must never overwrite existing local files.
 - Focus on new PDFs only.
 - All extracted file numbers from an email remain in the report for traceability and must be validated as belonging to the same LC/SC family before processing can continue. Family consistency is determined by LC/SC number, normalized buyer, and LC/SC date.
+- Workbook write execution is all-or-nothing per run-level batch.
+- Writes are allowed only into target cells that were validated as blank during pre-write validation (including append targets that are blank by construction).
+- If a crash/interruption occurs during the write phase, the run must be marked uncertain/incomplete.
+- In uncertain/incomplete write state, printing and email moves are hard-blocked.
+- Any rerun after uncertain/incomplete write state must begin with a recovery check against the workbook backup and the recorded staged write plan before any new write attempt.
 
 ## File storage rules
 
@@ -118,6 +124,10 @@ The dashboard column is verification-only and should not be used to drive other 
 - A run snapshots all candidate emails before validation and side effects begin.
 - Validation outcomes are decided per mail, but workbook writes, printing, and email moves execute in controlled post-validation phases.
 - One blocked mail does not invalidate unrelated successful mails in the same run.
+- The run initialization stage must capture both the email snapshot and a master-workbook backup before write-capable phases continue.
+- The workbook write stage must commit as an all-or-nothing batch from the approved staged write plan.
+- If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
+- Rerun entry must perform recovery validation using the backup artifact plus recorded staged write plan before allowing new writes.
 
 ## Outlook post-processing rule
 - Blocked emails remain in `working`.
