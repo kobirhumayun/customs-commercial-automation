@@ -85,11 +85,12 @@ The architecture must optimize for:
 
 ## 3. Staged execution model
 Each manually triggered CLI run should follow one explicit execution contract:
-1. **Run-level snapshot** — capture the complete set of messages currently in `working` for that workflow and bind them to the run id.
+1. **Run-level snapshot + workbook backup** — capture the complete set of messages currently in `working` for that workflow, bind them to the run id, and create a backup copy of the target yearly master workbook before any write-capable phase can proceed.
 2. **Mail-level validation** — iterate the snapshotted mails, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
 3. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
 4. **Batch print** — build print batches only from newly saved PDFs attached to successful mails in the run, ordered by workbook row sequence and grouped by originating mail.
 5. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
+6. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed.
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
@@ -191,14 +192,19 @@ During early live deployment, the system should treat any failure to satisfy spe
 
 ## 7. Excel integration design
 - Use one master workbook per year.
+- At the beginning of any write-capable tool run, create a master-workbook backup artifact before progressing past run initialization.
 - Assume exclusive access during writes.
 - Read headers from row 2 of sheet 1.
 - Never write unless all validations pass.
+- Execute the batch workbook-write phase as all-or-nothing for the run’s approved write set.
+- Restrict writes to previously validated blank target cells (or validated append targets that are blank by construction).
 - For export LC/SC, append new rows only after skip-if-file-number-exists and same-file/amendment checks.
 - Preserve formulas, styles, merged cells, conditional formatting, filters, comments, validations, and protection exactly.
 - Apply selective number-format override only for `Quantity of Fabrics (Yds/Mtr)` when the ERP unit is `MTR`, using `#,###.00 "Mtr"`.
 - Capture before/after row references and batched write operations in reports as compensating controls.
-- If a partial failure occurs after validation but before or during the batch workbook-write phase, mark the run incomplete and prevent printing and mail moves until rerun/resolution.
+- If a crash/interruption or partial failure occurs after validation but before or during the batch workbook-write phase, mark run state as uncertain/incomplete and persist that state in run metadata.
+- While run state is uncertain/incomplete, block batch printing and block post-run mail moves.
+- Reruns must start with a recovery check that compares workbook state to the backup and the recorded staged write plan; only after explicit recovery resolution may a new write attempt begin.
 
 ## 8. Document extraction strategy
 Use a layered extraction pipeline:
