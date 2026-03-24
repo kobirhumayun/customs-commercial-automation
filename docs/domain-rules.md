@@ -124,6 +124,9 @@ The dashboard column is verification-only and should not be used to drive other 
 - A run snapshots all candidate emails before validation and side effects begin.
 - Validation outcomes are decided per mail, but workbook writes, printing, and email moves execute in controlled post-validation phases.
 - One blocked mail does not invalidate unrelated successful mails in the same run.
+- Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
+- If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
+- Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 - The run initialization stage must capture both the email snapshot and a master-workbook backup before write-capable phases continue.
 - The workbook write stage must commit as an all-or-nothing batch from the approved staged write plan.
 - If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
