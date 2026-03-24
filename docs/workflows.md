@@ -45,6 +45,35 @@ Example mail/run report fragment:
 }
 ```
 
+### Rule ID governance (shared, normative)
+To keep lineage stable across releases, all rule IDs must follow one governance policy.
+
+#### Rule ID pattern and uniqueness
+- Required format: `<scope>.<domain>.<name>.v<major>`
+- Example: `core.subject.buyer_lc_match.v1`
+- `scope` is one of: `core`, `export_lc_sc`, `ud_ip_exp`, `import_btb_lc`, `bb_dashboard_verification`
+- Rule IDs are globally unique across the repository (not just within one workflow).
+
+#### Stability and lifecycle
+- Once released, a rule ID must never be reused for different semantics.
+- Material logic changes require a new ID/version suffix (for example `.v1` → `.v2`).
+- Deprecated rules remain reserved and may be marked inactive, but not reassigned.
+
+#### Registry and CI validation
+- Canonical registry path: `rules/registry/*.yaml` (or equivalent machine-readable location adopted by implementation).
+- Startup/run validation should hard-fail if a rule emits an ID not present in the registry.
+- CI should verify:
+  - uniqueness of IDs
+  - pattern conformance
+  - no deleted/reused IDs without explicit deprecation metadata
+
+#### Required change-log discipline
+Any PR that adds/removes/changes rule logic must include:
+1. affected rule IDs
+2. change type (`add`, `deprecate`, `supersede`)
+3. rationale and impact on report lineage
+4. migration note if decision behavior changes
+
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
@@ -295,8 +324,73 @@ function aggregate_rule_results(rule_results):
 1. Core warning + workflow pass => final `warning`.
 2. Core warning + workflow hard_block => final `hard_block` and no write/print/mail-move.
 
+### Deterministic workflow selection gaps (shared, normative closure)
+The following selection/disambiguation rules are mandatory to avoid implementation drift.
+
+#### 1) Export append/skip candidate resolution
+When export workflow finds multiple plausible workbook targets for update/append decisions, apply tie-break keys in order:
+1. exact file-number canonical match count (higher first)
+2. exact amendment canonical match count (higher first)
+3. earliest row index (ascending)
+4. stable candidate id (lexicographically smallest)
+
+If still tied after all keys: `hard_block` with discrepancy code `export_candidate_tie_after_full_tiebreak`.
+
+#### 2) Import candidate-row tie scenarios
+After 40%-80% validation, if more than one candidate row remains:
+1. prefer row with earliest row index
+2. if tied on row index (logical duplicates), prefer candidate with greatest blank-field compatibility for required target columns
+3. if still tied, choose stable candidate id (lexicographically smallest)
+
+If fully tied: `hard_block` with discrepancy code `import_candidate_tie_after_full_tiebreak`.
+
+#### 3) Attachment-to-document-type disambiguation
+If multiple attachments map to the same required class (for example two PI candidates):
+1. prefer strongest deterministic filename pattern score
+2. if tie, prefer higher clause-extraction confidence
+3. if tie, prefer earliest attachment order in message metadata
+4. if tie, stable filename lexical order
+
+If still tied and choosing one would change downstream writes: `hard_block` with discrepancy code `attachment_classification_ambiguous`.
+
+#### 4) OCR fallback acceptance thresholds
+For scanned/hybrid extraction fallback:
+- If required fields are extracted with confidence meeting workflow thresholds, continue.
+- If any required field is missing or below threshold, outcome is `hard_block`.
+- Warning-only continuation is allowed only when all required fields pass and only non-required fields are low confidence.
+
+Required discrepancy codes:
+- `ocr_required_field_below_threshold`
+- `ocr_required_field_missing`
+- `ocr_non_required_field_low_confidence`
+
+#### Required report fields for all deterministic selections
+Mail-level reports must include:
+- evaluated candidate count
+- tie-break keys and values per candidate
+- selected candidate id (or null for hard-block)
+- rejection reasons per non-selected candidate
+- final selection decision reason/code
+
 ### Workbook write failure strategy (shared, normative)
 Because Excel desktop adapters may fail mid-apply, write-capable workflows must use the following deterministic failure playbook.
+
+### Workbook lock/contention handling protocol (shared, normative)
+All write-capable workflows must execute this preflight before `write_phase_status=prevalidating_targets`:
+1. workbook existence + write permission check
+2. conflicting-open session detection
+3. adapter health check (open/save capability)
+4. persisted preflight evidence in run metadata
+
+If any check fails, emit discrepancy and stop with no workbook mutation.
+
+#### Contention decision table
+| Condition | Retry? | Discrepancy code | Write phase status |
+|---|---|---|---|
+| workbook locked by another actor | no | `workbook_lock_conflict` | `hard_blocked_no_write` |
+| workbook opened read-only | no | `workbook_open_readonly` | `hard_blocked_no_write` |
+| adapter unavailable at startup | yes (max 3 attempts) | `excel_adapter_unavailable` | `hard_blocked_no_write` |
+| save conflict during apply | no | `workbook_save_conflict` | `uncertain_not_committed` |
 
 #### Failure decision table
 | Failure point | Required write state | Same-run action | Next-run recovery eligibility |

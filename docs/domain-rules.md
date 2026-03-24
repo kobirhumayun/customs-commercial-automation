@@ -28,6 +28,117 @@ A duplicate PDF is defined only by identical filename.
 
 ## Subject and naming rules
 
+## Canonicalization profiles (normative)
+All matching-critical identifiers must be canonicalized before any equality or family-consistency checks.
+If canonicalization fails for any required identifier, the outcome is `hard_block`.
+
+### Shared canonicalization primitives
+Apply these primitives only when the identifier profile explicitly references them:
+1. trim leading/trailing whitespace
+2. collapse internal runs of whitespace to a single space
+3. uppercase ASCII letters
+4. replace Unicode dashes (`–`, `—`, `‑`) with `-`
+5. remove zero-width characters and non-printable control characters
+6. normalize slash variants (`\` → `/`) for file-number style tokens
+7. reject if result is empty
+
+### File number profile (`P/<yy>/<nnnn>`)
+Accepted raw forms (examples): `P/26/0042`, `p-26-42`, ` P\26\0042 `.
+
+Normalization steps (exact order):
+1. apply shared primitives 1, 3, 4, 5, 6
+2. replace `-` with `/`
+3. extract exactly three segments
+4. segment 1 must equal `P`
+5. segment 2 must be 2 digits (`yy`)
+6. segment 3 must be 1-4 digits; left-pad with zeros to 4 digits
+7. output canonical as `P/<yy>/<nnnn>`
+
+Invalid patterns:
+- missing/extra segments
+- non-numeric year/sequence
+- sequence longer than 4 digits
+
+Match rule: exact canonical string equality.
+
+### LC/SC number profile
+Accepted raw forms must begin with `LC` or `SC` prefix and include a non-empty body.
+
+Normalization steps (exact order):
+1. apply shared primitives 1, 2, 3, 4, 5
+2. split prefix token (`LC` or `SC`) from the rest
+3. strip separators around prefix/body boundaries
+4. preserve alphanumeric body characters and internal `-`
+5. collapse repeated `-` to single `-`
+6. trim trailing separators
+7. output canonical as `<PREFIX>-<BODY>`
+
+Invalid patterns:
+- prefix not `LC` or `SC`
+- empty body after normalization
+
+Match rule: exact canonical equality.
+
+### PI number profile
+Accepted raw forms are PI references such as `PDL-YY-NNNN` with optional revision token `R<digits>`.
+
+Normalization steps (exact order):
+1. apply shared primitives 1, 3, 4, 5
+2. parse base tokens `PDL`, `YY`, `NNNN`
+3. left-pad numeric serial to 4 digits
+4. if revision exists, normalize to `R<digits>` (no leading `+`, no spaces)
+5. output canonical as `PDL-<YY>-<NNNN>` optionally followed by `-R<digits>`
+
+Invalid patterns:
+- base token not `PDL`
+- missing `YY` or serial
+- non-numeric `YY`/serial/revision digits
+
+Match rule: exact canonical equality.
+
+### UD / IP / EXP document number profile
+Accepted raw forms may include mixed separators and spacing around prefixes (`UD`, `IP`, `EXP`).
+
+Normalization steps (exact order):
+1. apply shared primitives 1, 2, 3, 4, 5
+2. normalize prefix token to one of `UD`, `IP`, `EXP`
+3. normalize separators to single `-` between core tokens
+4. trim trailing punctuation (`.`, `,`, `;`, `:`)
+5. output canonical `<PREFIX>-<NORMALIZED_BODY>`
+
+Invalid patterns:
+- unknown prefix
+- empty normalized body
+
+Match rule: exact canonical equality for same prefix class.
+
+### Buyer name profile
+Accepted raw forms may include trailing punctuation and optional address segment in ERP field.
+
+Normalization steps (exact order):
+1. apply shared primitives 1, 2, 3, 4, 5
+2. if ERP source contains `\`, keep only segment before first `\`
+3. remove trailing periods from resulting buyer text
+4. collapse repeated punctuation separators to single space
+5. output canonical buyer string
+
+Invalid patterns:
+- empty buyer after normalization
+
+Match rule: exact canonical equality.
+
+### Worked examples (raw → canonical)
+1. `p/26/42` → `P/26/0042`
+2. ` P-26-0042 ` → `P/26/0042`
+3. `P\26\7` → `P/26/0007`
+4. `LC  -0038` → `LC-0038`
+5. `sc-010-pdl-8` → `SC-010-PDL-8`
+6. `pdl-26-42` → `PDL-26-0042`
+7. `PDL-26-0042-r4` → `PDL-26-0042-R4`
+8. `ip lc 0043 vintage denim studio ltd.` → `IP-LC-0043-VINTAGE DENIM STUDIO LTD`
+9. `exp-  9981 ;` → `EXP-9981`
+10. `Designer Fashion Ltd.\Dhaka.` → `DESIGNER FASHION LTD`
+
 ### Export subject parsing targets
 - prefix: `LC` or `SC`
 - LC/SC number end sequence
@@ -219,6 +330,10 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.
+
+## Discrepancy code registry reference
+- All discrepancy `code` values must come from `docs/discrepancy-codes.md`.
+- New codes must be added to the registry before implementation changes that emit them.
 
 ## Import keyword lifecycle and release gate (normative)
 To keep import relevance deterministic and auditable, keyword changes must follow a documented lifecycle.

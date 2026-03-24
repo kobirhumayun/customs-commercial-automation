@@ -30,6 +30,20 @@ Goal: establish the monolithic modular foundation without workflow-specific comp
 - Shared adapters/contracts for Outlook, file storage, Excel, PDF extraction, OCR, Playwright, and printing.
 - Discrepancy reporting contract and future human-review checkpoint hooks.
 
+## Open-question implementation gate matrix (normative)
+Use this matrix to decide whether implementation may proceed while a question remains unresolved.
+
+| Open question | Impacted workflow/module | Implementation status | Temporary default behavior | Owner / decision deadline |
+|---|---|---|---|---|
+| Future business-approved exceptions not yet encoded in rule packs | All workflow-specific rule-pack modules | Can implement with hard-block fallback | Treat unmatched/exception cases as `hard_block`; emit comprehensive discrepancy report with rule lineage | Business + automation engineering / before enabling exception in production |
+| New naming-pattern exceptions beyond current canonicalization profiles | Parsing/normalization layer + workflow packs | Can implement with hard-block fallback | Reject unsupported patterns with deterministic discrepancy code; no silent normalization expansion | Automation engineering / before releasing affected workflow update |
+| Any request to bypass deterministic candidate tie-break outcomes | Matching/reconciliation engines | Must defer (no bypass in phase 1) | Keep strict tie behavior and block on unresolved ties | Program owner / phase-2+ policy review |
+| Any proposal to introduce human-review routing in live decision path | Orchestrator + reporting + routing modules | Must defer (phase 1 exclusion) | Continue `hard_block` default for unspecified/ambiguous outcomes | Program governance / post recurring-issue taxonomy |
+
+### Gate interpretation
+- **Can implement with hard-block fallback:** coding may proceed now with deterministic blocking behavior documented in `docs/domain-rules.md` and `docs/workflows.md`.
+- **Must defer:** do not implement production-path behavior until a durable architecture/rules update lands.
+
 ### Phase 2 — Export LC/SC intake workflow
 Goal: support manual export email processing with strict validation and safe workbook append/skip logic.
 - Outlook working-folder intake.
