@@ -45,11 +45,15 @@ A duplicate PDF is defined only by identical filename.
 ## ERP normalization rules
 - ERP report is `rptDateWiseLCRegister`.
 - Headers are read from row 2 of sheet 1.
-- Duplicate ERP rows for the same file number may be treated as interchangeable; any one may be selected when they are true duplicates.
+- Canonical row selection follows ERP row order.
+- The first occurrence row is the canonical row for that file number/family context.
+- Canonical row fields drive folder path construction, workbook mapping, and reporting metadata.
+- Duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen.
 - When multiple file numbers are extracted from one email, each must be validated against ERP and all resolved rows must be consistent with the same LC/SC family.
-- Duplicate ERP rows may use any one row when they are true duplicates for family validation.
 - Any partial family match is a hard block.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
+
+Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
 
 ## Master workbook rules
 - One master workbook per year.

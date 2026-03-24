@@ -24,11 +24,16 @@ Every CLI workflow should follow the same control shape:
 - extract all body file numbers matching `P/<yy>/<nnnn>`
 - validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
 - define LC/SC family consistency using LC/SC number, normalized buyer, and LC/SC date
-- duplicate ERP rows may use any one row when they are true duplicates
+- canonical row selection follows ERP row order
+- the first occurrence row is the canonical row for that file number/family context
+- canonical row fields drive folder path construction, workbook mapping, and reporting metadata
+- duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen
 - hard-block if the extracted file numbers do not resolve to the same LC/SC family; any partial family match is a hard block
 - normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
 - hard-block if normalized subject buyer and LC/SC number do not exactly match ERP-derived values
 - identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
+
+Example (canonical selection): if two ERP rows are true-equivalent for `P/26/0042` and appear as row 118 then row 241, row 118 remains canonical and its fields are used for folder pathing, workbook mapping, and reporting metadata.
 
 ### Workbook mapping
 Use ERP fields to populate:
