@@ -496,7 +496,7 @@ Use ERP fields to populate:
 - `L/C Issuing Bank` ← `Notify Bank`
 - `L/C & S/C No.` ← `LC No.`
 - `LC Issue Date` ← `LC DT.`
-- ` Amount` ← `Current LC Value`
+- `Amount` (column 6, Export LC/SC field) ← `Current LC Value`
 - `Shipment Date` ← `Ship. DT.`
 - `Expiry Date` ← `Expiry DT.`
 - `Quantity of Fabrics (Yds/Mtr)` ← `LC Qty`
@@ -506,6 +506,8 @@ Use ERP fields to populate:
 - `Master L/C No.` ← `Master LC No.`
 - `Master L/C Issue Dt.` ← `M.L/C Date`
 - `Commercial File No.` ← `File No.`
+
+Note: the master workbook intentionally contains duplicate `Amount` headers. The export workflow must write only to column 6. Column 22 `Amount` is reserved for Import LC (Back-to-Back) workflow writes.
 
 ### No-write rules
 - subject mismatch
@@ -780,4 +782,3 @@ For `import_btb_lc`, the fabric-subject keyword list must be managed as versione
   3. any exclude hit after include pass makes the mail ineligible
 - `mail_report.import_keyword_revision` must equal `revision` from the loaded keyword file for every processed import mail.
 - Loader failures (missing file, invalid schema, empty include list) are startup hard failures for `import_btb_lc`.
-

@@ -206,6 +206,7 @@ Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` a
 
 ### Workbook mapping contract (normative)
 Implementations must resolve workbook targets from exact row-2 header text on sheet 1 and then stage writes using canonical `column_key` names. Header aliases are allowed only where explicitly listed.
+Duplicate header text is disallowed by default unless explicitly declared in this contract with fixed column indexes.
 
 #### Mapping matrix — shared/core fields
 | column_key | Required header text (exact) | Allowed aliases | Source | Write mode | Pre-write constraint |
@@ -220,11 +221,13 @@ Implementations must resolve workbook targets from exact row-2 header text on sh
 | workflow_id | column_key | Required header text (exact) | Write mode | Required preconditions |
 |---|---|---|---|---|
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
+| `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
+| `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
 
-If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
+If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns outside an explicitly declared duplicate-header exception, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
 
 ## Workbook preservation rules
 These must remain exactly as-is after writes:
