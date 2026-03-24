@@ -340,6 +340,11 @@ During early live deployment, the system should treat any failure to satisfy spe
 - At the beginning of any write-capable tool run, create a master-workbook backup artifact before progressing past run initialization.
 - Assume exclusive access during writes.
 - Read headers from row 2 of sheet 1.
+- Treat duplicate header labels as a supported workbook shape only when the duplicate is explicitly declared in the mapping contract with fixed column indexes and workflow ownership.
+- In the current master workbook schema, header text `Amount` appears twice and must be disambiguated by column index:
+  - column 6 `Amount` is the **Export LC/SC amount** target
+  - column 22 `Amount` is the **Import LC (Back-to-Back) amount** target
+- Any attempt to resolve `Amount` by header text alone is invalid; writes must bind to canonical column keys first, then enforce the declared column index.
 - Never write unless all validations pass.
 - Execute the batch workbook-write phase as all-or-nothing for the run’s approved write set.
 - Restrict writes to previously validated blank target cells (or validated append targets that are blank by construction).
