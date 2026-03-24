@@ -75,6 +75,7 @@ Goal: productionize the operator experience while preserving deterministic behav
 ## Cross-cutting implementation tracks
 These tracks progress in parallel with the phases above:
 - **Rule management:** represent business rules as versioned, testable rule packs.
+  - Implement the default contract from `docs/architecture.md` for module layout (shared core + per-workflow packs), execution ordering (core first, workflow exceptions second), decision schema, rule-pack function interface, runtime discovery/loading, and report lineage fields (rule-pack version + applied rule IDs).
 - **Excel safety:** preserve formulas, formatting, validation, comments, filters, merges, and protection exactly.
 - **Auditability:** every workflow emits machine-readable JSON artifacts with source provenance and write decisions.
 - **Idempotency:** no duplicate saves, writes, prints, or conflicting reruns.

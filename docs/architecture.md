@@ -178,6 +178,45 @@ Key entities that should exist in architecture and later in code contracts:
 ## 6. Rule engine and validation design
 Rules should be represented as explicit, versioned rule packs keyed by workflow.
 
+### Default workflow rule-pack contract
+To keep behavior deterministic and auditable across all workflows, phase 1 should adopt one default contract for how rule packs are organized, executed, and reported.
+
+#### Module layout
+- One **workflow-specific rule-pack module** per CLI workflow (`export_lc_sc`, `ud_ip_exp`, `import_btb_lc`, `bb_dashboard_verification`).
+- One **shared core validation module** that contains reusable baseline checks used by all workflows.
+
+#### Execution order
+1. Run shared core validations first.
+2. Run workflow-specific exception logic second.
+
+This ordering is mandatory so every workflow inherits the same baseline safety gates before any workflow-specific allowances are applied.
+
+#### Standard rule-pack function contract
+Each workflow rule-pack module should expose a single primary evaluator function with this conceptual contract:
+- **Input context**: normalized workflow payload, extracted entities, ERP/workbook candidate context, run metadata, and rule-pack configuration/version reference.
+- **Output decision list**: ordered list of decision records produced by rule evaluation.
+- **Output metadata**: rule-pack identifier, semantic version, evaluation timestamp, and optional execution diagnostics.
+
+#### Standard decision schema
+Every decision record emitted by the shared core module and workflow-specific module should use a consistent schema with at least:
+- `decision_type`: one of `hard_block`, `warning`, `applied_exception`
+- `rule_id`: stable rule identifier
+- `rationale`: human-readable explanation of why the decision was produced
+
+#### Reporting requirements
+Run-level and mail-level reports must capture rule-evaluation lineage fields:
+- rule-pack name/id used for the workflow
+- rule-pack version used at runtime
+- ordered list of applied rule IDs (including core and workflow-specific sources)
+
+These fields are required so discrepancy reports can be replayed and audited against exact rule logic.
+
+#### Rule-pack discovery and loading at runtime
+The orchestrator should resolve the active workflow name from the invoked CLI command, then load the mapped workflow rule-pack module via a deterministic registry (preferred) or explicit config mapping.
+- Unknown workflow or missing mapping is a startup hard failure (no processing).
+- Rule-pack version resolution must be explicit and recorded in run metadata.
+- Dynamic loading should be constrained to known module paths in-repo; no ad hoc external module discovery.
+
 ### Rule outcome classes
 - **Hard block**: no write; discrepancy report required.
 - **Soft warning**: processing may continue but report must retain warning.
