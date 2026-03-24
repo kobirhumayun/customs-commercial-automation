@@ -21,6 +21,112 @@ Batch atomicity applies only to mails with approved staged write operations, not
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
 Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 
+### Recovery Decision Matrix (shared, normative)
+This section defines the mandatory recovery contract when a prior run is uncertain/incomplete and a new write-capable run attempts to start.
+
+#### Required artifacts
+Recovery checks require all of the following persisted artifacts from the prior run:
+1. **Backup hash**
+   - cryptographic hash of the run-start workbook backup artifact (`run_start_backup_hash`)
+   - cryptographic hash of the active workbook at recovery time (`current_workbook_hash`)
+2. **Staged write plan**
+   - ordered staged write operations, including sheet, row, column, expected pre-write value, and intended value
+   - persisted plan checksum/hash (`staged_write_plan_hash`)
+3. **Run metadata**
+   - run id, workflow id, tool version/rule-pack version
+   - persisted `mail_iteration_order`
+   - persisted `print_group_order` (if computed before interruption)
+   - phase checkpoints (`write_phase_status`, `print_phase_status`, `mail_move_phase_status`)
+4. **Workbook probe results**
+   - deterministic probe of all staged target cells against expected post-write values and expected pre-write values from the staged write plan
+   - derived probe classification per target: `matches_post_write`, `matches_pre_write`, or `mismatch_unknown`
+
+If any required artifact is missing, unreadable, or hash-invalid, recovery must hard-block.
+
+#### Outcomes and exact conditions
+Recovery must produce exactly one outcome:
+
+1. **safe resume**
+   - `run_start_backup_hash` equals persisted backup file hash
+   - `staged_write_plan_hash` is valid and staged plan is readable
+   - workbook probe shows all staged targets as `matches_post_write`
+   - `write_phase_status` is `committed`
+   - `print_phase_status` and/or `mail_move_phase_status` are incomplete or unknown
+
+2. **safe reapply staged writes**
+   - `run_start_backup_hash` equals persisted backup file hash
+   - `staged_write_plan_hash` is valid and staged plan is readable
+   - workbook probe shows all staged targets as `matches_pre_write`
+   - `write_phase_status` is `not_started` or `uncertain_not_committed`
+   - no target classified as `matches_post_write` or `mismatch_unknown`
+
+3. **hard-block requiring operator/manual recovery**
+   - any missing/unreadable/invalid required artifact
+   - backup hash mismatch
+   - mixed probe state across staged targets (`matches_pre_write` + `matches_post_write`)
+   - any target classified as `mismatch_unknown`
+   - phase metadata contradictions (for example: `write_phase_status=committed` while all targets are `matches_pre_write`)
+   - print/mail-move evidence inconsistent with run metadata or absent when required for deterministic continuation
+
+#### Idempotency checks for partial print/mail-move stages
+When recovery outcome is `safe resume`, perform these idempotency gates before resuming:
+1. **Print idempotency**
+   - each print group has a stable id derived from `(run_id, mail_id, print_group_index, document_path_hash)`
+   - resume must skip any group whose completion marker exists and is hash-consistent
+   - resume may print only groups without completion markers
+   - if marker exists but hash/metadata differs from persisted plan, hard-block
+2. **Mail-move idempotency**
+   - each mail move has a stable operation id derived from `(run_id, entry_id, destination_folder)`
+   - resume must skip mails already marked moved with matching destination and timestamp evidence
+   - resume may move only mails with no completion marker
+   - if mail is no longer in expected source folder and no valid completion marker exists, hard-block
+3. **Cross-phase gate**
+   - mail move resumption is allowed only after print resumption reaches terminal success for all eligible groups (or workflow has no print phase)
+   - any attempt to move mail before this gate is a hard-block
+
+#### Recovery pseudocode (normative)
+```text
+function recover_or_block(prior_run_id):
+    artifacts = load_required_artifacts(prior_run_id)
+    if artifacts.missing_or_invalid:
+        return HARD_BLOCK("missing/invalid artifact set")
+
+    if hash(artifacts.backup_file) != artifacts.run_start_backup_hash:
+        return HARD_BLOCK("backup hash mismatch")
+
+    if hash(artifacts.staged_write_plan) != artifacts.staged_write_plan_hash:
+        return HARD_BLOCK("staged write plan hash mismatch")
+
+    probe = probe_workbook_targets(
+        workbook=current_master_workbook,
+        staged_plan=artifacts.staged_write_plan
+    )
+
+    if probe.any == mismatch_unknown:
+        return HARD_BLOCK("unknown workbook state")
+
+    if probe.all == matches_pre_write:
+        if artifacts.write_phase_status in {not_started, uncertain_not_committed}:
+            return SAFE_REAPPLY_STAGED_WRITES
+        return HARD_BLOCK("metadata/probe contradiction: expected uncommitted write status")
+
+    if probe.all == matches_post_write:
+        if artifacts.write_phase_status != committed:
+            return HARD_BLOCK("metadata/probe contradiction: expected committed write status")
+
+        print_check = evaluate_print_idempotency(artifacts)
+        if print_check == inconsistent:
+            return HARD_BLOCK("print evidence mismatch")
+
+        move_check = evaluate_mail_move_idempotency(artifacts)
+        if move_check == inconsistent:
+            return HARD_BLOCK("mail-move evidence mismatch")
+
+        return SAFE_RESUME
+
+    return HARD_BLOCK("mixed target states require manual recovery")
+```
+
 ## Export LC/SC intake
 
 ### Inputs
