@@ -16,6 +16,11 @@ Every CLI workflow should follow the same control shape:
 10. batch print only after the workbook-write phase completes successfully for the eligible mails
 11. perform post-run mail moves for successful mails only
 
+### Batch write contract (normative)
+Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
+If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
+Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
+
 ## Export LC/SC intake
 
 ### Inputs
