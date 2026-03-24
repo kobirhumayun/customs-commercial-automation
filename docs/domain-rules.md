@@ -185,6 +185,24 @@ The dashboard column is verification-only and should not be used to drive other 
 - If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
 - Rerun entry must perform recovery validation using the backup artifact plus recorded staged write plan before allowing new writes.
 
+## Rerun/recovery hash invariants
+- Recovery hash algorithm is fixed to **SHA-256** for:
+  - run-start backup (`run_start_backup_hash`)
+  - current workbook (`current_workbook_hash`)
+  - canonical staged write plan (`staged_write_plan_hash`)
+- Hash encoding is lowercase hexadecimal (64 chars), not base64.
+- Persisted metadata must include:
+  - `hash_algorithm` = `sha256`
+  - `run_start_backup_hash`
+  - `current_workbook_hash`
+  - `staged_write_plan_hash`
+- Staged write plan hashing must use canonical serialization before SHA-256:
+  - deterministic operation ordering by `(mail_iteration_order, operation_index_within_mail)`
+  - stable object key order (lexicographic ascending)
+  - UTF-8 byte encoding
+  - LF (`\n`) normalized line endings
+- Any missing hash field, unknown algorithm value, non-hex digest, or canonicalization failure is a hard block for rerun/recovery.
+
 ## Outlook post-processing rule
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
