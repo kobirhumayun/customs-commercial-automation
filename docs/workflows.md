@@ -1,0 +1,784 @@
+# Workflow Specifications
+
+## Shared workflow contract
+Every CLI workflow should follow the same control shape:
+1. capture operator execution context
+2. capture a run-level snapshot of all source emails/documents from the relevant manual intake location
+3. determine deterministic mail iteration order for the snapshot by:
+   - primary key: `ReceivedTime` converted to the workflow state timezone configured for operations (current deployment basis: Bangladesh Standard Time, UTC+06:00)
+   - tie-breaker: ascending Outlook `EntryID`
+4. save only new attachments/documents while iterating the snapshotted mails in that order
+5. extract and normalize entities per mail
+6. run workflow rule packs and stage per-mail write/print/move outcomes
+7. apply a controlled batch workbook-write phase for successful mails only
+8. derive deterministic print-group order from the successful mail groups using the earliest master-workbook row sequence assigned to each group
+9. emit JSON reports for both the run and each mail outcome, including persisted `mail_iteration_order` and final `print_group_order`
+10. batch print only after the workbook-write phase completes successfully for the eligible mails
+11. perform post-run mail moves for successful mails only
+
+Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
+
+### Shared decision and phase-state enums (normative)
+
+#### Decision enum
+- Allowed values: `pass`, `warning`, `hard_block`.
+- `hard_block` is terminal for the affected mail in the active run (no staged write, no print eligibility, no mail move eligibility).
+
+#### Warning-to-action decision table
+| Mail discrepancy profile | Staged write allowed | Print allowed | Mail move allowed |
+|---|---:|---:|---:|
+| no discrepancies | yes | yes (if workflow has print phase) | yes |
+| warning-only discrepancies | yes | yes (if workflow has print phase) | yes |
+| any hard-block discrepancy | no | no | no |
+
+`warning` never overrides any explicit hard-block rule. If both warning and hard-block discrepancies are present, final decision is `hard_block`.
+
+#### `write_phase_status` enum
+- Allowed values: `not_started`, `prevalidating_targets`, `prevalidated`, `applying`, `hard_blocked_no_write`, `uncertain_not_committed`, `committed`.
+- Transition rules are defined in the **Numbered transition flow for `write_phase_status`** section below.
+
+#### `print_phase_status` enum
+- Allowed values: `not_started`, `planned`, `printing`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Allowed transitions:
+  1. `not_started` → `planned`
+  2. `planned` → `printing`
+  3. `printing` → `completed`
+  4. `planned` or `printing` → `uncertain_incomplete` (runtime interruption)
+  5. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
+
+#### `mail_move_phase_status` enum
+- Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Allowed transitions:
+  1. `not_started` → `moving`
+  2. `moving` → `completed`
+  3. `moving` → `uncertain_incomplete` (runtime interruption)
+  4. `not_started` → `hard_blocked` (cross-phase gate not satisfied or eligibility failure)
+
+Any attempted state transition not listed above is a hard-block with discrepancy code `invalid_phase_state_transition`.
+
+
+### Rule-pack discovery and lineage contract (shared, normative)
+- The active workflow rule-pack module must publish a canonical version constant named `RULE_PACK_VERSION`.
+- Startup is a hard failure if `RULE_PACK_VERSION` is missing, empty, non-string, or not a valid semantic version.
+- Every run-level and mail-level report must include:
+  - `workflow_id`
+  - `rule_pack_id`
+  - `rule_pack_version`
+  - `applied_rule_ids` (ordered list of rule IDs applied from shared-core + workflow-specific packs)
+
+Example mail/run report fragment:
+
+```json
+{
+  "run_id": "run-2026-03-24T09-30-00Z",
+  "mail_id": "00000000A1B2C3D4",
+  "workflow_id": "export_lc_sc",
+  "rule_pack_id": "export_lc_sc.default",
+  "rule_pack_version": "1.4.0",
+  "applied_rule_ids": [
+    "core.subject.buyer_lc_match.v1",
+    "core.extraction.required_fields.v2",
+    "export_lc_sc.exception.filename_cosmetic_variation.v1"
+  ],
+  "final_decision": "warning"
+}
+```
+
+### Rule ID governance (shared, normative)
+To keep lineage stable across releases, all rule IDs must follow one governance policy.
+
+#### Rule ID pattern and uniqueness
+- Required format: `<scope>.<domain>.<name>.v<major>`
+- Example: `core.subject.buyer_lc_match.v1`
+- `scope` is one of: `core`, `export_lc_sc`, `ud_ip_exp`, `import_btb_lc`, `bb_dashboard_verification`
+- Rule IDs are globally unique across the repository (not just within one workflow).
+
+#### Stability and lifecycle
+- Once released, a rule ID must never be reused for different semantics.
+- Material logic changes require a new ID/version suffix (for example `.v1` → `.v2`).
+- Deprecated rules remain reserved and may be marked inactive, but not reassigned.
+
+#### Registry and CI validation
+- Canonical registry path: `rules/registry/*.yaml` (or equivalent machine-readable location adopted by implementation).
+- Startup/run validation should hard-fail if a rule emits an ID not present in the registry.
+- CI should verify:
+  - uniqueness of IDs
+  - pattern conformance
+  - no deleted/reused IDs without explicit deprecation metadata
+
+#### Required change-log discipline
+Any PR that adds/removes/changes rule logic must include:
+1. affected rule IDs
+2. change type (`add`, `deprecate`, `supersede`)
+3. rationale and impact on report lineage
+4. migration note if decision behavior changes
+
+### Batch write contract (normative)
+Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
+If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
+Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
+
+### Write transaction protocol and `write_phase_status` transitions (shared, normative)
+
+#### Staged write application protocol
+All write-capable workflows must execute this protocol exactly:
+1. Build one deterministic staged write plan ordered by `(mail_iteration_order, operation_index_within_mail)`.
+2. Persist `write_phase_status=prevalidating_targets`.
+3. Pre-validate **all** staged targets before any write:
+   - target address resolvable (sheet/row/column)
+   - row-eligibility predicates satisfied
+   - expected pre-write values satisfy staged constraints
+4. If any target fails pre-validation, persist `write_phase_status=hard_blocked_no_write`, emit discrepancy report, and perform zero writes.
+5. If all targets pass, persist `write_phase_status=prevalidated`.
+6. Apply writes in the same deterministic staged order; while writing, persist `write_phase_status=applying`.
+7. Run post-write probes at target-cell granularity and save workbook.
+8. If probes and save succeed for all targets, create commit marker and persist `write_phase_status=committed`.
+9. Any runtime interruption after `prevalidated` but before `committed` must persist `write_phase_status=uncertain_not_committed`.
+
+#### Commit marker creation point and required metadata
+Create the commit marker **only after** all staged writes are applied, post-write probes confirm expected values for all targets, and workbook save succeeds.
+Commit marker payload must include at least:
+- `run_id`, `workflow_id`, `tool_version`, `rule_pack_version`
+- `committed_at_utc` (ISO-8601 UTC timestamp)
+- `operation_count`
+- `staged_write_plan_hash` (SHA-256 over canonical plan serialization)
+- `run_start_backup_hash`
+- `post_write_probe_summary` with counts for `matches_post_write`, `matches_pre_write`, `mismatch_unknown`
+
+#### Failure window behavior (normative)
+- If interruption occurs **before** commit marker creation (`prevalidating_targets`, `prevalidated`, `applying`, or `uncertain_not_committed`), recovery must treat the write as not yet committed and decide via per-target probes whether safe reapply is allowed.
+- If interruption occurs **after** commit marker creation (`committed`), recovery must treat workbook writes as committed intent and only evaluate safe resume of print/mail-move via idempotency markers.
+- Metadata/probe contradictions are always `hard_block`.
+
+#### Minimum probe granularity (normative)
+Recovery and commit validation must probe every staged target cell individually. Minimum probe record fields:
+- `sheet_name`
+- `row_index`
+- `column_key` (or canonical column index)
+- `expected_pre_write_value`
+- `expected_post_write_value`
+- `observed_value`
+- `classification` (`matches_pre_write`, `matches_post_write`, `mismatch_unknown`)
+
+Workbook-level or row-level aggregate probes are not sufficient to classify partial writes safely.
+
+#### Numbered transition flow for `write_phase_status` (normative)
+1. `not_started` → `prevalidating_targets`
+2. `prevalidating_targets` → `hard_blocked_no_write` (any target pre-validation failure)
+3. `prevalidating_targets` → `prevalidated` (all targets pass)
+4. `prevalidated` → `applying` (first cell write attempt begins)
+5. `applying` → `uncertain_not_committed` (interruption/error before commit marker creation)
+6. `applying` → `committed` (all writes applied, post-write probes pass, workbook save succeeds, commit marker persisted)
+7. `committed` is terminal for workbook-write phase; only print/mail-move phases may continue/resume.
+
+### Recovery Decision Matrix (shared, normative)
+This section defines the mandatory recovery contract when a prior run is uncertain/incomplete and a new write-capable run attempts to start.
+
+#### Required artifacts
+Recovery checks require all of the following persisted artifacts from the prior run:
+1. **Backup hash**
+   - cryptographic hash of the run-start workbook backup artifact (`run_start_backup_hash`)
+   - cryptographic hash of the active workbook at recovery time (`current_workbook_hash`)
+   - algorithm: **SHA-256**
+   - encoding: lowercase hexadecimal (64 chars)
+2. **Staged write plan**
+   - ordered staged write operations, including sheet, row, column, expected pre-write value, and intended value
+   - canonical serialization is required before hashing:
+     - UTF-8 bytes
+     - LF (`\n`) line endings only
+     - stable object key order (lexicographic ascending)
+     - deterministic operation ordering by `(mail_iteration_order, operation_index_within_mail)`
+   - persisted plan hash (`staged_write_plan_hash`) uses SHA-256 over canonical serialized bytes
+   - encoding: lowercase hexadecimal (64 chars)
+3. **Run metadata**
+   - run id, workflow id, tool version/rule-pack version
+   - persisted `mail_iteration_order`
+   - persisted `print_group_order` (if computed before interruption)
+   - phase checkpoints (`write_phase_status`, `print_phase_status`, `mail_move_phase_status`)
+   - required hash metadata fields:
+     - `hash_algorithm` = `sha256`
+     - `run_start_backup_hash`
+     - `current_workbook_hash`
+     - `staged_write_plan_hash`
+4. **Workbook probe results**
+   - deterministic probe of all staged target cells against expected post-write values and expected pre-write values from the staged write plan
+   - derived probe classification per target: `matches_post_write`, `matches_pre_write`, or `mismatch_unknown`
+
+If any required artifact is missing, unreadable, or hash-invalid, recovery must hard-block.
+
+#### Outcomes and exact conditions
+Recovery must produce exactly one outcome:
+
+1. **safe resume**
+   - `run_start_backup_hash` equals persisted backup file hash
+   - `staged_write_plan_hash` is valid and staged plan is readable
+   - workbook probe shows all staged targets as `matches_post_write`
+   - `write_phase_status` is `committed`
+   - `print_phase_status` and/or `mail_move_phase_status` are incomplete or unknown
+
+2. **safe reapply staged writes**
+   - `run_start_backup_hash` equals persisted backup file hash
+   - `staged_write_plan_hash` is valid and staged plan is readable
+   - workbook probe shows all staged targets as `matches_pre_write`
+   - `write_phase_status` is `not_started` or `uncertain_not_committed`
+   - no target classified as `matches_post_write` or `mismatch_unknown`
+
+3. **hard-block requiring operator/manual recovery**
+   - any missing/unreadable/invalid required artifact
+   - backup hash mismatch
+   - mixed probe state across staged targets (`matches_pre_write` + `matches_post_write`)
+   - any target classified as `mismatch_unknown`
+   - phase metadata contradictions (for example: `write_phase_status=committed` while all targets are `matches_pre_write`)
+   - print/mail-move evidence inconsistent with run metadata or absent when required for deterministic continuation
+
+#### Idempotency checks for partial print/mail-move stages
+When recovery outcome is `safe resume`, perform these idempotency gates before resuming:
+1. **Print idempotency**
+   - each print group has a stable id derived from `(run_id, mail_id, print_group_index, document_path_hash)`
+   - resume must skip any group whose completion marker exists and is hash-consistent
+   - resume may print only groups without completion markers
+   - if marker exists but hash/metadata differs from persisted plan, hard-block
+2. **Mail-move idempotency**
+   - each mail move has a stable operation id derived from `(run_id, entry_id, destination_folder)`
+   - resume must skip mails already marked moved with matching destination and timestamp evidence
+   - resume may move only mails with no completion marker
+   - if mail is no longer in expected source folder and no valid completion marker exists, hard-block
+3. **Cross-phase gate**
+   - mail move resumption is allowed only after print resumption reaches terminal success for all eligible groups (or workflow has no print phase)
+   - any attempt to move mail before this gate is a hard-block
+
+#### Recovery pseudocode (normative)
+```text
+function recover_or_block(prior_run_id):
+    artifacts = load_required_artifacts(prior_run_id)
+    if artifacts.missing_or_invalid:
+        return HARD_BLOCK("missing/invalid artifact set")
+
+    if sha256_hex(artifacts.backup_file_bytes) != artifacts.run_start_backup_hash:
+        return HARD_BLOCK("backup hash mismatch")
+
+    if compute_staged_plan_hash(artifacts.staged_write_plan) != artifacts.staged_write_plan_hash:
+        return HARD_BLOCK("staged write plan hash mismatch")
+
+    probe = probe_workbook_targets(
+        workbook=current_master_workbook,
+        staged_plan=artifacts.staged_write_plan
+    )
+
+    if probe.any == mismatch_unknown:
+        return HARD_BLOCK("unknown workbook state")
+
+    if probe.all == matches_pre_write:
+        if artifacts.write_phase_status in {not_started, uncertain_not_committed}:
+            return SAFE_REAPPLY_STAGED_WRITES
+        return HARD_BLOCK("metadata/probe contradiction: expected uncommitted write status")
+
+    if probe.all == matches_post_write:
+        if artifacts.write_phase_status != committed:
+            return HARD_BLOCK("metadata/probe contradiction: expected committed write status")
+
+        print_check = evaluate_print_idempotency(artifacts)
+        if print_check == inconsistent:
+            return HARD_BLOCK("print evidence mismatch")
+
+        move_check = evaluate_mail_move_idempotency(artifacts)
+        if move_check == inconsistent:
+            return HARD_BLOCK("mail-move evidence mismatch")
+
+        return SAFE_RESUME
+
+    return HARD_BLOCK("mixed target states require manual recovery")
+```
+
+Helper reference:
+```text
+function compute_staged_plan_hash(plan):
+    canonical_bytes = canonical_serialize_staged_plan(
+        plan,
+        key_order="lexicographic_asc",
+        line_endings="lf",
+        encoding="utf-8",
+        operation_order=("mail_iteration_order", "operation_index_within_mail")
+    )
+    return sha256_hex(canonical_bytes)
+```
+
+### Deterministic rule aggregation contract (shared, normative)
+Rule outcomes must be aggregated in a deterministic way across shared core rules and workflow-specific rules.
+
+#### Execution order
+1. Run shared core rules in ascending `rule_id` lexical order.
+2. Run workflow-specific standard rules in ascending `rule_id` lexical order.
+3. Run workflow-specific exception rules in ascending `rule_id` lexical order.
+4. Persist `applied_rule_ids` exactly in execution order.
+
+#### Allowed per-rule outcomes
+- `pass`
+- `warning`
+- `hard_block`
+
+Any unknown outcome value is a startup hard failure for that run.
+
+#### Aggregation precedence
+Final decision precedence is strict:
+1. Any `hard_block` present => final decision `hard_block`.
+2. Else any `warning` present => final decision `warning`.
+3. Else => final decision `pass`.
+
+#### Discrepancy merge semantics
+- Deduplication key: `(discrepancy_code, subject_scope, target_ref)`.
+- If duplicates exist, keep the first by execution order and append later emitting `rule_id`s to `source_rule_ids`.
+- Final discrepancy list must be sorted by:
+  1) severity (`hard_block` before `warning`), then
+  2) first-emitting rule execution order, then
+  3) discrepancy code lexical order.
+
+#### Aggregation pseudocode
+```text
+function aggregate_rule_results(rule_results):
+    applied_rule_ids = []
+    discrepancies = OrderedMap()  # key=(code, scope, target_ref)
+    seen_warning = false
+    seen_hard_block = false
+
+    for result in rule_results_in_execution_order:
+        applied_rule_ids.append(result.rule_id)
+        if result.outcome == warning:
+            seen_warning = true
+        if result.outcome == hard_block:
+            seen_hard_block = true
+
+        for d in result.discrepancies:
+            key = (d.code, d.subject_scope, d.target_ref)
+            if key not in discrepancies:
+                discrepancies[key] = d.with_source_rule_ids([result.rule_id])
+            else:
+                discrepancies[key].source_rule_ids.append(result.rule_id)
+
+    final_decision = hard_block if seen_hard_block else warning if seen_warning else pass
+    return aggregated_payload(applied_rule_ids, sort_discrepancies(discrepancies.values()), final_decision)
+```
+
+#### Worked examples
+1. Core warning + workflow pass => final `warning`.
+2. Core warning + workflow hard_block => final `hard_block` and no write/print/mail-move.
+
+### Deterministic workflow selection gaps (shared, normative closure)
+The following selection/disambiguation rules are mandatory to avoid implementation drift.
+
+#### 1) Export append/skip candidate resolution
+When export workflow finds multiple plausible workbook targets for update/append decisions, apply tie-break keys in order:
+1. exact file-number canonical match count (higher first)
+2. exact amendment canonical match count (higher first)
+3. earliest row index (ascending)
+4. stable candidate id (lexicographically smallest)
+
+If still tied after all keys: `hard_block` with discrepancy code `export_candidate_tie_after_full_tiebreak`.
+
+#### 2) Import candidate-row tie scenarios
+After 40%-80% validation, if more than one candidate row remains:
+1. prefer row with earliest row index
+2. if tied on row index (logical duplicates), prefer candidate with greatest blank-field compatibility for required target columns
+3. if still tied, choose stable candidate id (lexicographically smallest)
+
+If fully tied: `hard_block` with discrepancy code `import_candidate_tie_after_full_tiebreak`.
+
+#### 3) Attachment-to-document-type disambiguation
+If multiple attachments map to the same required class (for example two PI candidates):
+1. prefer strongest deterministic filename pattern score
+2. if tie, prefer higher clause-extraction confidence
+3. if tie, prefer earliest attachment order in message metadata
+4. if tie, stable filename lexical order
+
+If still tied and choosing one would change downstream writes: `hard_block` with discrepancy code `attachment_classification_ambiguous`.
+
+#### 4) OCR fallback acceptance thresholds
+For scanned/hybrid extraction fallback:
+- If required fields are extracted with confidence meeting workflow thresholds, continue.
+- If any required field is missing or below threshold, outcome is `hard_block`.
+- Warning-only continuation is allowed only when all required fields pass and only non-required fields are low confidence.
+
+Required discrepancy codes:
+- `ocr_required_field_below_threshold`
+- `ocr_required_field_missing`
+- `ocr_non_required_field_low_confidence`
+
+#### Required report fields for all deterministic selections
+Mail-level reports must include:
+- evaluated candidate count
+- tie-break keys and values per candidate
+- selected candidate id (or null for hard-block)
+- rejection reasons per non-selected candidate
+- final selection decision reason/code
+
+### Workbook write failure strategy (shared, normative)
+Because Excel desktop adapters may fail mid-apply, write-capable workflows must use the following deterministic failure playbook.
+
+### Workbook lock/contention handling protocol (shared, normative)
+All write-capable workflows must execute this preflight before `write_phase_status=prevalidating_targets`:
+1. workbook existence + write permission check
+2. conflicting-open session detection
+3. adapter health check (open/save capability)
+4. persisted preflight evidence in run metadata
+
+If any check fails, emit discrepancy and stop with no workbook mutation.
+
+#### Contention decision table
+| Condition | Retry? | Discrepancy code | Write phase status |
+|---|---|---|---|
+| workbook locked by another actor | no | `workbook_lock_conflict` | `hard_blocked_no_write` |
+| workbook opened read-only | no | `workbook_open_readonly` | `hard_blocked_no_write` |
+| adapter unavailable at startup | yes (max 3 attempts) | `excel_adapter_unavailable` | `hard_blocked_no_write` |
+| save conflict during apply | no | `workbook_save_conflict` | `uncertain_not_committed` |
+
+#### Failure decision table
+| Failure point | Required write state | Same-run action | Next-run recovery eligibility |
+|---|---|---|---|
+| target pre-validation fails | `hard_blocked_no_write` | stop; zero writes | new run allowed without recovery resume |
+| first write throws before save | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+| post-write probe mismatch | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+| save failure after successful apply | `uncertain_not_committed` | stop; zero downstream phases | recovery matrix required |
+
+#### Rollback policy
+- No in-memory rollback is trusted as proof of safety.
+- No automatic same-run backup restore is allowed.
+- The only permitted post-failure path is persisted uncertain state + recovery gate evaluation in a subsequent run.
+- Manual/operator backup restoration remains an out-of-band recovery operation and must be recorded before rerun.
+
+### Canonical report field set for downstream consumers (shared, normative)
+Run-level reports and mail-level reports must include these required fields:
+
+Run-level:
+- `report_schema_version`
+- `run_id`, `workflow_id`
+- `rule_pack_id`, `rule_pack_version`
+- `mail_iteration_order`, `print_group_order`
+- `write_phase_status`, `print_phase_status`, `mail_move_phase_status`
+- `hash_algorithm`, `run_start_backup_hash`, `staged_write_plan_hash`
+
+Mail-level:
+- `report_schema_version`
+- `run_id`, `mail_id`, `workflow_id`
+- `rule_pack_id`, `rule_pack_version`
+- `applied_rule_ids`, `final_decision`
+- `discrepancies`
+- `saved_documents`
+- `staged_write_operations`
+- `print_group_id` (if eligible)
+- `mail_move_operation_id` (if eligible)
+
+## Export LC/SC intake
+
+### Inputs
+- Outlook folder: `working` after operator triage from `temp-export`; snapshot all messages in the folder when the CLI is triggered
+- ERP report: `rptDateWiseLCRegister`
+- Attachments: LC/SC PDFs and PI PDFs
+
+### Deterministic checks
+- parse subject into document type, LC/SC end sequence, buyer, and optional suffix
+- extract all body file numbers matching `P/<yy>/<nnnn>`
+- validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
+- define LC/SC family consistency using LC/SC number, normalized buyer, and LC/SC date
+- canonical row selection follows ERP row order
+- the first occurrence row is the canonical row for that file number/family context
+- canonical row fields drive folder path construction, workbook mapping, and reporting metadata
+- duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen
+- hard-block if the extracted file numbers do not resolve to the same LC/SC family; any partial family match is a hard block
+- normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
+- hard-block if normalized subject buyer and LC/SC number do not exactly match ERP-derived values
+- identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
+
+Example (canonical selection): if two ERP rows are true-equivalent for `P/26/0042` and appear as row 118 then row 241, row 118 remains canonical and its fields are used for folder pathing, workbook mapping, and reporting metadata.
+
+### Workbook mapping
+Use ERP fields to populate:
+- `Name of Buyers` ← `Buyer Name`
+- `L/C Issuing Bank` ← `Notify Bank`
+- `L/C & S/C No.` ← `LC No.`
+- `LC Issue Date` ← `LC DT.`
+- `Amount` (column 6, Export LC/SC field) ← `Current LC Value`
+- `Shipment Date` ← `Ship. DT.`
+- `Expiry Date` ← `Expiry DT.`
+- `Quantity of Fabrics (Yds/Mtr)` ← `LC Qty`
+- `L/C Amnd No.` ← `Amd No`
+- `L/C Amnd Date` ← `Amd DT`
+- `Lien Bank` ← `Nego Bank`
+- `Master L/C No.` ← `Master LC No.`
+- `Master L/C Issue Dt.` ← `M.L/C Date`
+- `Commercial File No.` ← `File No.`
+
+Note: the master workbook intentionally contains duplicate `Amount` headers. The export workflow must write only to column 6. Column 22 `Amount` is reserved for Import LC (Back-to-Back) workflow writes.
+
+### No-write rules
+- subject mismatch
+- any extracted file number is missing its required ERP row
+- any partial family match across LC/SC number, normalized buyer, and LC/SC date
+- duplicate file number already present when workflow expects skip
+- ambiguous document identity not resolved by rules
+- any incomplete validation needed for append/skip decision
+
+### Batch execution behavior
+- blocked emails remain in `working`
+- successfully processed export-team emails move to `UD and LC` only after the batch workbook-write and batch print phases finish
+- print batches are built from successful mails in the active run snapshot, using only newly saved PDFs
+
+## UD / IP / EXP processing
+
+During the initial live-deployment phase, any mismatch, unknown exception, or incomplete rule condition should hard-block with a comprehensive report rather than route to human review.
+
+### Inputs
+- Outlook folder: `working`; snapshot all messages in the folder when the CLI is triggered
+- PDF attachments for UD, EXP, and/or IP
+- Existing master workbook rows for the same LC/SC family
+
+### Shared-column behavior
+- Column `UD No. & IP No.` stores UD/EXP/IP values together.
+- UD entries have no prefix.
+- EXP entries use `EXP: ` prefix.
+- IP entries use `IP: ` prefix.
+- When both EXP and IP exist, EXP must be listed before IP.
+- Multiple entries are line-break separated.
+
+### UD allocation logic
+- extract UD number, date, LC/SC number, quantity, quantity unit, and relevant values
+- find candidate rows for the LC/SC family
+- select the first occurrence of each required row value, even when combinations are non-sequential
+- maintain a multiset/bag of remaining values so duplicates are handled correctly
+- write UD number to matched rows only if quantity rules are satisfied
+- ignore excess quantity only when excess is at least 50 yards/meters; otherwise hard-block
+
+#### UD row-combination candidate scoring and tie-break order (normative)
+When more than one valid row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
+
+1. **Primary key — workbook row index sequence (ascending)**
+   - Compare combinations lexicographically by sorted workbook row indexes.
+   - Prefer the combination whose first differing row index is smaller.
+2. **Secondary key — amendment recency (older first)**
+   - For each combination, derive an amendment recency tuple from matched rows:
+     - normalized `L/C Amnd Date` ascending (blank treated as oldest)
+     - then numeric `L/C Amnd No.` ascending (blank treated as `0`)
+   - Prefer the combination with the lexicographically smaller recency tuple.
+3. **Tertiary key — blank-field priority (maximize write safety)**
+   - Prefer the combination with the higher count of rows where all UD target cells for this write are blank at pre-write validation.
+   - If still tied, prefer the combination with fewer non-target populated optional cells (minimize risk of semantic conflict).
+4. **Quaternary key — stable candidate id**
+   - Build `candidate_id` as joined sorted row indexes (example: `17-22-25`).
+   - Select the lexicographically smallest `candidate_id`.
+
+#### Equal-score candidate behavior (normative)
+- If two or more candidate combinations remain exactly tied after all keys above, do **not** select arbitrarily.
+- Mark the mail outcome as `hard_block`.
+- Emit discrepancy reason `ud_candidate_tie_after_full_tiebreak`.
+- Include full candidate comparison details in the mail report so the operator can resolve data ambiguity offline.
+
+#### Required UD selection-report fields (normative)
+For every mail that reaches UD allocation, the mail-level JSON report must include:
+- `ud_selection.required_quantity`
+- `ud_selection.quantity_unit`
+- `ud_selection.candidate_count`
+- `ud_selection.candidates[]` with:
+  - `candidate_id`
+  - `row_indexes` (ascending)
+  - `matched_quantities`
+  - `score_keys` object containing:
+    - `row_index_key`
+    - `amendment_recency_key`
+    - `blank_field_priority_key`
+    - `stable_candidate_id_key`
+  - `prewrite_blank_targets_count`
+  - `prewrite_nonblank_optional_count`
+  - `selected` (boolean)
+  - `rejection_reason` (if not selected)
+- `ud_selection.final_decision` (`selected` or `hard_block_tie`)
+- `ud_selection.final_decision_reason`
+
+#### Worked example (duplicated quantities + non-sequential matches)
+UD extracted quantity = `3000 YDS`.
+Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
+- row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
+- row 14 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
+- row 19 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+- row 27 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+
+Valid quantity combinations:
+- Candidate A: rows `[11, 19]` = `1000 + 2000`
+- Candidate B: rows `[14, 19]` = `1000 + 2000`
+- Candidate C: rows `[11, 27]` = `1000 + 2000`
+- Candidate D: rows `[14, 27]` = `1000 + 2000`
+
+Selection:
+1. Row-index key prefers candidates starting with row `11` over row `14` → keep A/C.
+2. Amendment recency ties between A and C (same amendment metadata pattern).
+3. Blank-field priority evaluated; if equal, continue.
+4. Stable `candidate_id` tie-break: `11-19` < `11-27` → select Candidate A.
+
+Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
+
+### IP / EXP rules
+- no amendment model
+- each document is newly issued against a specific LC/SC or amendment
+- when multiple IP/EXP docs appear in one mail, their total value and quantity should match LC total unless a future documented exception applies
+- dates must be written line-by-line aligned with their corresponding numbers
+
+## Import / BTB LC processing
+
+### Inputs
+- Outlook folder: `working` after operator triage from `temp-import`; snapshot all messages in the folder when the CLI is triggered
+- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list stored in code
+
+### Extraction targets
+- BTB LC number
+- BTB LC date
+- BTB LC value
+- yarn quantity from PI
+- related export LC number from clause text
+
+### Candidate row rules
+- export LC matches related export LC
+- `UP No.` blank
+- BTB LC target field blank
+- choose the first row where BTB LC value is between 40% and 80% of export LC value
+- one import LC maps to one row only
+
+### Batch execution behavior
+- blocked emails remain in `working`
+- successfully processed import-team emails move to `Import` only after the batch workbook-write and batch print phases finish
+
+## Bangladesh Bank dashboard verification
+
+### Candidate filters
+Rows where:
+- `UP No.` is blank
+- UD value exists
+- dashboard field is blank, not `OK`, or not `OK (Kgs)`
+
+### Verification result values
+- `OK` when quantity matches LC Qty and remaining fields are consistent
+- `OK (Kgs)` when quantity mismatches LC Qty but matches Net Weight and remaining fields are consistent
+- otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
+
+## Printing
+- only newly saved PDFs are printed
+- print groups are organized by originating mail from the active run snapshot
+- group order follows master-workbook row sequence across mail groups
+- within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
+- insert exactly one blank page between consecutive mail groups
+- persist final print group order in run JSON metadata
+- any print failure must be reported with retry/review metadata
+
+## Rule-pack loading contract (shared, normative)
+To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.
+
+### Required package layout
+- Shared core rules: `project/rules/core/`
+- Workflow rules: `project/rules/workflows/<workflow_id>/`
+- Optional exceptions: `project/rules/workflows/<workflow_id>/exceptions/`
+
+### Required module exports
+Every loadable rule-pack module must export:
+- `RULE_PACK_ID` (non-empty string)
+- `RULE_PACK_VERSION` (semantic version string)
+- `RULE_DEFINITIONS` (ordered sequence of rule descriptors)
+
+Each rule descriptor must provide:
+- `rule_id` (stable string)
+- `stage` (`core`, `workflow_standard`, or `workflow_exception`)
+- deterministic callable/entrypoint
+
+### Loader behavior
+1. Resolve active `workflow_id`.
+2. Load shared core rules from `project.rules.core`.
+3. Load workflow rules from `project.rules.workflows.<workflow_id>`.
+4. Load exceptions from `project.rules.workflows.<workflow_id>.exceptions` when present.
+5. Validate that all `rule_id` values are unique across the resolved set.
+6. Sort execution order according to deterministic aggregation contract.
+7. Persist `rule_pack_id`, `rule_pack_version`, and ordered `applied_rule_ids`.
+
+### Startup hard-fail cases
+Startup must hard-fail if any of these occur:
+- missing required exports
+- empty or invalid semantic version
+- duplicate `RULE_PACK_ID` or duplicate `rule_id`
+- unknown rule `stage`
+- import/discovery error for required core/workflow modules
+
+## Excel transaction procedure (write-capable workflows, normative)
+Write-capable workflows must apply the following desktop Excel procedure.
+
+1. **Session preflight**
+   - Confirm workbook path exists and is writable.
+   - Acquire exclusive write intent lock (process-level + run metadata lock).
+   - Record `excel_session_id`, host, pid, and timestamp in run metadata.
+
+2. **Open + verify baseline**
+   - Open workbook in one controlled session.
+   - Validate sheet/header expectations and staged target resolvability.
+   - If baseline validation fails, set `write_phase_status=hard_blocked_no_write` and close without saving.
+
+3. **Apply staged writes**
+   - Transition status to `applying`.
+   - Apply staged operations strictly in deterministic order.
+   - Capture per-target operation receipts in memory for probe correlation.
+
+4. **Probe + save gate**
+   - Run per-target post-write probes.
+   - If any probe mismatches expected post-write values, set `write_phase_status=uncertain_not_committed`, do not create commit marker, close session, and hard-block recovery-required state.
+   - If probes pass, save workbook in the active session.
+
+5. **Commit marker creation**
+   - Only after save success + probe success, persist commit marker and set `write_phase_status=committed`.
+
+6. **Close + release lock**
+   - Close workbook session and release lock.
+   - Persist close outcome and lock-release evidence.
+
+### Save failure behavior
+- If save fails after any write attempt, state is `uncertain_not_committed`.
+- No print or mail move is allowed.
+- Next write-capable run must execute recovery decision matrix before any new writes.
+
+### Prohibited behavior
+- Multiple concurrent write sessions to the same yearly workbook.
+- Commit marker creation before successful post-write probes + save.
+- Silent retry loops that mutate workbook after uncertain state without recovery gate.
+
+## Outlook folder identity and resolution contract (shared, normative)
+Folder routing must use stable identifiers, not display names alone.
+
+### Folder mapping requirements
+Each workflow configuration must declare:
+- `source_working_folder_entry_id`
+- destination folder entry id(s) per success path (for example `destination_success_entry_id`)
+- optional display-name hints for diagnostics only
+
+### Resolution behavior
+1. Resolve folders by EntryID first.
+2. If EntryID resolution fails and policy allows fallback, resolve by exact configured display name and record fallback mode.
+3. If multiple folders share the same display name, hard-fail startup.
+4. If any required folder is missing/inaccessible, hard-fail startup.
+
+### Audit fields
+Run metadata must include resolved folder identity fields:
+- `resolved_source_folder_entry_id`
+- `resolved_destination_folder_entry_id`
+- `folder_resolution_mode` (`entry_id` or `display_name_fallback`)
+
+Mail-level move records must include source/destination EntryIDs and move operation id.
+
+## Report schema reference
+Versioned JSON schema definitions for run-level, mail-level, discrepancy, and recovery/idempotency artifacts are defined in `docs/report-schemas.md` and are normative for all workflow outputs.
+
+### Import workflow keyword-governance contract (normative)
+For `import_btb_lc`, the fabric-subject keyword list must be managed as versioned rule data rather than ad hoc constants.
+
+- Canonical source path: `rules/import_btb_lc/keywords.yaml`.
+- The file must contain:
+  - `revision` (string, required)
+  - `include_keywords` (array of case-insensitive substrings, required)
+  - `exclude_keywords` (array, optional; evaluated after include match)
+- Matching policy:
+  1. subject is normalized by trim + whitespace collapse + ASCII case-folding to lowercase
+  2. include pass requires at least one include keyword hit
+  3. any exclude hit after include pass makes the mail ineligible
+- `mail_report.import_keyword_revision` must equal `revision` from the loaded keyword file for every processed import mail.
+- Loader failures (missing file, invalid schema, empty include list) are startup hard failures for `import_btb_lc`.
