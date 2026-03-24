@@ -77,7 +77,8 @@ The architecture must optimize for:
     - row-sequence ordering
     - retries and review handling
 13. **Configuration and secrets layer**
-    - local config files
+    - local config files for operator/environment settings
+    - in-code versioned constants for phase 1 deterministic rule/keyword lists
     - credential storage strategy
     - environment-specific paths
 14. **Future AI extension seam**
@@ -282,6 +283,28 @@ This allows deterministic review of why a value was accepted or blocked.
 - Import files live under the designated import root organized by year.
 - JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
 - Run-level JSON metadata must persist deterministic `mail_iteration_order` (timezone-normalized `ReceivedTime` + `EntryID`) and final `print_group_order` (mail-group ids ranked by workbook row sequence).
+- Run-level and mail-level reports must include revision stamps for every active deterministic list/rule set used during evaluation (for example `import_subject_keyword_list_version`).
+
+## Configuration layer policy (phase 1)
+
+### Deterministic list location
+- Workflow keyword/rule lists that directly influence write/no-write decisions (including import relevance keywords) must live in **in-repo Python constants**, not operator-editable external config files, in phase 1.
+- Rationale: keeps behavior deterministic, code-reviewed, and tied to explicit release artifacts.
+
+### Ownership and update workflow
+- **Owner**: automation engineering maintains list definitions in code.
+- **Approver**: at least one business-domain reviewer (customs/commercial process owner or delegate) must approve list-change pull requests before merge.
+- **Review minimum**: one technical reviewer + one business reviewer.
+- **Release boundary**: list changes become effective only after merge and tagged deployment/package release; no ad hoc runtime edits on operator machines.
+
+### Version stamping requirements
+- Each deterministic list/rule set must expose a stable revision identifier (for example semantic version or date+sequence token).
+- The orchestrator must capture the active revision identifier in run metadata and discrepancy/report outputs.
+- Report consumers must be able to reconstruct which exact list revision produced each relevance or validation decision.
+
+### Missing/malformed configuration behavior
+- If required deterministic list constants cannot be loaded, are empty when marked mandatory, or fail schema/shape validation at startup, the CLI must terminate with a **startup hard failure** before snapshot side effects.
+- Phase 1 must not silently fall back to permissive defaults for missing/malformed decision-driving lists.
 
 ## 10. Windows deployment and operations
 - Package and manage the environment with `uv`.
