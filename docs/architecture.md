@@ -405,3 +405,114 @@ The architecture should continue to be split across:
 - `docs/domain-rules.md`
 - `PLANS.md`
 - later implementation specs/runbooks under `docs/` as the codebase grows
+
+## 15. Canonical entity schemas and stable identifiers (normative)
+This section defines minimum schema requirements for phase 1 records so independently implemented modules remain interoperable.
+
+### `ProcessingJob` (run-level)
+Required fields:
+- `run_id` (string): stable run identifier, format `run-<UTC ISO basic timestamp>-<workflow_id>-<8hex>`.
+- `workflow_id` (string): one of `export_lc_sc`, `ud_ip_exp`, `import_btb_lc`, `bb_dashboard_verification`.
+- `started_at_utc` (string): ISO-8601 UTC timestamp.
+- `operator_id` (string): immutable operator identity captured at run start.
+- `mail_iteration_order` (array): ordered list of `mail_id`.
+- `hash_algorithm` (string): must be `sha256`.
+- `run_start_backup_hash` (string): lowercase hex SHA-256 digest.
+- `staged_write_plan_hash` (string|null): lowercase hex SHA-256 digest when write-capable workflow stages writes.
+- `write_phase_status` (string): workflow write phase checkpoint.
+- `print_phase_status` (string): workflow print checkpoint.
+- `mail_move_phase_status` (string): workflow mail-move checkpoint.
+
+### `EmailMessage` (mail-level)
+Required fields:
+- `mail_id` (string): stable mail identifier derived from Outlook `EntryID`.
+- `entry_id` (string): raw Outlook `EntryID`.
+- `received_time_utc` (string): normalized ISO-8601 UTC timestamp.
+- `received_time_workflow_tz` (string): timestamp in configured workflow timezone.
+- `subject_raw` (string): original subject.
+- `sender_address` (string): canonical sender SMTP address when available.
+- `snapshot_index` (integer): position from deterministic run snapshot ordering.
+
+### `SavedDocument`
+Required fields:
+- `saved_document_id` (string): stable id `sha256(mail_id + "|" + normalized_filename + "|" + destination_path)`.
+- `mail_id` (string): parent mail id.
+- `attachment_name` (string): original attachment filename.
+- `normalized_filename` (string): normalized filename for dedupe comparisons.
+- `destination_path` (string): full output path.
+- `file_sha256` (string): lowercase hex SHA-256 of saved bytes.
+- `save_decision` (string): `saved_new` or `skipped_duplicate_filename`.
+
+### `WriteOperation`
+Required fields:
+- `write_operation_id` (string): stable id `sha256(run_id + "|" + mail_id + "|" + operation_index_within_mail + "|" + sheet_name + "|" + row_index + "|" + column_key)`.
+- `run_id`, `mail_id` (string): lineage keys.
+- `operation_index_within_mail` (integer): 0-based deterministic operation index.
+- `sheet_name` (string), `row_index` (integer), `column_key` (string): cell target.
+- `expected_pre_write_value` (string|number|null): precondition.
+- `expected_post_write_value` (string|number|null): intended write value.
+- `row_eligibility_checks` (array): explicit predicates used during prevalidation.
+
+### `PrintBatch`
+Required fields:
+- `print_group_id` (string): stable id `sha256(run_id + "|" + mail_id + "|" + print_group_index)`.
+- `run_id`, `mail_id` (string): lineage keys.
+- `print_group_index` (integer): deterministic rank in `print_group_order`.
+- `document_path_hashes` (array): SHA-256 hashes for print payload documents in group order.
+- `completion_marker_id` (string): `sha256(run_id + "|" + mail_id + "|" + print_group_index + "|" + joined_document_hashes)`.
+
+### `MailMoveOperation`
+Required fields:
+- `mail_move_operation_id` (string): `sha256(run_id + "|" + entry_id + "|" + destination_folder)`.
+- `run_id`, `mail_id`, `entry_id` (string): lineage keys.
+- `source_folder`, `destination_folder` (string): expected move path.
+- `moved_at_utc` (string|null): completion evidence timestamp.
+- `move_status` (string): `pending`, `moved`, or `inconsistent`.
+
+## 16. Report schema/versioning contract (normative)
+All JSON report payloads must include `report_schema_version` using semantic versioning:
+- Patch: backward-compatible additive fields.
+- Minor: backward-compatible structural additions.
+- Major: breaking changes requiring consumer upgrade.
+
+### Required top-level run report object
+```json
+{
+  "report_schema_version": "1.0.0",
+  "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
+  "workflow_id": "export_lc_sc",
+  "rule_pack_id": "export_lc_sc.default",
+  "rule_pack_version": "1.4.0",
+  "started_at_utc": "2026-03-24T09:30:00Z",
+  "mail_iteration_order": ["mail-01", "mail-02"],
+  "print_group_order": ["grp-mail-02", "grp-mail-01"],
+  "write_phase_status": "committed",
+  "print_phase_status": "completed",
+  "mail_move_phase_status": "completed",
+  "hash_algorithm": "sha256",
+  "run_start_backup_hash": "9e1f...",
+  "staged_write_plan_hash": "3ac8..."
+}
+```
+
+### Required top-level mail report object
+```json
+{
+  "report_schema_version": "1.0.0",
+  "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
+  "mail_id": "mail-01",
+  "workflow_id": "export_lc_sc",
+  "rule_pack_id": "export_lc_sc.default",
+  "rule_pack_version": "1.4.0",
+  "applied_rule_ids": ["core.subject.buyer_lc_match.v1"],
+  "final_decision": "warning",
+  "discrepancies": [],
+  "saved_documents": [],
+  "staged_write_operations": [],
+  "print_group_id": "grp-mail-01",
+  "mail_move_operation_id": "move-01"
+}
+```
+
+Canonical serialization for any hash/signature-relevant report variant must use UTF-8, LF line endings, deterministic key order (lexicographic), and deterministic array ordering where identities are ordered.
+Implementation should keep schema definitions in `project/reporting/schemas/` so report writers and validators share one source of truth.
