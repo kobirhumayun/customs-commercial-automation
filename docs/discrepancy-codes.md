@@ -37,6 +37,8 @@ Every discrepancy payload should include:
 | `workbook_open_readonly` | `hard_block` | shared | Workbook opened read-only when write required. |
 | `excel_adapter_unavailable` | `hard_block` | shared | Excel adapter unavailable after retry policy. |
 | `workbook_save_conflict` | `hard_block` | shared | Save conflict during/after write application. |
+| `invalid_phase_state_transition` | `hard_block` | shared | Attempted workflow phase-state transition outside allowed state machine. |
+| `workbook_header_mapping_invalid` | `hard_block` | shared | Required workbook header missing/duplicated/ambiguous for canonical mapping. |
 
 ### Export / import candidate ambiguity
 | Code | Severity | Scope | Description |

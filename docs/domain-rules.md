@@ -159,6 +159,29 @@ Match rule: exact canonical equality.
 - IP example: `IP-LC-0043-VINTAGE DENIM STUDIO LTD`
 - EXP example: `[Invoice]-EXP [Extension]`
 
+## OCR confidence thresholds and fallback policy (normative)
+Required-field OCR thresholds are explicit and workflow-bound:
+
+| workflow/document class | required field | min confidence |
+|---|---|---:|
+| export LC/SC docs | LC/SC number | 0.98 |
+| export LC/SC docs | PI reference | 0.95 |
+| UD docs | UD number | 0.97 |
+| IP docs | IP number | 0.97 |
+| EXP docs | EXP number | 0.97 |
+| import BTB LC docs | BTB LC number | 0.98 |
+| import BTB LC docs | BTB LC value | 0.96 |
+
+Extraction order is mandatory:
+1. text-layer PDF parse
+2. OCR pass for scanned/hybrid pages
+3. table extraction fallback for required tabular fields
+
+Decision rules:
+- Any required field below threshold emits `ocr_required_field_below_threshold` and hard-blocks.
+- Any missing required field emits `ocr_required_field_missing` and hard-blocks.
+- Non-required low-confidence fields may emit `ocr_non_required_field_low_confidence` warning if all required fields pass.
+
 ## ERP normalization rules
 - ERP report is `rptDateWiseLCRegister`.
 - Headers are read from row 2 of sheet 1.
@@ -180,6 +203,28 @@ Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` a
 - If the same file number exists, skip that file.
 - If required, first attempt to locate an existing row for the same file/amendment to avoid duplicate insertion.
 - Operational ordering is row sequence and drives staged write ordering, reporting, and print ordering.
+
+### Workbook mapping contract (normative)
+Implementations must resolve workbook targets from exact row-2 header text on sheet 1 and then stage writes using canonical `column_key` names. Header aliases are allowed only where explicitly listed.
+
+#### Mapping matrix — shared/core fields
+| column_key | Required header text (exact) | Allowed aliases | Source | Write mode | Pre-write constraint |
+|---|---|---|---|---|---|
+| `file_no` | `File No.` | `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
+| `lc_sc_no` | `L/C No.` | `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
+| `buyer_name` | `Buyer Name` | `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
+| `ud_ip_shared` | `UD No. & IP No.` | none | UD/IP/EXP extraction and ordering rules | `update_if_blank_or_append_multiline` | existing value may be preserved and line-extended only by deterministic rule pack |
+| `up_no` | `UP No.` | `UP` | workflow filters only in phase 1 | `never_write` (except future approved workflow) | n/a |
+
+#### Mapping matrix — workflow-specific minimum fields
+| workflow_id | column_key | Required header text (exact) | Write mode | Required preconditions |
+|---|---|---|---|---|
+| `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
+| `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
+| `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
+| `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
+
+If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
 
 ## Workbook preservation rules
 These must remain exactly as-is after writes:
@@ -278,20 +323,18 @@ The dashboard column is verification-only and should not be used to drive other 
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against the subject keyword list stored in code constants (phase 1), not operator-editable external files.
-- The import keyword constants must be defined in the workflow module path `project/workflows/import_btb_lc/keywords.py` (module import path: `project.workflows.import_btb_lc.keywords`).
-- Required constants in that module:
-  - `IMPORT_SUBJECT_KEYWORDS`: non-empty sequence of non-empty strings used for case-insensitive subject substring checks.
-  - `IMPORT_KEYWORD_REVISION`: revision string for the active keyword list.
-- `IMPORT_KEYWORD_REVISION` format is mandatory: `YYYY-MM-DD.N` where date is zero-padded Gregorian calendar date and `N` is a positive integer sequence (`1`, `2`, ... ) for same-day revisions.
-- The import subject keyword list is owned by automation engineering and requires both technical and business-domain review before merge.
-- Keyword-list updates take effect only through normal code release boundaries (merged change + deployment/package release), never through ad hoc runtime edits.
-- Startup must hard-fail before run snapshot/side effects if `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, empty when mandatory, wrong type/shape, or fails revision-format validation.
-- The active `IMPORT_KEYWORD_REVISION` must be stamped in:
-  - run-level metadata/report payload (for run lineage),
-  - every mail-level report/discrepancy payload (including blocked and warning outcomes),
-  - any relevance-decision audit record tied to import-mail processing.
-- Stamped field name should be stable across reports: `import_keyword_revision`.
+- Fabric-related import emails are identified by case-insensitive substring matching against a versioned rules data file: `rules/import_btb_lc/keywords.yaml`.
+- Required keys in `keywords.yaml`:
+  - `revision` (string)
+  - `include_keywords` (non-empty array of non-empty strings)
+  - `exclude_keywords` (array, optional)
+- Subject matching sequence:
+  1. normalize subject with trim + whitespace collapse + lowercase
+  2. require at least one include-keyword hit
+  3. reject if any exclude-keyword hit is present
+- Startup must hard-fail before run snapshot/side effects if file is missing, malformed, or include list is empty.
+- The active `revision` value must be stamped as `import_keyword_revision` in run and mail reports.
+- Keyword-list changes must follow code-review and release boundaries; no ad hoc runtime edits.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
