@@ -205,6 +205,73 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - write UD number to matched rows only if quantity rules are satisfied
 - ignore excess quantity only when excess is at least 50 yards/meters; otherwise hard-block
 
+#### UD row-combination candidate scoring and tie-break order (normative)
+When more than one valid row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
+
+1. **Primary key — workbook row index sequence (ascending)**
+   - Compare combinations lexicographically by sorted workbook row indexes.
+   - Prefer the combination whose first differing row index is smaller.
+2. **Secondary key — amendment recency (older first)**
+   - For each combination, derive an amendment recency tuple from matched rows:
+     - normalized `L/C Amnd Date` ascending (blank treated as oldest)
+     - then numeric `L/C Amnd No.` ascending (blank treated as `0`)
+   - Prefer the combination with the lexicographically smaller recency tuple.
+3. **Tertiary key — blank-field priority (maximize write safety)**
+   - Prefer the combination with the higher count of rows where all UD target cells for this write are blank at pre-write validation.
+   - If still tied, prefer the combination with fewer non-target populated optional cells (minimize risk of semantic conflict).
+4. **Quaternary key — stable candidate id**
+   - Build `candidate_id` as joined sorted row indexes (example: `17-22-25`).
+   - Select the lexicographically smallest `candidate_id`.
+
+#### Equal-score candidate behavior (normative)
+- If two or more candidate combinations remain exactly tied after all keys above, do **not** select arbitrarily.
+- Mark the mail outcome as `hard_block`.
+- Emit discrepancy reason `ud_candidate_tie_after_full_tiebreak`.
+- Include full candidate comparison details in the mail report so the operator can resolve data ambiguity offline.
+
+#### Required UD selection-report fields (normative)
+For every mail that reaches UD allocation, the mail-level JSON report must include:
+- `ud_selection.required_quantity`
+- `ud_selection.quantity_unit`
+- `ud_selection.candidate_count`
+- `ud_selection.candidates[]` with:
+  - `candidate_id`
+  - `row_indexes` (ascending)
+  - `matched_quantities`
+  - `score_keys` object containing:
+    - `row_index_key`
+    - `amendment_recency_key`
+    - `blank_field_priority_key`
+    - `stable_candidate_id_key`
+  - `prewrite_blank_targets_count`
+  - `prewrite_nonblank_optional_count`
+  - `selected` (boolean)
+  - `rejection_reason` (if not selected)
+- `ud_selection.final_decision` (`selected` or `hard_block_tie`)
+- `ud_selection.final_decision_reason`
+
+#### Worked example (duplicated quantities + non-sequential matches)
+UD extracted quantity = `3000 YDS`.
+Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
+- row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
+- row 14 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
+- row 19 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+- row 27 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+
+Valid quantity combinations:
+- Candidate A: rows `[11, 19]` = `1000 + 2000`
+- Candidate B: rows `[14, 19]` = `1000 + 2000`
+- Candidate C: rows `[11, 27]` = `1000 + 2000`
+- Candidate D: rows `[14, 27]` = `1000 + 2000`
+
+Selection:
+1. Row-index key prefers candidates starting with row `11` over row `14` → keep A/C.
+2. Amendment recency ties between A and C (same amendment metadata pattern).
+3. Blank-field priority evaluated; if equal, continue.
+4. Stable `candidate_id` tie-break: `11-19` < `11-27` → select Candidate A.
+
+Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
+
 ### IP / EXP rules
 - no amendment model
 - each document is newly issued against a specific LC/SC or amendment
