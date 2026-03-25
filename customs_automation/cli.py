@@ -140,6 +140,7 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
             run_id=run_context.run_id,
             workflow_id=run_context.workflow_id,
             decision=orchestration_result.run_report.final_decision,
+            mail_count=orchestration_result.run_report.mail_count,
             run_state_path=run_state_path,
             run_report_path=run_report_path,
             run_snapshot_path=orchestration_result.run_snapshot_path,

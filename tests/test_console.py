@@ -8,6 +8,7 @@ def test_format_run_summary_contains_core_fields() -> None:
         run_id="run-20260325T120000Z",
         workflow_id="export_lc_sc",
         decision="pass",
+        mail_count=2,
         run_state_path=Path("artifacts/runs/run-1/run_state.json"),
         run_report_path=Path("artifacts/runs/run-1/run_report.json"),
         run_snapshot_path=Path("artifacts/runs/run-1/run_snapshot.json"),
@@ -16,6 +17,7 @@ def test_format_run_summary_contains_core_fields() -> None:
     assert "run_id: run-20260325T120000Z" in output
     assert "workflow: export_lc_sc" in output
     assert "decision: pass" in output
+    assert "mail_count: 2" in output
     assert "run_snapshot.json" in output
     assert "run_state.json" in output
     assert "run_report.json" in output
