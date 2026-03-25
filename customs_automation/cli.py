@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Optional JSON file containing source mail snapshot rows for deterministic local runs.",
         )
+        command_parser.add_argument(
+            "--artifacts-root",
+            type=Path,
+            default=Path("artifacts") / "runs",
+            help="Directory where run artifacts are written (default: artifacts/runs).",
+        )
 
     return parser
 
@@ -66,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         rule_pack_version=workflow_module.RULE_PACK_VERSION,
     )
 
-    run_state_store = RunStateStore()
+    run_state_store = RunStateStore(base_dir=args.artifacts_root)
     run_state_store.write_state(new_run_state_record(run_context))
 
     workflow_exit_code = workflow_module.run(run_context)
