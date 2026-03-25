@@ -4,10 +4,12 @@ import argparse
 from pathlib import Path
 
 from customs_automation.core.console import format_run_summary
+from customs_automation.core.contracts import WritePhaseStatus
 from customs_automation.core.intake import JsonFileIntakeAdapter, StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
-from customs_automation.core.reporting import ReportWriter
+from customs_automation.core.recovery import ProbeClassification, RecoveryOutcome, evaluate_recovery_decision
 from customs_automation.core.recovery_gate import find_blocking_prior_run
+from customs_automation.core.reporting import ReportWriter
 from customs_automation.core.rule_pack import validate_rule_pack_version
 from customs_automation.core.rule_registry import load_rule_registry, validate_rule_ids_registered
 from customs_automation.core.run_state import (
@@ -54,13 +56,39 @@ def build_parser() -> argparse.ArgumentParser:
             help="Directory where run artifacts are written (default: artifacts/runs).",
         )
 
+    recovery_parser = subparsers.add_parser("recovery-check")
+    recovery_parser.add_argument(
+        "--write-phase-status",
+        required=True,
+        choices=[status.value for status in WritePhaseStatus],
+    )
+    recovery_parser.add_argument(
+        "--probe",
+        action="append",
+        required=True,
+        choices=[probe.value for probe in ProbeClassification],
+        help="Repeat per probe classification entry.",
+    )
+    recovery_parser.add_argument("--artifacts-valid", action=argparse.BooleanOptionalAction, default=True)
+    recovery_parser.add_argument("--backup-hash-matches", action=argparse.BooleanOptionalAction, default=True)
+    recovery_parser.add_argument("--staged-plan-hash-valid", action=argparse.BooleanOptionalAction, default=True)
+
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+def _run_recovery_check(args: argparse.Namespace) -> int:
+    outcome, reason = evaluate_recovery_decision(
+        write_phase_status=WritePhaseStatus(args.write_phase_status),
+        probe_classifications=[ProbeClassification(value) for value in args.probe],
+        artifacts_valid=args.artifacts_valid,
+        backup_hash_matches=args.backup_hash_matches,
+        staged_plan_hash_valid=args.staged_plan_hash_valid,
+    )
+    print(f"recovery_outcome={outcome.value} reason={reason.value}")
+    return 0 if outcome != RecoveryOutcome.HARD_BLOCK else 2
 
+
+def _run_workflow_command(args: argparse.Namespace) -> int:
     workflow_module = WORKFLOW_HANDLERS[args.command]
     validate_rule_pack_version(workflow_module.RULE_PACK_VERSION)
     registry = load_rule_registry()
@@ -118,3 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return orchestration_result.exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "recovery-check":
+        return _run_recovery_check(args)
+    return _run_workflow_command(args)

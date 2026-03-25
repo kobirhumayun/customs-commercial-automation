@@ -57,3 +57,29 @@ def test_cli_blocks_when_prior_uncertain_run_exists(tmp_path: Path) -> None:
 
     exit_code = main(["export-lc-sc", "--artifacts-root", str(artifacts_root)])
     assert exit_code == 2
+
+
+def test_recovery_check_returns_success_for_safe_resume() -> None:
+    exit_code = main(
+        [
+            "recovery-check",
+            "--write-phase-status",
+            "committed",
+            "--probe",
+            "matches_post_write",
+        ]
+    )
+    assert exit_code == 0
+
+
+def test_recovery_check_returns_block_for_contradiction() -> None:
+    exit_code = main(
+        [
+            "recovery-check",
+            "--write-phase-status",
+            "not_started",
+            "--probe",
+            "matches_post_write",
+        ]
+    )
+    assert exit_code == 2
