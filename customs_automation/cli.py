@@ -74,10 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     recovery_parser.add_argument("--backup-hash-matches", action=argparse.BooleanOptionalAction, default=True)
     recovery_parser.add_argument("--staged-plan-hash-valid", action=argparse.BooleanOptionalAction, default=True)
 
-    subparsers.add_parser("list-workflows")
+    list_parser = subparsers.add_parser("list-workflows")
+    list_parser.add_argument("--json", action="store_true", dest="as_json")
 
     show_run_parser = subparsers.add_parser("show-run")
     show_run_parser.add_argument("--run-id", required=True)
+    show_run_parser.add_argument("--json", action="store_true", dest="as_json")
     show_run_parser.add_argument(
         "--artifacts-root",
         type=Path,
@@ -111,6 +113,23 @@ def _run_show_run(args: argparse.Namespace) -> int:
     run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
     run_report = json.loads(run_report_path.read_text(encoding="utf-8"))
 
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "run_id": args.run_id,
+                    "workflow_id": run_state.get("workflow_id"),
+                    "write_phase_status": run_state.get("write_phase_status"),
+                    "print_phase_status": run_state.get("print_phase_status"),
+                    "mail_move_phase_status": run_state.get("mail_move_phase_status"),
+                    "mail_count": run_report.get("mail_count"),
+                    "final_decision": run_report.get("final_decision"),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+
     print(
         "Run summary\n"
         f"  run_id: {args.run_id}\n"
@@ -124,12 +143,26 @@ def _run_show_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_list_workflows() -> int:
-    for command, workflow_module in WORKFLOW_HANDLERS.items():
+def _run_list_workflows(args: argparse.Namespace) -> int:
+    rows = [
+        {
+            "command": command,
+            "rule_pack_id": workflow_module.RULE_PACK_ID,
+            "rule_pack_version": workflow_module.RULE_PACK_VERSION,
+            "rule_count": len(workflow_module.APPLIED_RULE_IDS),
+        }
+        for command, workflow_module in WORKFLOW_HANDLERS.items()
+    ]
+
+    if args.as_json:
+        print(json.dumps(rows, sort_keys=True))
+        return 0
+
+    for row in rows:
         print(
-            f"{command} | rule_pack_id={workflow_module.RULE_PACK_ID} "
-            f"version={workflow_module.RULE_PACK_VERSION} "
-            f"rule_count={len(workflow_module.APPLIED_RULE_IDS)}"
+            f"{row["command"]} | rule_pack_id={row["rule_pack_id"]} "
+            f"version={row["rule_pack_version"]} "
+            f"rule_count={row["rule_count"]}"
         )
     return 0
 
@@ -202,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "recovery-check":
         return _run_recovery_check(args)
     if args.command == "list-workflows":
-        return _run_list_workflows()
+        return _run_list_workflows(args)
     if args.command == "show-run":
         return _run_show_run(args)
     return _run_workflow_command(args)
