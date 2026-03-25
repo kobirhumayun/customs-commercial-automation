@@ -8,11 +8,13 @@ from customs_automation.core.intake import IntakeAdapter
 from customs_automation.core.phases import transition_write_phase
 from customs_automation.core.reporting import MailReport, RunReport, build_mail_report, build_run_report
 from customs_automation.core.run_snapshot import build_run_snapshot, write_snapshot
+from customs_automation.core.write_plan import compute_staged_write_plan_hash
 from customs_automation.core.run_state import (
     RunContext,
     RunStateRecord,
     RunStateStore,
     with_mail_iteration_order,
+    with_hash_metadata,
     with_print_group_order,
     with_write_phase_status,
 )
@@ -44,6 +46,12 @@ def execute_workflow_run(
     state = run_state_store.read_state(context.run_id)
     state = with_mail_iteration_order(state, snapshot.ordered_mail_ids)
     state = with_print_group_order(state, snapshot.ordered_mail_ids)
+    state = with_hash_metadata(
+        state,
+        run_start_backup_hash=state.run_start_backup_hash,
+        current_workbook_hash=state.current_workbook_hash,
+        staged_write_plan_hash=compute_staged_write_plan_hash([]),
+    )
 
     write_phase = WritePhaseStatus(state.write_phase_status)
     write_phase = transition_write_phase(write_phase, WritePhaseStatus.PREVALIDATING_TARGETS)

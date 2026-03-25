@@ -5,6 +5,7 @@ from customs_automation.core.contracts import EmailMessage
 from customs_automation.core.intake import StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
 from customs_automation.core.run_state import RunContext, RunStateStore, new_run_state_record
+from customs_automation.core.write_plan import compute_staged_write_plan_hash
 
 
 def test_execute_workflow_run_persists_ordered_mail_ids_and_phase(tmp_path: Path) -> None:
@@ -34,6 +35,7 @@ def test_execute_workflow_run_persists_ordered_mail_ids_and_phase(tmp_path: Path
     assert persisted.mail_iteration_order == ["A", "B"]
     assert persisted.print_group_order == ["A", "B"]
     assert persisted.write_phase_status == "prevalidated"
+    assert persisted.staged_write_plan_hash == compute_staged_write_plan_hash([])
     assert result.run_snapshot_path.name == "run_snapshot.json"
     assert result.run_snapshot_path.exists()
     assert result.run_report.final_decision == "pass"
