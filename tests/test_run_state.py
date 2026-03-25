@@ -6,6 +6,7 @@ from customs_automation.core.run_state import (
     RunStateStore,
     generate_run_id,
     new_run_state_record,
+    with_hash_metadata,
 )
 
 
@@ -30,3 +31,23 @@ def test_run_state_store_writes_json(tmp_path: Path) -> None:
     assert payload["run_id"] == context.run_id
     assert payload["workflow_id"] == context.workflow_id
     assert payload["write_phase_status"] == "not_started"
+    assert payload["hash_algorithm"] == "sha256"
+
+
+def test_with_hash_metadata_updates_hash_fields() -> None:
+    context = RunContext(
+        run_id="run-1",
+        workflow_id="export_lc_sc",
+        rule_pack_id="export_lc_sc.default",
+        rule_pack_version="1.0.0",
+    )
+    updated = with_hash_metadata(
+        new_run_state_record(context),
+        run_start_backup_hash="a" * 64,
+        current_workbook_hash="b" * 64,
+        staged_write_plan_hash="c" * 64,
+    )
+
+    assert updated.run_start_backup_hash == "a" * 64
+    assert updated.current_workbook_hash == "b" * 64
+    assert updated.staged_write_plan_hash == "c" * 64
