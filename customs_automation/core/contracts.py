@@ -62,3 +62,12 @@ class MailOrderRecord:
     received_time_utc: datetime
     received_time_local_iso: str
     order_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class DiscrepancyEntry:
+    """Structured discrepancy payload for report artifacts."""
+
+    code: str
+    severity: Decision
+    message: str

@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from customs_automation.core.contracts import Decision
+from customs_automation.core.contracts import Decision, DiscrepancyEntry
 from customs_automation.core.rule_pack import validate_applied_rule_ids
 
 
@@ -16,6 +16,7 @@ class MailReport:
     rule_pack_version: str
     mail_id: str
     applied_rule_ids: list[str]
+    discrepancies: list[dict]
     final_decision: str
 
 
@@ -26,6 +27,7 @@ class RunReport:
     rule_pack_id: str
     rule_pack_version: str
     applied_rule_ids: list[str]
+    discrepancies: list[dict]
     final_decision: str
 
 
@@ -45,6 +47,17 @@ class ReportWriter:
         return path
 
 
+def _serialize_discrepancies(discrepancies: list[DiscrepancyEntry]) -> list[dict]:
+    return [
+        {
+            "code": discrepancy.code,
+            "severity": discrepancy.severity.value,
+            "message": discrepancy.message,
+        }
+        for discrepancy in discrepancies
+    ]
+
+
 def build_run_report(
     *,
     run_id: str,
@@ -53,14 +66,17 @@ def build_run_report(
     rule_pack_version: str,
     applied_rule_ids: list[str],
     final_decision: Decision,
+    discrepancies: list[DiscrepancyEntry] | None = None,
 ) -> RunReport:
     validate_applied_rule_ids(applied_rule_ids)
+    serialized_discrepancies = _serialize_discrepancies(discrepancies or [])
     return RunReport(
         run_id=run_id,
         workflow_id=workflow_id,
         rule_pack_id=rule_pack_id,
         rule_pack_version=rule_pack_version,
         applied_rule_ids=applied_rule_ids,
+        discrepancies=serialized_discrepancies,
         final_decision=final_decision.value,
     )
 
@@ -74,8 +90,10 @@ def build_mail_report(
     mail_id: str,
     applied_rule_ids: list[str],
     final_decision: Decision,
+    discrepancies: list[DiscrepancyEntry] | None = None,
 ) -> MailReport:
     validate_applied_rule_ids(applied_rule_ids)
+    serialized_discrepancies = _serialize_discrepancies(discrepancies or [])
     return MailReport(
         run_id=run_id,
         workflow_id=workflow_id,
@@ -83,5 +101,6 @@ def build_mail_report(
         rule_pack_version=rule_pack_version,
         mail_id=mail_id,
         applied_rule_ids=applied_rule_ids,
+        discrepancies=serialized_discrepancies,
         final_decision=final_decision.value,
     )
