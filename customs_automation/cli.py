@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             decision=orchestration_result.run_report.final_decision,
             run_state_path=run_state_path,
             run_report_path=run_report_path,
+            run_snapshot_path=orchestration_result.run_snapshot_path,
         )
     )
     return orchestration_result.exit_code

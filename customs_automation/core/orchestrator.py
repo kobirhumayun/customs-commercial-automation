@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from customs_automation.core.contracts import Decision, WritePhaseStatus
 from customs_automation.core.intake import IntakeAdapter
 from customs_automation.core.phases import transition_write_phase
 from customs_automation.core.reporting import RunReport, build_run_report
-from customs_automation.core.run_snapshot import build_run_snapshot
+from customs_automation.core.run_snapshot import build_run_snapshot, write_snapshot
 from customs_automation.core.run_state import (
     RunContext,
     RunStateRecord,
@@ -21,6 +22,7 @@ class OrchestrationResult:
     exit_code: int
     run_state: RunStateRecord
     run_report: RunReport
+    run_snapshot_path: Path
 
 
 
@@ -34,6 +36,8 @@ def execute_workflow_run(
 ) -> OrchestrationResult:
     messages = intake_adapter.list_working_messages()
     snapshot = build_run_snapshot(context.run_id, context.workflow_id, messages)
+    run_dir = run_state_store.run_dir(context.run_id)
+    snapshot_path = write_snapshot(snapshot, run_dir)
 
     state = run_state_store.read_state(context.run_id)
     state = with_mail_iteration_order(state, snapshot.ordered_mail_ids)
@@ -52,4 +56,9 @@ def execute_workflow_run(
         applied_rule_ids=applied_rule_ids,
         final_decision=Decision.PASS if workflow_exit_code == 0 else Decision.HARD_BLOCK,
     )
-    return OrchestrationResult(exit_code=workflow_exit_code, run_state=state, run_report=run_report)
+    return OrchestrationResult(
+        exit_code=workflow_exit_code,
+        run_state=state,
+        run_report=run_report,
+        run_snapshot_path=snapshot_path,
+    )

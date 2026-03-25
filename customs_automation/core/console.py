@@ -10,12 +10,14 @@ def format_run_summary(
     decision: str,
     run_state_path: Path,
     run_report_path: Path,
+    run_snapshot_path: Path,
 ) -> str:
     return (
         f"Run completed\n"
         f"  run_id: {run_id}\n"
         f"  workflow: {workflow_id}\n"
         f"  decision: {decision}\n"
+        f"  run_snapshot: {run_snapshot_path}\n"
         f"  run_state: {run_state_path}\n"
         f"  run_report: {run_report_path}"
     )
