@@ -5,6 +5,7 @@ from customs_automation.core.contracts import (
     PrintPhaseStatus,
     WritePhaseStatus,
 )
+from customs_automation.core.errors import InvalidPhaseTransitionError
 
 WRITE_ALLOWED_TRANSITIONS: dict[WritePhaseStatus, set[WritePhaseStatus]] = {
     WritePhaseStatus.NOT_STARTED: {WritePhaseStatus.PREVALIDATING_TARGETS},
@@ -69,3 +70,24 @@ def is_allowed_mail_move_transition(
     next_status: MailMovePhaseStatus,
 ) -> bool:
     return next_status in MAIL_MOVE_ALLOWED_TRANSITIONS[current]
+
+
+def transition_write_phase(current: WritePhaseStatus, next_status: WritePhaseStatus) -> WritePhaseStatus:
+    if not is_allowed_transition(current, next_status):
+        raise InvalidPhaseTransitionError("write_phase_status", current.value, next_status.value)
+    return next_status
+
+
+def transition_print_phase(current: PrintPhaseStatus, next_status: PrintPhaseStatus) -> PrintPhaseStatus:
+    if not is_allowed_print_transition(current, next_status):
+        raise InvalidPhaseTransitionError("print_phase_status", current.value, next_status.value)
+    return next_status
+
+
+def transition_mail_move_phase(
+    current: MailMovePhaseStatus,
+    next_status: MailMovePhaseStatus,
+) -> MailMovePhaseStatus:
+    if not is_allowed_mail_move_transition(current, next_status):
+        raise InvalidPhaseTransitionError("mail_move_phase_status", current.value, next_status.value)
+    return next_status
