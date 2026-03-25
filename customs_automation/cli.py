@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from customs_automation.core.contracts import Decision
-from customs_automation.core.reporting import ReportWriter, build_run_report
+from customs_automation.core.intake import StaticIntakeAdapter
+from customs_automation.core.orchestrator import execute_workflow_run
+from customs_automation.core.reporting import ReportWriter
 from customs_automation.core.rule_pack import validate_rule_pack_version
 from customs_automation.core.rule_registry import load_rule_registry, validate_rule_ids_registered
 from customs_automation.core.run_state import (
@@ -58,20 +59,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     run_state_store = RunStateStore()
-    run_record = new_run_state_record(run_context)
-    run_dir = run_state_store.run_dir(run_context.run_id)
-    run_state_store.write_state(run_record)
+    run_state_store.write_state(new_run_state_record(run_context))
 
-    exit_code = workflow_module.run(run_context)
-
-    run_report = build_run_report(
-        run_id=run_context.run_id,
-        workflow_id=run_context.workflow_id,
-        rule_pack_id=run_context.rule_pack_id,
-        rule_pack_version=run_context.rule_pack_version,
+    workflow_exit_code = workflow_module.run(run_context)
+    orchestration_result = execute_workflow_run(
+        context=run_context,
+        run_state_store=run_state_store,
+        intake_adapter=StaticIntakeAdapter(messages=[]),
         applied_rule_ids=workflow_module.APPLIED_RULE_IDS,
-        final_decision=Decision.PASS if exit_code == 0 else Decision.HARD_BLOCK,
+        workflow_exit_code=workflow_exit_code,
     )
-    ReportWriter(run_dir).write_run_report(run_report)
 
-    return exit_code
+    run_dir = run_state_store.run_dir(run_context.run_id)
+    ReportWriter(run_dir).write_run_report(orchestration_result.run_report)
+    return orchestration_result.exit_code

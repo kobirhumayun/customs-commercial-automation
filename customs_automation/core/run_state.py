@@ -48,6 +48,13 @@ class RunStateStore:
         target.write_text(json.dumps(asdict(record), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return target
 
+    def read_state(self, run_id: str) -> RunStateRecord:
+        payload = json.loads((self.run_dir(run_id) / "run_state.json").read_text(encoding="utf-8"))
+        return RunStateRecord(**payload)
+
+    def update_state(self, record: RunStateRecord) -> Path:
+        return self.write_state(record)
+
 
 
 def generate_run_id(now: datetime | None = None) -> str:
@@ -67,4 +74,34 @@ def new_run_state_record(context: RunContext) -> RunStateRecord:
         mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED.value,
         mail_iteration_order=[],
         print_group_order=[],
+    )
+
+
+def with_mail_iteration_order(record: RunStateRecord, ordered_mail_ids: list[str]) -> RunStateRecord:
+    return RunStateRecord(
+        run_id=record.run_id,
+        workflow_id=record.workflow_id,
+        rule_pack_id=record.rule_pack_id,
+        rule_pack_version=record.rule_pack_version,
+        created_at_utc=record.created_at_utc,
+        write_phase_status=record.write_phase_status,
+        print_phase_status=record.print_phase_status,
+        mail_move_phase_status=record.mail_move_phase_status,
+        mail_iteration_order=ordered_mail_ids,
+        print_group_order=record.print_group_order,
+    )
+
+
+def with_write_phase_status(record: RunStateRecord, write_phase_status: WritePhaseStatus) -> RunStateRecord:
+    return RunStateRecord(
+        run_id=record.run_id,
+        workflow_id=record.workflow_id,
+        rule_pack_id=record.rule_pack_id,
+        rule_pack_version=record.rule_pack_version,
+        created_at_utc=record.created_at_utc,
+        write_phase_status=write_phase_status.value,
+        print_phase_status=record.print_phase_status,
+        mail_move_phase_status=record.mail_move_phase_status,
+        mail_iteration_order=record.mail_iteration_order,
+        print_group_order=record.print_group_order,
     )
