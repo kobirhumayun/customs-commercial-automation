@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     recovery_parser.add_argument("--backup-hash-matches", action=argparse.BooleanOptionalAction, default=True)
     recovery_parser.add_argument("--staged-plan-hash-valid", action=argparse.BooleanOptionalAction, default=True)
 
+
+    subparsers.add_parser("list-workflows")
+
     return parser
 
 
@@ -86,6 +89,18 @@ def _run_recovery_check(args: argparse.Namespace) -> int:
     )
     print(f"recovery_outcome={outcome.value} reason={reason.value}")
     return 0 if outcome != RecoveryOutcome.HARD_BLOCK else 2
+
+
+
+
+def _run_list_workflows() -> int:
+    for command, workflow_module in WORKFLOW_HANDLERS.items():
+        print(
+            f"{command} | rule_pack_id={workflow_module.RULE_PACK_ID} "
+            f"version={workflow_module.RULE_PACK_VERSION} "
+            f"rule_count={len(workflow_module.APPLIED_RULE_IDS)}"
+        )
+    return 0
 
 
 def _run_workflow_command(args: argparse.Namespace) -> int:
@@ -155,4 +170,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "recovery-check":
         return _run_recovery_check(args)
+    if args.command == "list-workflows":
+        return _run_list_workflows()
     return _run_workflow_command(args)

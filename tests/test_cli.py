@@ -83,3 +83,14 @@ def test_recovery_check_returns_block_for_contradiction() -> None:
         ]
     )
     assert exit_code == 2
+
+
+def test_list_workflows_outputs_registered_workflow_commands(capsys) -> None:
+    exit_code = main(["list-workflows"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "export-lc-sc" in output
+    assert "ud-ip-exp" in output
+    assert "import-btb-lc" in output
+    assert "bb-dashboard-verification" in output
