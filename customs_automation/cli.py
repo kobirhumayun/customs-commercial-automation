@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from customs_automation.core.console import format_run_summary
-from customs_automation.core.intake import StaticIntakeAdapter
+from customs_automation.core.intake import JsonFileIntakeAdapter, StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
 from customs_automation.core.reporting import ReportWriter
 from customs_automation.core.rule_pack import validate_rule_pack_version
@@ -38,7 +39,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     for command in WORKFLOW_HANDLERS:
-        subparsers.add_parser(command)
+        command_parser = subparsers.add_parser(command)
+        command_parser.add_argument(
+            "--snapshot-input",
+            type=Path,
+            default=None,
+            help="Optional JSON file containing source mail snapshot rows for deterministic local runs.",
+        )
 
     return parser
 
@@ -63,10 +70,16 @@ def main(argv: list[str] | None = None) -> int:
     run_state_store.write_state(new_run_state_record(run_context))
 
     workflow_exit_code = workflow_module.run(run_context)
+    intake_adapter = (
+        JsonFileIntakeAdapter(snapshot_path=args.snapshot_input)
+        if args.snapshot_input is not None
+        else StaticIntakeAdapter(messages=[])
+    )
+
     orchestration_result = execute_workflow_run(
         context=run_context,
         run_state_store=run_state_store,
-        intake_adapter=StaticIntakeAdapter(messages=[]),
+        intake_adapter=intake_adapter,
         applied_rule_ids=workflow_module.APPLIED_RULE_IDS,
         workflow_exit_code=workflow_exit_code,
     )
