@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from customs_automation.core.console import format_run_summary
 from customs_automation.core.intake import StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
 from customs_automation.core.reporting import ReportWriter
@@ -71,5 +72,16 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     run_dir = run_state_store.run_dir(run_context.run_id)
-    ReportWriter(run_dir).write_run_report(orchestration_result.run_report)
+    run_report_path = ReportWriter(run_dir).write_run_report(orchestration_result.run_report)
+    run_state_path = run_dir / "run_state.json"
+
+    print(
+        format_run_summary(
+            run_id=run_context.run_id,
+            workflow_id=run_context.workflow_id,
+            decision=orchestration_result.run_report.final_decision,
+            run_state_path=run_state_path,
+            run_report_path=run_report_path,
+        )
+    )
     return orchestration_result.exit_code
