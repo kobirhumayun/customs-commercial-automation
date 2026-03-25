@@ -67,6 +67,7 @@ def execute_workflow_run(
         rule_pack_version=context.rule_pack_version,
         applied_rule_ids=applied_rule_ids,
         final_decision=decision,
+        mail_count=len(snapshot.mail_order_records),
     )
     mail_reports = [
         build_mail_report(

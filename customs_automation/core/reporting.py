@@ -28,6 +28,7 @@ class RunReport:
     rule_pack_version: str
     applied_rule_ids: list[str]
     discrepancies: list[dict]
+    mail_count: int
     final_decision: str
 
 
@@ -67,6 +68,7 @@ def build_run_report(
     applied_rule_ids: list[str],
     final_decision: Decision,
     discrepancies: list[DiscrepancyEntry] | None = None,
+    mail_count: int = 0,
 ) -> RunReport:
     validate_applied_rule_ids(applied_rule_ids)
     serialized_discrepancies = _serialize_discrepancies(discrepancies or [])
@@ -77,6 +79,7 @@ def build_run_report(
         rule_pack_version=rule_pack_version,
         applied_rule_ids=applied_rule_ids,
         discrepancies=serialized_discrepancies,
+        mail_count=mail_count,
         final_decision=final_decision.value,
     )
 

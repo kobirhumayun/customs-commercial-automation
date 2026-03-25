@@ -34,6 +34,7 @@ def test_report_writer_persists_report(tmp_path: Path) -> None:
             )
         ],
         final_decision=Decision.PASS,
+        mail_count=3,
     )
     writer = ReportWriter(tmp_path)
     output_path = writer.write_run_report(report)
@@ -42,3 +43,4 @@ def test_report_writer_persists_report(tmp_path: Path) -> None:
     assert payload["workflow_id"] == "export_lc_sc"
     assert payload["applied_rule_ids"] == ["core.cli.bootstrap.v1"]
     assert payload["discrepancies"][0]["severity"] == "warning"
+    assert payload["mail_count"] == 3

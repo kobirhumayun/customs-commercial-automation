@@ -39,4 +39,5 @@ def test_execute_workflow_run_persists_ordered_mail_ids_and_phase(tmp_path: Path
     assert result.run_snapshot_path.name == "run_snapshot.json"
     assert result.run_snapshot_path.exists()
     assert result.run_report.final_decision == "pass"
+    assert result.run_report.mail_count == 2
     assert [mail_report.mail_id for mail_report in result.mail_reports] == ["A", "B"]
