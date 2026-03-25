@@ -176,3 +176,45 @@ def test_show_run_json_output(tmp_path: Path, capsys) -> None:
     assert show_exit == 0
     assert payload["run_id"] == run_id
     assert payload["workflow_id"] == "export_lc_sc"
+
+
+def test_list_runs_outputs_created_run(tmp_path: Path, capsys) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entry_id": "A",
+                    "received_time_utc": "2026-01-01T10:00:00+00:00",
+                    "subject": "mail",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    artifacts_root = tmp_path / "custom-runs"
+    _ = main(
+        [
+            "export-lc-sc",
+            "--snapshot-input",
+            str(snapshot_path),
+            "--artifacts-root",
+            str(artifacts_root),
+        ]
+    )
+    _ = capsys.readouterr()
+
+    exit_code = main(["list-runs", "--artifacts-root", str(artifacts_root)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "workflow=export_lc_sc" in output
+
+
+def test_list_runs_json_output(tmp_path: Path, capsys) -> None:
+    artifacts_root = tmp_path / "custom-runs"
+    exit_code = main(["list-runs", "--artifacts-root", str(artifacts_root), "--json"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert json.loads(output) == []

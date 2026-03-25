@@ -77,6 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list-workflows")
     list_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    list_runs_parser = subparsers.add_parser("list-runs")
+    list_runs_parser.add_argument("--json", action="store_true", dest="as_json")
+    list_runs_parser.add_argument(
+        "--artifacts-root",
+        type=Path,
+        default=Path("artifacts") / "runs",
+        help="Directory where run artifacts are stored (default: artifacts/runs).",
+    )
+
     show_run_parser = subparsers.add_parser("show-run")
     show_run_parser.add_argument("--run-id", required=True)
     show_run_parser.add_argument("--json", action="store_true", dest="as_json")
@@ -167,6 +176,49 @@ def _run_list_workflows(args: argparse.Namespace) -> int:
     return 0
 
 
+
+
+def _run_list_runs(args: argparse.Namespace) -> int:
+    if not args.artifacts_root.exists():
+        print("[]" if args.as_json else f"No runs found in {args.artifacts_root}")
+        return 0
+
+    rows: list[dict] = []
+    for run_dir in sorted((path for path in args.artifacts_root.iterdir() if path.is_dir()), reverse=True):
+        state_path = run_dir / "run_state.json"
+        report_path = run_dir / "run_report.json"
+        if not state_path.exists() or not report_path.exists():
+            continue
+
+        run_state = json.loads(state_path.read_text(encoding="utf-8"))
+        run_report = json.loads(report_path.read_text(encoding="utf-8"))
+        rows.append(
+            {
+                "run_id": run_dir.name,
+                "workflow_id": run_state.get("workflow_id"),
+                "write_phase_status": run_state.get("write_phase_status"),
+                "mail_count": run_report.get("mail_count"),
+                "final_decision": run_report.get("final_decision"),
+            }
+        )
+
+    if args.as_json:
+        print(json.dumps(rows, sort_keys=True))
+        return 0
+
+    if not rows:
+        print(f"No runs found in {args.artifacts_root}")
+        return 0
+
+    for row in rows:
+        print(
+            f"{row['run_id']} | workflow={row['workflow_id']} "
+            f"write_phase={row['write_phase_status']} "
+            f"mail_count={row['mail_count']} decision={row['final_decision']}"
+        )
+    return 0
+
+
 def _run_workflow_command(args: argparse.Namespace) -> int:
     workflow_module = WORKFLOW_HANDLERS[args.command]
     validate_rule_pack_version(workflow_module.RULE_PACK_VERSION)
@@ -238,4 +290,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_list_workflows(args)
     if args.command == "show-run":
         return _run_show_run(args)
+    if args.command == "list-runs":
+        return _run_list_runs(args)
     return _run_workflow_command(args)
