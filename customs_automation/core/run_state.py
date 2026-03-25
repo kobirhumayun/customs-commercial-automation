@@ -146,3 +146,22 @@ def with_hash_metadata(
         current_workbook_hash=current_workbook_hash,
         staged_write_plan_hash=staged_write_plan_hash,
     )
+
+
+def with_print_group_order(record: RunStateRecord, print_group_order: list[str]) -> RunStateRecord:
+    return RunStateRecord(
+        run_id=record.run_id,
+        workflow_id=record.workflow_id,
+        rule_pack_id=record.rule_pack_id,
+        rule_pack_version=record.rule_pack_version,
+        created_at_utc=record.created_at_utc,
+        write_phase_status=record.write_phase_status,
+        print_phase_status=record.print_phase_status,
+        mail_move_phase_status=record.mail_move_phase_status,
+        mail_iteration_order=record.mail_iteration_order,
+        print_group_order=print_group_order,
+        hash_algorithm=record.hash_algorithm,
+        run_start_backup_hash=record.run_start_backup_hash,
+        current_workbook_hash=record.current_workbook_hash,
+        staged_write_plan_hash=record.staged_write_plan_hash,
+    )

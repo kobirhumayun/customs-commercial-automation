@@ -13,6 +13,7 @@ from customs_automation.core.run_state import (
     RunStateRecord,
     RunStateStore,
     with_mail_iteration_order,
+    with_print_group_order,
     with_write_phase_status,
 )
 
@@ -42,6 +43,7 @@ def execute_workflow_run(
 
     state = run_state_store.read_state(context.run_id)
     state = with_mail_iteration_order(state, snapshot.ordered_mail_ids)
+    state = with_print_group_order(state, snapshot.ordered_mail_ids)
 
     write_phase = WritePhaseStatus(state.write_phase_status)
     write_phase = transition_write_phase(write_phase, WritePhaseStatus.PREVALIDATING_TARGETS)

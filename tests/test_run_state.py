@@ -7,6 +7,7 @@ from customs_automation.core.run_state import (
     generate_run_id,
     new_run_state_record,
     with_hash_metadata,
+    with_print_group_order,
 )
 
 
@@ -51,3 +52,14 @@ def test_with_hash_metadata_updates_hash_fields() -> None:
     assert updated.run_start_backup_hash == "a" * 64
     assert updated.current_workbook_hash == "b" * 64
     assert updated.staged_write_plan_hash == "c" * 64
+
+
+def test_with_print_group_order_updates_order() -> None:
+    context = RunContext(
+        run_id="run-2",
+        workflow_id="export_lc_sc",
+        rule_pack_id="export_lc_sc.default",
+        rule_pack_version="1.0.0",
+    )
+    updated = with_print_group_order(new_run_state_record(context), ["mail-A", "mail-B"])
+    assert updated.print_group_order == ["mail-A", "mail-B"]

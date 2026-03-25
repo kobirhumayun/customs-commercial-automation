@@ -32,6 +32,7 @@ def test_execute_workflow_run_persists_ordered_mail_ids_and_phase(tmp_path: Path
 
     persisted = store.read_state(context.run_id)
     assert persisted.mail_iteration_order == ["A", "B"]
+    assert persisted.print_group_order == ["A", "B"]
     assert persisted.write_phase_status == "prevalidated"
     assert result.run_snapshot_path.name == "run_snapshot.json"
     assert result.run_snapshot_path.exists()
