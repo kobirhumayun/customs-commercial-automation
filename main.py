@@ -1,6 +1,5 @@
-def main():
-    print("Hello from customs-commercial-automation!")
+from customs_automation.cli import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
