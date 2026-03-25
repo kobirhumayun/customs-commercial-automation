@@ -1,0 +1,9 @@
+{
+  "rule_ids": [
+    "core.cli.bootstrap.v1",
+    "export_lc_sc.bootstrap.stub.v1",
+    "ud_ip_exp.bootstrap.stub.v1",
+    "import_btb_lc.bootstrap.stub.v1",
+    "bb_dashboard_verification.bootstrap.stub.v1"
+  ]
+}

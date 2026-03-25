@@ -5,6 +5,7 @@ import argparse
 from customs_automation.core.contracts import Decision
 from customs_automation.core.reporting import ReportWriter, build_run_report
 from customs_automation.core.rule_pack import validate_rule_pack_version
+from customs_automation.core.rule_registry import load_rule_registry, validate_rule_ids_registered
 from customs_automation.core.run_state import (
     RunContext,
     RunStateStore,
@@ -46,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow_module = WORKFLOW_HANDLERS[args.command]
     validate_rule_pack_version(workflow_module.RULE_PACK_VERSION)
+    registry = load_rule_registry()
+    validate_rule_ids_registered(workflow_module.APPLIED_RULE_IDS, registry)
 
     run_context = RunContext(
         run_id=generate_run_id(),
@@ -66,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         workflow_id=run_context.workflow_id,
         rule_pack_id=run_context.rule_pack_id,
         rule_pack_version=run_context.rule_pack_version,
-        applied_rule_ids=["core.cli.bootstrap.v1"],
+        applied_rule_ids=workflow_module.APPLIED_RULE_IDS,
         final_decision=Decision.PASS if exit_code == 0 else Decision.HARD_BLOCK,
     )
     ReportWriter(run_dir).write_run_report(run_report)
