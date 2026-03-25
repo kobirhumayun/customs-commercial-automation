@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from customs_automation.core.console import format_run_summary
@@ -73,8 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
     recovery_parser.add_argument("--backup-hash-matches", action=argparse.BooleanOptionalAction, default=True)
     recovery_parser.add_argument("--staged-plan-hash-valid", action=argparse.BooleanOptionalAction, default=True)
 
-
     subparsers.add_parser("list-workflows")
+
+    show_run_parser = subparsers.add_parser("show-run")
+    show_run_parser.add_argument("--run-id", required=True)
+    show_run_parser.add_argument(
+        "--artifacts-root",
+        type=Path,
+        default=Path("artifacts") / "runs",
+        help="Directory where run artifacts are stored (default: artifacts/runs).",
+    )
 
     return parser
 
@@ -91,6 +100,28 @@ def _run_recovery_check(args: argparse.Namespace) -> int:
     return 0 if outcome != RecoveryOutcome.HARD_BLOCK else 2
 
 
+def _run_show_run(args: argparse.Namespace) -> int:
+    run_dir = args.artifacts_root / args.run_id
+    run_state_path = run_dir / "run_state.json"
+    run_report_path = run_dir / "run_report.json"
+    if not run_state_path.exists() or not run_report_path.exists():
+        print(f"Run artifacts not found for run_id={args.run_id} in {args.artifacts_root}")
+        return 2
+
+    run_state = json.loads(run_state_path.read_text(encoding="utf-8"))
+    run_report = json.loads(run_report_path.read_text(encoding="utf-8"))
+
+    print(
+        "Run summary\n"
+        f"  run_id: {args.run_id}\n"
+        f"  workflow_id: {run_state.get('workflow_id')}\n"
+        f"  write_phase_status: {run_state.get('write_phase_status')}\n"
+        f"  print_phase_status: {run_state.get('print_phase_status')}\n"
+        f"  mail_move_phase_status: {run_state.get('mail_move_phase_status')}\n"
+        f"  mail_count: {run_report.get('mail_count')}\n"
+        f"  final_decision: {run_report.get('final_decision')}"
+    )
+    return 0
 
 
 def _run_list_workflows() -> int:
@@ -172,4 +203,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_recovery_check(args)
     if args.command == "list-workflows":
         return _run_list_workflows()
+    if args.command == "show-run":
+        return _run_show_run(args)
     return _run_workflow_command(args)

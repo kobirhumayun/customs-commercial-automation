@@ -94,3 +94,39 @@ def test_list_workflows_outputs_registered_workflow_commands(capsys) -> None:
     assert "ud-ip-exp" in output
     assert "import-btb-lc" in output
     assert "bb-dashboard-verification" in output
+
+
+def test_show_run_outputs_run_metadata(tmp_path: Path, capsys) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entry_id": "A",
+                    "received_time_utc": "2026-01-01T10:00:00+00:00",
+                    "subject": "mail",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    artifacts_root = tmp_path / "custom-runs"
+    exit_code = main(
+        [
+            "export-lc-sc",
+            "--snapshot-input",
+            str(snapshot_path),
+            "--artifacts-root",
+            str(artifacts_root),
+        ]
+    )
+    assert exit_code == 0
+
+    run_id = next(path.name for path in artifacts_root.iterdir() if path.is_dir())
+    show_exit = main(["show-run", "--run-id", run_id, "--artifacts-root", str(artifacts_root)])
+    output = capsys.readouterr().out
+
+    assert show_exit == 0
+    assert "Run summary" in output
+    assert f"run_id: {run_id}" in output
+    assert "workflow_id: export_lc_sc" in output
