@@ -79,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_runs_parser = subparsers.add_parser("list-runs")
     list_runs_parser.add_argument("--json", action="store_true", dest="as_json")
+    list_runs_parser.add_argument("--workflow-id", default=None)
     list_runs_parser.add_argument(
         "--artifacts-root",
         type=Path,
@@ -192,6 +193,11 @@ def _run_list_runs(args: argparse.Namespace) -> int:
 
         run_state = json.loads(state_path.read_text(encoding="utf-8"))
         run_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        workflow_id = run_state.get("workflow_id")
+        if args.workflow_id and workflow_id != args.workflow_id:
+            continue
+
         rows.append(
             {
                 "run_id": run_dir.name,

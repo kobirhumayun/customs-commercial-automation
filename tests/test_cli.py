@@ -218,3 +218,40 @@ def test_list_runs_json_output(tmp_path: Path, capsys) -> None:
 
     assert exit_code == 0
     assert json.loads(output) == []
+
+
+def test_list_runs_can_filter_by_workflow(tmp_path: Path, capsys) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entry_id": "A",
+                    "received_time_utc": "2026-01-01T10:00:00+00:00",
+                    "subject": "mail",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    artifacts_root = tmp_path / "custom-runs"
+    _ = main(["export-lc-sc", "--snapshot-input", str(snapshot_path), "--artifacts-root", str(artifacts_root)])
+    _ = main(["import-btb-lc", "--snapshot-input", str(snapshot_path), "--artifacts-root", str(artifacts_root)])
+    _ = capsys.readouterr()
+
+    exit_code = main(
+        [
+            "list-runs",
+            "--artifacts-root",
+            str(artifacts_root),
+            "--workflow-id",
+            "import_btb_lc",
+            "--json",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    payload = json.loads(output)
+    assert exit_code == 0
+    assert len(payload) == 1
+    assert payload[0]["workflow_id"] == "import_btb_lc"
