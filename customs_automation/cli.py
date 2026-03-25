@@ -85,7 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     run_dir = run_state_store.run_dir(run_context.run_id)
-    run_report_path = ReportWriter(run_dir).write_run_report(orchestration_result.run_report)
+    report_writer = ReportWriter(run_dir)
+    run_report_path = report_writer.write_run_report(orchestration_result.run_report)
+    for mail_report in orchestration_result.mail_reports:
+        report_writer.write_mail_report(mail_report)
+
     run_state_path = run_dir / "run_state.json"
 
     print(

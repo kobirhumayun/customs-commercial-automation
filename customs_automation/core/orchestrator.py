@@ -6,7 +6,7 @@ from pathlib import Path
 from customs_automation.core.contracts import Decision, WritePhaseStatus
 from customs_automation.core.intake import IntakeAdapter
 from customs_automation.core.phases import transition_write_phase
-from customs_automation.core.reporting import RunReport, build_run_report
+from customs_automation.core.reporting import MailReport, RunReport, build_mail_report, build_run_report
 from customs_automation.core.run_snapshot import build_run_snapshot, write_snapshot
 from customs_automation.core.run_state import (
     RunContext,
@@ -22,6 +22,7 @@ class OrchestrationResult:
     exit_code: int
     run_state: RunStateRecord
     run_report: RunReport
+    mail_reports: list[MailReport]
     run_snapshot_path: Path
 
 
@@ -48,17 +49,31 @@ def execute_workflow_run(
     state = with_write_phase_status(state, write_phase)
     run_state_store.update_state(state)
 
+    decision = Decision.PASS if workflow_exit_code == 0 else Decision.HARD_BLOCK
     run_report = build_run_report(
         run_id=context.run_id,
         workflow_id=context.workflow_id,
         rule_pack_id=context.rule_pack_id,
         rule_pack_version=context.rule_pack_version,
         applied_rule_ids=applied_rule_ids,
-        final_decision=Decision.PASS if workflow_exit_code == 0 else Decision.HARD_BLOCK,
+        final_decision=decision,
     )
+    mail_reports = [
+        build_mail_report(
+            run_id=context.run_id,
+            workflow_id=context.workflow_id,
+            rule_pack_id=context.rule_pack_id,
+            rule_pack_version=context.rule_pack_version,
+            mail_id=order_record.entry_id,
+            applied_rule_ids=applied_rule_ids,
+            final_decision=decision,
+        )
+        for order_record in snapshot.mail_order_records
+    ]
     return OrchestrationResult(
         exit_code=workflow_exit_code,
         run_state=state,
         run_report=run_report,
+        mail_reports=mail_reports,
         run_snapshot_path=snapshot_path,
     )
