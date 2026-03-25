@@ -38,3 +38,22 @@ def test_cli_writes_artifacts_to_custom_root(tmp_path: Path) -> None:
     assert (run_dir / "run_snapshot.json").exists()
     assert (run_dir / "run_report.json").exists()
     assert (run_dir / "mail_A.json").exists()
+
+
+def test_cli_blocks_when_prior_uncertain_run_exists(tmp_path: Path) -> None:
+    artifacts_root = tmp_path / "custom-runs"
+    run_dir = artifacts_root / "run-20260325T010000Z"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_state.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-20260325T010000Z",
+                "workflow_id": "export_lc_sc",
+                "write_phase_status": "uncertain_not_committed",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["export-lc-sc", "--artifacts-root", str(artifacts_root)])
+    assert exit_code == 2

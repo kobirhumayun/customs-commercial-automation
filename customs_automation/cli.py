@@ -7,6 +7,7 @@ from customs_automation.core.console import format_run_summary
 from customs_automation.core.intake import JsonFileIntakeAdapter, StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
 from customs_automation.core.reporting import ReportWriter
+from customs_automation.core.recovery_gate import find_blocking_prior_run
 from customs_automation.core.rule_pack import validate_rule_pack_version
 from customs_automation.core.rule_registry import load_rule_registry, validate_rule_ids_registered
 from customs_automation.core.run_state import (
@@ -71,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
         rule_pack_id=workflow_module.RULE_PACK_ID,
         rule_pack_version=workflow_module.RULE_PACK_VERSION,
     )
+
+    blocking_run_id = find_blocking_prior_run(args.artifacts_root, run_context.workflow_id)
+    if blocking_run_id is not None:
+        print(
+            f"Recovery gate blocked new run for workflow '{run_context.workflow_id}'. "
+            f"Prior run requires recovery: {blocking_run_id}"
+        )
+        return 2
 
     run_state_store = RunStateStore(base_dir=args.artifacts_root)
     run_state_store.write_state(new_run_state_record(run_context))
