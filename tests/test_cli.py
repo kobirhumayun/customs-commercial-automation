@@ -12,7 +12,7 @@ def test_cli_writes_artifacts_to_custom_root(tmp_path: Path) -> None:
                 {
                     "entry_id": "A",
                     "received_time_utc": "2026-01-01T10:00:00+00:00",
-                    "subject": "mail",
+                    "subject": "LC reference mail",
                 }
             ]
         ),
@@ -104,7 +104,7 @@ def test_show_run_outputs_run_metadata(tmp_path: Path, capsys) -> None:
                 {
                     "entry_id": "A",
                     "received_time_utc": "2026-01-01T10:00:00+00:00",
-                    "subject": "mail",
+                    "subject": "LC reference mail",
                 }
             ]
         ),
@@ -150,7 +150,7 @@ def test_show_run_json_output(tmp_path: Path, capsys) -> None:
                 {
                     "entry_id": "A",
                     "received_time_utc": "2026-01-01T10:00:00+00:00",
-                    "subject": "mail",
+                    "subject": "LC reference mail",
                 }
             ]
         ),
@@ -186,7 +186,7 @@ def test_list_runs_outputs_created_run(tmp_path: Path, capsys) -> None:
                 {
                     "entry_id": "A",
                     "received_time_utc": "2026-01-01T10:00:00+00:00",
-                    "subject": "mail",
+                    "subject": "LC reference mail",
                 }
             ]
         ),
@@ -228,7 +228,7 @@ def test_list_runs_can_filter_by_workflow(tmp_path: Path, capsys) -> None:
                 {
                     "entry_id": "A",
                     "received_time_utc": "2026-01-01T10:00:00+00:00",
-                    "subject": "mail",
+                    "subject": "LC reference mail",
                 }
             ]
         ),

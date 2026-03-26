@@ -71,3 +71,20 @@ class DiscrepancyEntry:
     code: str
     severity: Decision
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowMailOutcome:
+    """Per-mail workflow decision produced before orchestration/report rendering."""
+
+    entry_id: str
+    decision: Decision
+    discrepancies: list[DiscrepancyEntry]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRunOutcome:
+    """Workflow-level outcome for one run execution."""
+
+    exit_code: int
+    mail_outcomes: list[WorkflowMailOutcome]

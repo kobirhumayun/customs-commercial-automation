@@ -249,19 +249,19 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
     run_state_store = RunStateStore(base_dir=args.artifacts_root)
     run_state_store.write_state(new_run_state_record(run_context))
 
-    workflow_exit_code = workflow_module.run(run_context)
     intake_adapter = (
         JsonFileIntakeAdapter(snapshot_path=args.snapshot_input)
         if args.snapshot_input is not None
         else StaticIntakeAdapter(messages=[])
     )
+    workflow_outcome = workflow_module.run(run_context, intake_adapter.list_working_messages())
 
     orchestration_result = execute_workflow_run(
         context=run_context,
         run_state_store=run_state_store,
         intake_adapter=intake_adapter,
         applied_rule_ids=workflow_module.APPLIED_RULE_IDS,
-        workflow_exit_code=workflow_exit_code,
+        workflow_mail_outcomes=workflow_outcome.mail_outcomes,
     )
 
     run_dir = run_state_store.run_dir(run_context.run_id)

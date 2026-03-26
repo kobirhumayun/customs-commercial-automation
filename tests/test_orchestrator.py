@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from customs_automation.core.contracts import EmailMessage
+from customs_automation.core.contracts import Decision, EmailMessage, WorkflowMailOutcome
 from customs_automation.core.intake import StaticIntakeAdapter
 from customs_automation.core.orchestrator import execute_workflow_run
 from customs_automation.core.run_state import RunContext, RunStateStore, new_run_state_record
@@ -28,7 +28,10 @@ def test_execute_workflow_run_persists_ordered_mail_ids_and_phase(tmp_path: Path
             ]
         ),
         applied_rule_ids=["core.cli.bootstrap.v1", "export_lc_sc.bootstrap.stub.v1"],
-        workflow_exit_code=0,
+        workflow_mail_outcomes=[
+            WorkflowMailOutcome(entry_id="A", decision=Decision.PASS, discrepancies=[]),
+            WorkflowMailOutcome(entry_id="B", decision=Decision.PASS, discrepancies=[]),
+        ],
     )
 
     persisted = store.read_state(context.run_id)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from customs_automation.core.contracts import Decision, WritePhaseStatus
+from customs_automation.core.contracts import Decision, WorkflowMailOutcome, WritePhaseStatus
 from customs_automation.core.intake import IntakeAdapter
 from customs_automation.core.phases import transition_write_phase
 from customs_automation.core.reporting import MailReport, RunReport, build_mail_report, build_run_report
@@ -36,7 +36,7 @@ def execute_workflow_run(
     run_state_store: RunStateStore,
     intake_adapter: IntakeAdapter,
     applied_rule_ids: list[str],
-    workflow_exit_code: int,
+    workflow_mail_outcomes: list[WorkflowMailOutcome],
 ) -> OrchestrationResult:
     messages = intake_adapter.list_working_messages()
     snapshot = build_run_snapshot(context.run_id, context.workflow_id, messages)
@@ -59,7 +59,34 @@ def execute_workflow_run(
     state = with_write_phase_status(state, write_phase)
     run_state_store.update_state(state)
 
-    decision = Decision.PASS if workflow_exit_code == 0 else Decision.HARD_BLOCK
+    outcome_by_entry_id = {outcome.entry_id: outcome for outcome in workflow_mail_outcomes}
+    mail_reports: list[MailReport] = []
+    for order_record in snapshot.mail_order_records:
+        mail_outcome = outcome_by_entry_id.get(order_record.entry_id)
+        if mail_outcome is None:
+            mail_decision = Decision.HARD_BLOCK
+            mail_discrepancies = []
+        else:
+            mail_decision = mail_outcome.decision
+            mail_discrepancies = mail_outcome.discrepancies
+        mail_reports.append(
+            build_mail_report(
+                run_id=context.run_id,
+                workflow_id=context.workflow_id,
+                rule_pack_id=context.rule_pack_id,
+                rule_pack_version=context.rule_pack_version,
+                mail_id=order_record.entry_id,
+                applied_rule_ids=applied_rule_ids,
+                final_decision=mail_decision,
+                discrepancies=mail_discrepancies,
+            )
+        )
+
+    decision = (
+        Decision.HARD_BLOCK
+        if any(report.final_decision == Decision.HARD_BLOCK.value for report in mail_reports)
+        else Decision.PASS
+    )
     run_report = build_run_report(
         run_id=context.run_id,
         workflow_id=context.workflow_id,
@@ -69,20 +96,8 @@ def execute_workflow_run(
         final_decision=decision,
         mail_count=len(snapshot.mail_order_records),
     )
-    mail_reports = [
-        build_mail_report(
-            run_id=context.run_id,
-            workflow_id=context.workflow_id,
-            rule_pack_id=context.rule_pack_id,
-            rule_pack_version=context.rule_pack_version,
-            mail_id=order_record.entry_id,
-            applied_rule_ids=applied_rule_ids,
-            final_decision=decision,
-        )
-        for order_record in snapshot.mail_order_records
-    ]
     return OrchestrationResult(
-        exit_code=workflow_exit_code,
+        exit_code=0 if decision == Decision.PASS else 2,
         run_state=state,
         run_report=run_report,
         mail_reports=mail_reports,
