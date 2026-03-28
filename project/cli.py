@@ -16,6 +16,7 @@ from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
 from project.printing import SimulatedPrintProvider
+from project.models import SavedDocument
 from project.reporting.persistence import (
     append_discrepancy,
     write_commit_marker,
@@ -28,6 +29,7 @@ from project.reporting.persistence import (
 )
 from project.rules import load_rule_pack
 from project.storage import Win32ComAttachmentContentProvider
+from project.utils.ids import build_saved_document_id
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.utils.time import validate_timezone
 from project.workbook import (
@@ -61,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_init_run(args)
     if args.command == "validate-run":
         return _handle_validate_run(args)
+    if args.command == "inspect-document-analysis":
+        return _handle_inspect_document_analysis(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
     if args.command == "recover-run":
@@ -100,6 +104,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Initialize a run and evaluate the snapshotted mails through the current rule pack.",
     )
     _add_common_workflow_args(validate_run_parser)
+
+    inspect_document_parser = subparsers.add_parser(
+        "inspect-document-analysis",
+        help="Analyze one saved PDF through the document-extraction provider seam without running a workflow.",
+    )
+    inspect_document_parser.add_argument(
+        "--document-path",
+        type=Path,
+        required=True,
+        help="Path to the saved PDF to inspect.",
+    )
+    inspect_document_parser.add_argument(
+        "--document-analysis-json",
+        type=Path,
+        help="Optional JSON manifest to inspect deterministic analysis output instead of live PDF extraction.",
+    )
 
     inspect_workbook_parser = subparsers.add_parser(
         "inspect-workbook",
@@ -724,6 +744,46 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         "mail_move_phase_status": updated_run_report.mail_move_phase_status.value,
         "mail_move_operation_count": len(move_operations),
         "discrepancy_count": len(discrepancies),
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_document_analysis(args: argparse.Namespace) -> int:
+    try:
+        document_path = args.document_path
+        if args.document_analysis_json is None and not document_path.exists():
+            raise ValueError(f"Document path does not exist: {document_path}")
+        normalized_filename = document_path.name.strip()
+        if not normalized_filename:
+            raise ValueError(f"Document path must resolve to a filename: {document_path}")
+        saved_document = SavedDocument(
+            saved_document_id=build_saved_document_id(
+                "inspect-document",
+                normalized_filename,
+                str(document_path),
+            ),
+            mail_id="inspect-document",
+            attachment_name=normalized_filename,
+            normalized_filename=normalized_filename,
+            destination_path=str(document_path),
+            file_sha256="",
+            save_decision="saved_new",
+        )
+        provider = (
+            JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
+            if args.document_analysis_json is not None
+            else LayeredSavedDocumentAnalysisProvider()
+        )
+        analysis = provider.analyze(saved_document=saved_document)
+    except (ConfigError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "document_path": str(document_path),
+        "normalized_filename": normalized_filename,
+        "analysis": to_jsonable(analysis),
     }
     print(pretty_json_dumps(payload), end="")
     return 0

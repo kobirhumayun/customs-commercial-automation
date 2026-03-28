@@ -84,6 +84,7 @@ class SavedDocument:
     extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
     extracted_pi_confidence: float | None = None
+    extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None

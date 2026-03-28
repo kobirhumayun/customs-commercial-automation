@@ -249,6 +249,73 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         self.assertIn("ocr_required_field_below_threshold", [item.code for item in classified.discrepancies])
         self.assertFalse(any(document.print_eligible for document in classified.saved_documents))
 
+    def test_classify_saved_export_documents_prefers_amendment_match_from_analysis_context(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                    sender_address="sender@example.com",
+                    body_text="Please process file P/26/0042.",
+                    attachments=[
+                        SourceAttachmentRecord(attachment_name="amendment-a.pdf"),
+                        SourceAttachmentRecord(attachment_name="amendment-b.pdf"),
+                    ],
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+        payload = build_export_mail_payload(mail)
+
+        class AmendmentAwareProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                from project.documents import SavedDocumentAnalysis
+
+                amendment_number = "5" if saved_document.normalized_filename == "amendment-b.pdf" else "4"
+                return SavedDocumentAnalysis(
+                    analysis_basis="pdfplumber_table",
+                    extracted_lc_sc_number="LC-0038",
+                    extracted_lc_sc_confidence=1.0,
+                    extracted_amendment_number=amendment_number,
+                    clause_related_lc_sc_number="LC-0038",
+                    clause_confidence=1.0,
+                )
+
+        classified = classify_saved_export_documents(
+            payload=payload,
+            saved_documents=[
+                SavedDocument(
+                    saved_document_id="doc-1",
+                    mail_id=mail.mail_id,
+                    attachment_name="amendment-a.pdf",
+                    normalized_filename="amendment-a.pdf",
+                    destination_path="C:/docs/amendment-a.pdf",
+                    file_sha256="a" * 64,
+                    save_decision="saved_new",
+                    attachment_index=0,
+                ),
+                SavedDocument(
+                    saved_document_id="doc-2",
+                    mail_id=mail.mail_id,
+                    attachment_name="amendment-b.pdf",
+                    normalized_filename="amendment-b.pdf",
+                    destination_path="C:/docs/amendment-b.pdf",
+                    file_sha256="b" * 64,
+                    save_decision="saved_new",
+                    attachment_index=1,
+                ),
+            ],
+            analysis_provider=AmendmentAwareProvider(),
+        )
+
+        self.assertEqual(classified.discrepancies, [])
+        self.assertEqual(
+            [document.print_eligible for document in classified.saved_documents],
+            [False, True],
+        )
+        self.assertEqual(classified.saved_documents[1].extracted_amendment_number, "5")
+
 
 if __name__ == "__main__":
     unittest.main()

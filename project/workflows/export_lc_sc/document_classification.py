@@ -39,6 +39,7 @@ class _ClassificationResult:
 class _RankedCandidate:
     saved_document: SavedDocument
     filename_score: int
+    amendment_match_score: int
     clause_confidence: float
     attachment_index: int
     lexical_name: str
@@ -159,6 +160,7 @@ def _annotate_saved_document(
         extracted_lc_sc_confidence=analysis.extracted_lc_sc_confidence,
         extracted_pi_number=analysis.extracted_pi_number,
         extracted_pi_confidence=analysis.extracted_pi_confidence,
+        extracted_amendment_number=analysis.extracted_amendment_number,
         clause_related_lc_sc_number=analysis.clause_related_lc_sc_number,
         clause_excerpt=analysis.clause_excerpt,
         clause_confidence=analysis.clause_confidence,
@@ -214,6 +216,7 @@ def _rank_candidates(
             _RankedCandidate(
                 saved_document=document,
                 filename_score=filename_score,
+                amendment_match_score=_amendment_match_score(document=document, payload=payload),
                 clause_confidence=_clause_confidence_for_family_match(document=document, payload=payload),
                 attachment_index=document.attachment_index if document.attachment_index is not None else 10**6,
                 lexical_name=document.normalized_filename,
@@ -222,6 +225,7 @@ def _rank_candidates(
     ranked.sort(
         key=lambda item: (
             -item.filename_score,
+            -item.amendment_match_score,
             -item.clause_confidence,
             item.attachment_index,
             item.lexical_name,
@@ -250,9 +254,10 @@ def _select_best_candidate(
     return candidates[0].saved_document, None
 
 
-def _candidate_tie_key(candidate: _RankedCandidate) -> tuple[int, float, int, str]:
+def _candidate_tie_key(candidate: _RankedCandidate) -> tuple[int, int, float, int, str]:
     return (
         candidate.filename_score,
+        candidate.amendment_match_score,
         candidate.clause_confidence,
         candidate.attachment_index,
         candidate.lexical_name,
@@ -306,6 +311,30 @@ def _clause_confidence_for_family_match(*, document: SavedDocument, payload: Exp
     return 0.0
 
 
+def _amendment_match_score(*, document: SavedDocument, payload: ExportMailPayload) -> int:
+    subject_amendment = _subject_amendment_number(payload)
+    if subject_amendment is None:
+        return 0
+    if document.extracted_amendment_number == subject_amendment:
+        return 1
+    return 0
+
+
+def _subject_amendment_number(payload: ExportMailPayload) -> str | None:
+    if payload.parsed_subject is None:
+        return None
+    tokens = [token.strip().upper() for token in payload.parsed_subject.suffix_tokens if token.strip()]
+    for index, token in enumerate(tokens):
+        if token in {"AMD", "AMND", "AMENDMENT"} and index + 1 < len(tokens):
+            candidate = tokens[index + 1]
+            if candidate.isdigit():
+                return str(int(candidate))
+        match = re.fullmatch(r"(?:AMD|AMND|AMENDMENT)[- ]?0*(\d{1,3})", token)
+        if match is not None:
+            return str(int(match.group(1)))
+    return None
+
+
 def _is_family_lc_sc_match(candidate_lc_sc_number: str, payload: ExportMailPayload) -> bool:
     compact_candidate = _compact_alnum(candidate_lc_sc_number)
     family_numbers = {
@@ -341,7 +370,7 @@ def _build_ocr_quality_discrepancies(
     for document in finalized_candidates:
         if document.saved_document_id not in selected_document_ids:
             continue
-        if document.analysis_basis != "ocr_text":
+        if not _analysis_includes_ocr(document.analysis_basis):
             continue
         if document.document_type == "export_lc_sc_document":
             if not document.extracted_lc_sc_number:
@@ -417,6 +446,10 @@ def _build_ocr_discrepancy(*, code: str, message: str, details: dict[str, object
         message=message,
         details=details,
     )
+
+
+def _analysis_includes_ocr(analysis_basis: str | None) -> bool:
+    return bool(analysis_basis and "ocr_text" in analysis_basis)
 
 
 def _compact_alnum(value: str) -> str:

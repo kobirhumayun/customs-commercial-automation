@@ -10,6 +10,7 @@ from project.documents import (
     JsonManifestSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
     OCRSavedDocumentAnalysisProvider,
+    PDFPlumberSavedDocumentAnalysisProvider,
     PyMuPDFSavedDocumentAnalysisProvider,
 )
 from project.models import SavedDocument
@@ -50,6 +51,56 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 0.99)
+
+    def test_pdfplumber_provider_extracts_identifiers_and_amendment_from_table_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "table.pdf"
+            pdf_path.write_bytes(b"fake table pdf")
+
+            class FakePage:
+                @staticmethod
+                def extract_tables():
+                    return [
+                        [
+                            ["Reference", "Value"],
+                            ["L/C No.", "LC-0038"],
+                            ["PI No.", "PDL-26-0042"],
+                            ["Amendment No.", "05"],
+                        ]
+                    ]
+
+            class FakePDF:
+                pages = [FakePage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                analysis = PDFPlumberSavedDocumentAnalysisProvider().analyze(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-table",
+                        mail_id="mail-1",
+                        attachment_name="table.pdf",
+                        normalized_filename="table.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="d" * 64,
+                        save_decision="saved_new",
+                    )
+                )
+
+        self.assertEqual(analysis.analysis_basis, "pdfplumber_table")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
+        self.assertEqual(analysis.extracted_amendment_number, "5")
 
     def test_pymupdf_provider_extracts_lc_sc_and_pi_from_saved_pdf_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -93,6 +144,7 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_confidence, 1.0)
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042-R1")
         self.assertEqual(analysis.extracted_pi_confidence, 1.0)
+        self.assertEqual(analysis.extracted_amendment_number, None)
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 1.0)
         self.assertIn("LC-0038", analysis.clause_excerpt)
@@ -198,6 +250,52 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
 
         self.assertEqual(analysis.analysis_basis, "ocr_text")
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
+
+    def test_layered_provider_merges_table_amendment_context_with_text_identifiers(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="doc-4",
+            mail_id="mail-1",
+            attachment_name="amendment.pdf",
+            normalized_filename="amendment.pdf",
+            destination_path="C:/docs/amendment.pdf",
+            file_sha256="e" * 64,
+            save_decision="saved_new",
+        )
+
+        class TextProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="pymupdf_text",
+                    extracted_lc_sc_number="LC-0038",
+                    extracted_lc_sc_confidence=1.0,
+                )
+
+        class TableProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="pdfplumber_table",
+                    extracted_amendment_number="5",
+                )
+
+        class OCRProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                raise AssertionError("OCR fallback should not run when text-plus-table analysis is sufficient.")
+
+        analysis = LayeredSavedDocumentAnalysisProvider(
+            text_provider=TextProvider(),
+            table_provider=TableProvider(),
+            ocr_provider=OCRProvider(),
+        ).analyze(saved_document=saved_document)
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text+pdfplumber_table")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_amendment_number, "5")
 
 
 if __name__ == "__main__":

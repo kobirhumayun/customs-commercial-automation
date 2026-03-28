@@ -1030,6 +1030,7 @@ class ValidationTests(unittest.TestCase):
                         {
                             "normalized_filename": "supporting.pdf",
                             "extracted_pi_number": "PDL-26-0042",
+                            "extracted_amendment_number": "05",
                             "clause_related_lc_sc_number": "LC-0038",
                             "clause_excerpt": "PI PDL-26-0042 belongs to LC-0038",
                             "clause_confidence": 0.99,
@@ -1084,6 +1085,10 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(
                 validation_result.mail_outcomes[0].saved_documents[1]["extracted_pi_number"],
                 "PDL-26-0042",
+            )
+            self.assertEqual(
+                validation_result.mail_outcomes[0].saved_documents[1]["extracted_amendment_number"],
+                "5",
             )
 
     def test_validate_run_snapshot_hard_blocks_low_confidence_ocr_selected_pi(self) -> None:

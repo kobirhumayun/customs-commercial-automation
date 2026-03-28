@@ -27,6 +27,81 @@ from project.workbook import WorkbookHeader
 
 
 class CLITests(unittest.TestCase):
+    def test_inspect_document_analysis_command_prints_layered_provider_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            document_path = root / "saved.pdf"
+            document_path.write_bytes(b"%PDF-1.4\nfake\n")
+
+            class FakeProvider:
+                def analyze(self, *, saved_document):
+                    from project.documents import SavedDocumentAnalysis
+
+                    self.last_saved_document = saved_document
+                    return SavedDocumentAnalysis(
+                        analysis_basis="pymupdf_text+pdfplumber_table",
+                        extracted_lc_sc_number="LC-0038",
+                        extracted_pi_number="PDL-26-0042",
+                        extracted_amendment_number="5",
+                    )
+
+            provider = FakeProvider()
+            buffer = io.StringIO()
+            with patch("project.cli.LayeredSavedDocumentAnalysisProvider", return_value=provider):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-document-analysis",
+                            "--document-path",
+                            str(document_path),
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["normalized_filename"], "saved.pdf")
+        self.assertEqual(payload["analysis"]["analysis_basis"], "pymupdf_text+pdfplumber_table")
+        self.assertEqual(payload["analysis"]["extracted_lc_sc_number"], "LC-0038")
+        self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
+        self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
+
+    def test_inspect_document_analysis_command_uses_manifest_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            document_path = root / "saved.pdf"
+            document_path.write_bytes(b"%PDF-1.4\nfake\n")
+            manifest_path = root / "analysis.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "destination_path": str(document_path),
+                            "extracted_pi_number": "PDL-26-0042",
+                            "extracted_amendment_number": "05",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "inspect-document-analysis",
+                        "--document-path",
+                        str(document_path),
+                        "--document-analysis-json",
+                        str(manifest_path),
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["analysis"]["analysis_basis"], "json_manifest")
+        self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
+        self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
+
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -13,6 +13,9 @@ from project.erp.normalization import normalize_lc_sc_number
 
 LC_SC_CANDIDATE_PATTERN = re.compile(r"(?i)\b(?:LC|SC)\s*[- ]\s*[A-Z0-9]+(?:\s*-\s*[A-Z0-9]+){0,8}\b")
 PI_CANDIDATE_PATTERN = re.compile(r"(?i)\bPDL\s*[- ]*\s*\d{2}\s*[- ]*\s*\d{1,4}(?:\s*[- ]*\s*R\d+)?\b")
+AMENDMENT_CANDIDATE_PATTERN = re.compile(
+    r"(?i)\b(?:AMD|AMND|AMENDMENT)(?:\s*(?:NO|NUMBER|#)\.?\s*)?[-:|]?\s*0*(\d{1,3})\b"
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -22,6 +25,7 @@ class SavedDocumentAnalysis:
     extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
     extracted_pi_confidence: float | None = None
+    extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
@@ -54,6 +58,7 @@ class JsonManifestSavedDocumentAnalysisProvider:
             extracted_lc_sc_confidence=_optional_float(match.get("extracted_lc_sc_confidence")),
             extracted_pi_number=_optional_string(match.get("extracted_pi_number")),
             extracted_pi_confidence=_optional_float(match.get("extracted_pi_confidence")),
+            extracted_amendment_number=_optional_amendment_number(match.get("extracted_amendment_number")),
             clause_related_lc_sc_number=_optional_string(match.get("clause_related_lc_sc_number")),
             clause_excerpt=_optional_string(match.get("clause_excerpt")),
             clause_confidence=_optional_float(match.get("clause_confidence")),
@@ -79,6 +84,7 @@ class PyMuPDFSavedDocumentAnalysisProvider:
 
         lc_sc_match = _first_lc_sc_match(extracted_text)
         pi_match = _first_pi_match(extracted_text)
+        amendment_match = _first_amendment_number_match(extracted_text)
         excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
         return SavedDocumentAnalysis(
             analysis_basis="pymupdf_text",
@@ -86,6 +92,7 @@ class PyMuPDFSavedDocumentAnalysisProvider:
             extracted_lc_sc_confidence=1.0 if lc_sc_match is not None else None,
             extracted_pi_number=pi_match[0] if pi_match is not None else None,
             extracted_pi_confidence=1.0 if pi_match is not None else None,
+            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
             clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
             clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
             clause_confidence=1.0 if excerpt_seed is not None else None,
@@ -95,6 +102,47 @@ class PyMuPDFSavedDocumentAnalysisProvider:
         if self._fitz_module is None:
             self._fitz_module = _load_pymupdf_module()
         return self._fitz_module
+
+
+@dataclass(slots=True)
+class PDFPlumberSavedDocumentAnalysisProvider:
+    _pdfplumber_module: object | None = field(default=None, init=False, repr=False)
+
+    def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
+        document_path = Path(saved_document.destination_path)
+        if not document_path.exists():
+            return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
+
+        try:
+            extracted_text = _extract_pdf_table_text(document_path, self._get_pdfplumber_module())
+        except Exception:
+            return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_error")
+
+        if not extracted_text.strip():
+            return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+
+        lc_sc_match = _first_lc_sc_match(extracted_text)
+        pi_match = _first_pi_match(extracted_text)
+        amendment_match = _first_amendment_number_match(extracted_text)
+        excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
+        if lc_sc_match is None and pi_match is None and amendment_match is None:
+            return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+        return SavedDocumentAnalysis(
+            analysis_basis="pdfplumber_table",
+            extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            extracted_lc_sc_confidence=1.0 if lc_sc_match is not None else None,
+            extracted_pi_number=pi_match[0] if pi_match is not None else None,
+            extracted_pi_confidence=1.0 if pi_match is not None else None,
+            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
+            clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
+            clause_confidence=1.0 if excerpt_seed is not None else None,
+        )
+
+    def _get_pdfplumber_module(self):
+        if self._pdfplumber_module is None:
+            self._pdfplumber_module = _load_pdfplumber_module()
+        return self._pdfplumber_module
 
 
 @dataclass(slots=True)
@@ -123,6 +171,7 @@ class OCRSavedDocumentAnalysisProvider:
 
         lc_sc_match = _first_lc_sc_match(extracted_text)
         pi_match = _first_pi_match(extracted_text)
+        amendment_match = _first_amendment_number_match(extracted_text)
         lc_sc_confidence = (
             _field_confidence_from_tokens(tokens, confidences, lc_sc_match[0], normalize_lc_sc_number)
             if lc_sc_match is not None
@@ -140,6 +189,7 @@ class OCRSavedDocumentAnalysisProvider:
             extracted_lc_sc_confidence=lc_sc_confidence,
             extracted_pi_number=pi_match[0] if pi_match is not None else None,
             extracted_pi_confidence=pi_confidence,
+            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
             clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
             clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
             clause_confidence=confidence,
@@ -164,16 +214,17 @@ class OCRSavedDocumentAnalysisProvider:
 @dataclass(slots=True)
 class LayeredSavedDocumentAnalysisProvider:
     text_provider: SavedDocumentAnalysisProvider = field(default_factory=PyMuPDFSavedDocumentAnalysisProvider)
+    table_provider: SavedDocumentAnalysisProvider = field(default_factory=PDFPlumberSavedDocumentAnalysisProvider)
     ocr_provider: SavedDocumentAnalysisProvider = field(default_factory=OCRSavedDocumentAnalysisProvider)
 
     def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
         text_analysis = self.text_provider.analyze(saved_document=saved_document)
-        if _analysis_has_identifier(text_analysis):
-            return text_analysis
+        table_analysis = self.table_provider.analyze(saved_document=saved_document)
+        merged_analysis = _merge_analysis(text_analysis, table_analysis)
+        if _analysis_has_identifier(merged_analysis):
+            return merged_analysis
         ocr_analysis = self.ocr_provider.analyze(saved_document=saved_document)
-        if _analysis_has_identifier(ocr_analysis):
-            return ocr_analysis
-        return text_analysis
+        return _merge_analysis(merged_analysis, ocr_analysis)
 
 
 def _load_manifest(path: Path) -> list[dict]:
@@ -221,6 +272,23 @@ def _optional_float(value: object) -> float | None:
     raise ValueError("Saved-document analysis manifest clause_confidence must be numeric when present.")
 
 
+def _optional_amendment_number(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        match = AMENDMENT_CANDIDATE_PATTERN.search(stripped)
+        if match is not None:
+            return str(int(match.group(1)))
+        if stripped.isdigit():
+            return str(int(stripped))
+    raise ValueError("Saved-document analysis manifest extracted_amendment_number must be numeric when present.")
+
+
 def _extract_pdf_text(path: Path, fitz_module: object) -> str:
     document = fitz_module.open(str(path))
     try:
@@ -229,6 +297,25 @@ def _extract_pdf_text(path: Path, fitz_module: object) -> str:
         close = getattr(document, "close", None)
         if callable(close):
             close()
+
+
+def _extract_pdf_table_text(path: Path, pdfplumber_module: object) -> str:
+    with pdfplumber_module.open(str(path)) as document:
+        rows: list[str] = []
+        for page in document.pages:
+            extract_tables = getattr(page, "extract_tables", None)
+            if not callable(extract_tables):
+                continue
+            for table in extract_tables() or []:
+                for raw_row in table or []:
+                    cells: list[str] = []
+                    for cell in raw_row or []:
+                        cell_text = " ".join(str(cell or "").split())
+                        if cell_text:
+                            cells.append(cell_text)
+                    if cells:
+                        rows.append(" | ".join(cells))
+        return "\n".join(rows)
 
 
 def _extract_pdf_text_with_ocr(
@@ -309,6 +396,13 @@ def _first_pi_match(text: str) -> tuple[str, int] | None:
     return None
 
 
+def _first_amendment_number_match(text: str) -> tuple[str, int] | None:
+    match = AMENDMENT_CANDIDATE_PATTERN.search(text)
+    if match is None:
+        return None
+    return str(int(match.group(1))), match.start()
+
+
 def _normalize_pi_number(raw_value: str) -> str | None:
     normalized = raw_value.strip().upper()
     normalized = normalized.replace("_", "-").replace(" ", "-")
@@ -339,6 +433,40 @@ def _analysis_has_identifier(analysis: SavedDocumentAnalysis) -> bool:
         (analysis.extracted_lc_sc_number and analysis.extracted_lc_sc_number.strip())
         or (analysis.extracted_pi_number and analysis.extracted_pi_number.strip())
     )
+
+
+def _merge_analysis(primary: SavedDocumentAnalysis, secondary: SavedDocumentAnalysis) -> SavedDocumentAnalysis:
+    return SavedDocumentAnalysis(
+        analysis_basis=_merge_analysis_basis(primary.analysis_basis, secondary.analysis_basis),
+        extracted_lc_sc_number=primary.extracted_lc_sc_number or secondary.extracted_lc_sc_number,
+        extracted_lc_sc_confidence=primary.extracted_lc_sc_confidence or secondary.extracted_lc_sc_confidence,
+        extracted_pi_number=primary.extracted_pi_number or secondary.extracted_pi_number,
+        extracted_pi_confidence=primary.extracted_pi_confidence or secondary.extracted_pi_confidence,
+        extracted_amendment_number=primary.extracted_amendment_number or secondary.extracted_amendment_number,
+        clause_related_lc_sc_number=primary.clause_related_lc_sc_number or secondary.clause_related_lc_sc_number,
+        clause_excerpt=primary.clause_excerpt or secondary.clause_excerpt,
+        clause_confidence=primary.clause_confidence or secondary.clause_confidence,
+    )
+
+
+def _merge_analysis_basis(primary_basis: str, secondary_basis: str) -> str:
+    empty_bases = {
+        "none",
+        "missing_saved_document",
+        "pdfplumber_table_empty",
+        "pdfplumber_table_error",
+        "ocr_text_empty",
+        "ocr_text_error",
+        "pymupdf_text_empty",
+        "pymupdf_text_error",
+    }
+    if secondary_basis in empty_bases:
+        return primary_basis
+    if primary_basis in empty_bases:
+        return secondary_basis
+    if primary_basis == secondary_basis:
+        return primary_basis
+    return f"{primary_basis}+{secondary_basis}"
 
 
 def _normalize_ocr_confidence(value: object) -> float | None:
@@ -389,6 +517,14 @@ def _load_pytesseract_module():
     except ImportError as exc:
         raise ValueError("pytesseract is required for OCR saved-document analysis") from exc
     return pytesseract
+
+
+def _load_pdfplumber_module():
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError as exc:
+        raise ValueError("pdfplumber is required for table-aware saved-document analysis") from exc
+    return pdfplumber
 
 
 def _load_pil_image_module():
