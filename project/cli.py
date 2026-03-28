@@ -8,7 +8,7 @@ from pathlib import Path
 from project.config import load_workflow_config
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
-from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
+from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
 from project.printing import SimulatedPrintProvider
 from project.reporting.persistence import (
@@ -246,6 +246,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON manifest of source emails to bind into the run snapshot.",
     )
     parser.add_argument(
+        "--live-outlook-snapshot",
+        action="store_true",
+        help="Load the source-mail snapshot from the configured Outlook working folder via pywin32.",
+    )
+    parser.add_argument(
         "--erp-json",
         type=Path,
         help="Optional JSON manifest of canonical ERP rows for workflow validation.",
@@ -286,7 +291,11 @@ def _handle_validate_config(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
-        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
+        snapshot = _load_snapshot_if_supplied(
+            snapshot_json=args.snapshot_json,
+            live_outlook_snapshot=args.live_outlook_snapshot,
+            config=config,
+        )
     except (ConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -308,7 +317,11 @@ def _handle_init_run(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
-        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
+        snapshot = _load_snapshot_if_supplied(
+            snapshot_json=args.snapshot_json,
+            live_outlook_snapshot=args.live_outlook_snapshot,
+            config=config,
+        )
         rule_pack = load_rule_pack(descriptor.workflow_id)
         initialized = initialize_workflow_run(
             descriptor=descriptor,
@@ -343,7 +356,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
-        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
+        snapshot = _load_snapshot_if_supplied(
+            snapshot_json=args.snapshot_json,
+            live_outlook_snapshot=args.live_outlook_snapshot,
+            config=config,
+        )
         rule_pack = load_rule_pack(descriptor.workflow_id)
         initialized = initialize_workflow_run(
             descriptor=descriptor,
@@ -727,13 +744,24 @@ def _parse_overrides(items: list[str]) -> dict[str, str]:
     return overrides
 
 
-def _load_snapshot_if_supplied(snapshot_json: Path | None, state_timezone: str):
-    provider = (
-        JsonManifestMailSnapshotProvider(snapshot_json)
-        if snapshot_json is not None
-        else EmptyMailSnapshotProvider()
-    )
-    return provider.load_snapshot(state_timezone=state_timezone)
+def _load_snapshot_if_supplied(
+    *,
+    snapshot_json: Path | None,
+    live_outlook_snapshot: bool,
+    config,
+):
+    if snapshot_json is not None and live_outlook_snapshot:
+        raise ValueError("Choose either --snapshot-json or --live-outlook-snapshot, not both")
+    if snapshot_json is not None:
+        provider = JsonManifestMailSnapshotProvider(snapshot_json)
+    elif live_outlook_snapshot:
+        provider = Win32ComMailSnapshotProvider(
+            source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")).strip(),
+            outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None,
+        )
+    else:
+        provider = EmptyMailSnapshotProvider()
+    return provider.load_snapshot(state_timezone=config.state_timezone)
 
 
 def _load_erp_provider(erp_json: Path | None):

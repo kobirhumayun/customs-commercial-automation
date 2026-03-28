@@ -475,6 +475,75 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["mail_move_phase_status"], "completed")
         self.assertEqual(payload["mail_move_operation_count"], 0)
 
+    def test_validate_config_uses_live_outlook_snapshot_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_provider = type(
+                "FakeProvider",
+                (),
+                {
+                    "load_snapshot": lambda self, *, state_timezone: [
+                        type(
+                            "FakeMail",
+                            (),
+                            {
+                                "mail_id": "mail-1",
+                                "entry_id": "entry-1",
+                                "received_time_utc": "2026-03-28T03:00:00Z",
+                                "received_time_workflow_tz": "2026-03-28T09:00:00+06:00",
+                                "subject_raw": "subject",
+                                "sender_address": "a@example.com",
+                                "snapshot_index": 0,
+                                "body_text": "",
+                            },
+                        )()
+                    ]
+                },
+            )()
+
+            buffer = io.StringIO()
+            with patch("project.cli.Win32ComMailSnapshotProvider", return_value=fake_provider):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "validate-config",
+                            "export_lc_sc",
+                            "--config",
+                            str(config_path),
+                            "--live-outlook-snapshot",
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["snapshot_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

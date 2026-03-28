@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
+from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
 
 
@@ -68,6 +70,83 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([mail.entry_id for mail in snapshot], ["C", "A", "B"])
         self.assertEqual([mail.snapshot_index for mail in snapshot], [0, 1, 2])
         self.assertEqual(snapshot[0].received_time_workflow_tz, "2026-03-28T08:59:59+06:00")
+
+    def test_live_outlook_snapshot_provider_reads_folder_and_preserves_deterministic_order(self) -> None:
+        class FakeNamespace:
+            def __init__(self) -> None:
+                self.folder = type(
+                    "FakeFolder",
+                    (),
+                    {
+                        "Items": [
+                            type(
+                                "FakeMail",
+                                (),
+                                {
+                                    "EntryID": "B",
+                                    "ReceivedTime": datetime(2026, 3, 28, 9, 0, 0),
+                                    "Subject": "Second",
+                                    "SenderEmailAddress": "b@example.com",
+                                    "Body": "body-b",
+                                },
+                            )(),
+                            type(
+                                "FakeMail",
+                                (),
+                                {
+                                    "EntryID": "A",
+                                    "ReceivedTime": datetime(2026, 3, 28, 9, 0, 0),
+                                    "Subject": "First",
+                                    "SenderEmailAddress": "a@example.com",
+                                    "Body": "body-a",
+                                },
+                            )(),
+                            type(
+                                "FakeMail",
+                                (),
+                                {
+                                    "EntryID": "C",
+                                    "ReceivedTime": datetime(2026, 3, 28, 8, 59, 59),
+                                    "Subject": "Earlier",
+                                    "SenderEmailAddress": "c@example.com",
+                                    "Body": "body-c",
+                                },
+                            )(),
+                        ]
+                    },
+                )()
+
+            def Logon(self, **_kwargs) -> None:
+                return None
+
+            def GetFolderFromID(self, entry_id: str):
+                self.requested_folder_id = entry_id
+                return self.folder
+
+        class FakeClient:
+            def __init__(self, namespace) -> None:
+                self.namespace = namespace
+
+            def Dispatch(self, app_name: str):
+                self.app_name = app_name
+                return type(
+                    "FakeApplication",
+                    (),
+                    {"GetNamespace": lambda _self, namespace_name: self.namespace},
+                )()
+
+        namespace = FakeNamespace()
+
+        with patch("project.intake.providers._load_win32com_client_module", return_value=FakeClient(namespace)):
+            snapshot = Win32ComMailSnapshotProvider(
+                source_folder_entry_id="src-folder",
+                outlook_profile="Operations",
+            ).load_snapshot(state_timezone="Asia/Dhaka")
+
+        self.assertEqual(namespace.requested_folder_id, "src-folder")
+        self.assertEqual([mail.entry_id for mail in snapshot], ["C", "A", "B"])
+        self.assertEqual(snapshot[0].body_text, "body-c")
+        self.assertEqual(snapshot[1].received_time_workflow_tz, "2026-03-28T09:00:00+06:00")
 
 
 if __name__ == "__main__":
