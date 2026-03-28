@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from project.config import load_workflow_config
-from project.models.enums import WorkflowId
+from project.models.enums import MailProcessingStatus, WorkflowId
 from project.rules import load_rule_pack
 from project.utils.time import validate_timezone
 from project.workflows.bootstrap import initialize_workflow_run
@@ -106,6 +106,24 @@ class WorkflowBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(run_metadata["resolved_source_folder_entry_id"], "src-folder")
             self.assertEqual(run_metadata["mail_iteration_order"], [mail.mail_id for mail in mail_snapshot])
+            mail_outcome_records = [
+                json.loads(line)
+                for line in initialized.artifact_paths.mail_outcomes_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(mail_outcome_records), 2)
+            self.assertEqual(
+                [record["source_entry_id"] for record in mail_outcome_records],
+                ["entry-001", "entry-002"],
+            )
+            self.assertEqual(
+                [record["processing_status"] for record in mail_outcome_records],
+                [MailProcessingStatus.SNAPSHOTTED.value, MailProcessingStatus.SNAPSHOTTED.value],
+            )
+            self.assertEqual(
+                [record["eligible_for_write"] for record in mail_outcome_records],
+                [False, False],
+            )
 
 
 if __name__ == "__main__":

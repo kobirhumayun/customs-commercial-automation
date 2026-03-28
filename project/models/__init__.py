@@ -2,6 +2,7 @@ from project.models.entities import (
     DiscrepancyReport,
     EmailMessage,
     MailMoveOperation,
+    MailOutcomeRecord,
     MailReport,
     OperatorContext,
     PrintBatch,
@@ -12,6 +13,7 @@ from project.models.entities import (
 )
 from project.models.enums import (
     FinalDecision,
+    MailProcessingStatus,
     MailMovePhaseStatus,
     PrintPhaseStatus,
     RuleStage,
@@ -24,6 +26,8 @@ __all__ = [
     "EmailMessage",
     "FinalDecision",
     "MailMoveOperation",
+    "MailOutcomeRecord",
+    "MailProcessingStatus",
     "MailMovePhaseStatus",
     "MailReport",
     "OperatorContext",

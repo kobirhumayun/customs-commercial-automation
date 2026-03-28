@@ -9,7 +9,7 @@ from typing import Any
 
 from project.exceptions import ArtifactError
 from project.utils.hashing import sha256_file
-from project.utils.json import pretty_json_dumps
+from project.utils.json import canonical_json_dumps, pretty_json_dumps
 
 
 @dataclass(slots=True, frozen=True)
@@ -68,13 +68,14 @@ def initialize_run_artifacts(
     *,
     paths: RunArtifactPaths,
     run_metadata: Any,
+    mail_outcomes: list[dict[str, Any]] | None = None,
     staged_write_plan: list[dict[str, Any]] | None = None,
     print_plan: dict[str, Any] | None = None,
 ) -> None:
     write_json(paths.run_metadata_path, run_metadata)
     write_json(paths.staged_write_plan_path, staged_write_plan or [])
     write_json(paths.print_plan_path, print_plan or {"print_groups": [], "print_group_order": []})
-    atomic_write_text(paths.mail_outcomes_path, "")
+    _write_jsonl(paths.mail_outcomes_path, mail_outcomes or [])
     atomic_write_text(paths.target_probes_path, "")
     atomic_write_text(paths.discrepancies_path, "")
 
@@ -93,10 +94,18 @@ def write_json(path: Path, payload: Any) -> None:
 
 
 def append_jsonl_record(path: Path, payload: Any) -> None:
-    line = pretty_json_dumps(payload).rstrip("\n")
+    line = canonical_json_dumps(payload)
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     new_content = f"{existing}{line}\n"
     atomic_write_text(path, new_content)
+
+
+def _write_jsonl(path: Path, payloads: list[Any]) -> None:
+    if not payloads:
+        atomic_write_text(path, "")
+        return
+    content = "".join(f"{canonical_json_dumps(payload)}\n" for payload in payloads)
+    atomic_write_text(path, content)
 
 
 def atomic_write_text(path: Path, content: str) -> None:

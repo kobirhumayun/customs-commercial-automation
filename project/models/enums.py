@@ -45,3 +45,14 @@ class RuleStage(StrEnum):
     CORE = "core"
     WORKFLOW_STANDARD = "workflow_standard"
     WORKFLOW_EXCEPTION = "workflow_exception"
+
+
+class MailProcessingStatus(StrEnum):
+    SNAPSHOTTED = "snapshotted"
+    VALIDATION_PENDING = "validation_pending"
+    VALIDATED = "validated"
+    BLOCKED = "blocked"
+    STAGED_FOR_WRITE = "staged_for_write"
+    WRITTEN = "written"
+    PRINTED = "printed"
+    MOVED = "moved"

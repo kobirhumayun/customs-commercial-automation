@@ -27,8 +27,10 @@ from project.storage import (
 from project.utils.hashing import HASH_ALGORITHM, canonical_json_hash, sha256_file
 from project.utils.ids import build_run_id
 from project.utils.json import to_jsonable
+from project.workflows.orchestrator import initialize_mail_outcomes
 from project.utils.time import utc_timestamp, validate_timezone
 from project.workflows.registry import WorkflowDescriptor
+from project.workflows.runtime import WorkflowRuntimeState
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,6 +40,7 @@ class InitializedWorkflowRun:
     rule_pack: LoadedRulePack
     processing_job: ProcessingJob
     run_report: RunReport
+    runtime_state: WorkflowRuntimeState
     artifact_paths: RunArtifactPaths
     master_workbook_path: str
 
@@ -108,9 +111,16 @@ def initialize_workflow_run(
         resolved_destination_folder_entry_id=str(config.values.get("destination_success_entry_id", "")) or None,
         folder_resolution_mode="entry_id" if descriptor.requires_mail_folders else None,
     )
+    mail_outcomes = initialize_mail_outcomes(
+        run_id=run_id,
+        workflow_id=descriptor.workflow_id,
+        mail_snapshot=snapshot,
+    )
+    runtime_state = WorkflowRuntimeState(mail_outcomes=mail_outcomes)
     initialize_run_artifacts(
         paths=artifact_paths,
         run_metadata=to_jsonable(run_report),
+        mail_outcomes=to_jsonable(mail_outcomes),
     )
     return InitializedWorkflowRun(
         descriptor=descriptor,
@@ -118,6 +128,7 @@ def initialize_workflow_run(
         rule_pack=rule_pack,
         processing_job=processing_job,
         run_report=run_report,
+        runtime_state=runtime_state,
         artifact_paths=artifact_paths,
         master_workbook_path=str(master_workbook_path),
     )

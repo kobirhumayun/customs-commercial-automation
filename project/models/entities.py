@@ -5,6 +5,7 @@ from typing import Any
 
 from project.models.enums import (
     FinalDecision,
+    MailProcessingStatus,
     MailMovePhaseStatus,
     PrintPhaseStatus,
     WorkflowId,
@@ -13,6 +14,7 @@ from project.models.enums import (
 from project.reporting.schemas import (
     DISCREPANCY_REPORT_SCHEMA_ID,
     MAIL_REPORT_SCHEMA_ID,
+    MAIL_OUTCOME_RECORD_SCHEMA_ID,
     REPORT_SCHEMA_VERSION,
     RUN_REPORT_SCHEMA_ID,
 )
@@ -133,6 +135,26 @@ class MailReport:
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None
     schema_id: str = MAIL_REPORT_SCHEMA_ID
+    schema_version: str = REPORT_SCHEMA_VERSION
+    report_schema_version: str = REPORT_SCHEMA_VERSION
+
+
+@dataclass(slots=True, frozen=True)
+class MailOutcomeRecord:
+    run_id: str
+    mail_id: str
+    workflow_id: WorkflowId
+    snapshot_index: int
+    processing_status: MailProcessingStatus
+    final_decision: FinalDecision | None
+    decision_reasons: list[str]
+    eligible_for_write: bool
+    eligible_for_print: bool
+    eligible_for_mail_move: bool
+    source_entry_id: str
+    subject_raw: str
+    sender_address: str
+    schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID
     schema_version: str = REPORT_SCHEMA_VERSION
     report_schema_version: str = REPORT_SCHEMA_VERSION
 

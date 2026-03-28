@@ -6,11 +6,11 @@ from pathlib import Path
 
 from project.config import load_workflow_config
 from project.exceptions import ArtifactError, ConfigError, RulePackError
+from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
 from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
-from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -143,10 +143,12 @@ def _parse_overrides(items: list[str]) -> dict[str, str]:
 
 
 def _load_snapshot_if_supplied(snapshot_json: Path | None, state_timezone: str):
-    if snapshot_json is None:
-        return []
-    source_messages = load_snapshot_manifest(snapshot_json)
-    return build_email_snapshot(source_messages, state_timezone=state_timezone)
+    provider = (
+        JsonManifestMailSnapshotProvider(snapshot_json)
+        if snapshot_json is not None
+        else EmptyMailSnapshotProvider()
+    )
+    return provider.load_snapshot(state_timezone=state_timezone)
 
 
 if __name__ == "__main__":
