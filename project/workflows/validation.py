@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from project.erp import ERPRowProvider
 from project.models import (
@@ -18,6 +19,7 @@ from project.models import (
     WriteOperation,
 )
 from project.rules import AggregatedRuleEvaluation, LoadedRulePack, evaluate_rule_pack
+from project.storage import AttachmentContentProvider, DocumentSaveIssue, DocumentSaveResult, save_export_mail_documents
 from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
@@ -62,6 +64,8 @@ def validate_run_snapshot(
     rule_pack: LoadedRulePack,
     erp_row_provider: ERPRowProvider | None = None,
     workbook_snapshot: WorkbookSnapshot | None = None,
+    attachment_content_provider: AttachmentContentProvider | None = None,
+    document_root: Path | None = None,
 ) -> ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord] = []
     mail_reports: list[MailReport] = []
@@ -84,6 +88,13 @@ def validate_run_snapshot(
                 erp_row_provider=erp_row_provider,
             ),
         )
+        document_save_result = _save_mail_documents_if_configured(
+            descriptor=descriptor,
+            mail=mail,
+            workflow_payload=context.workflow_payload,
+            attachment_content_provider=attachment_content_provider,
+            document_root=document_root,
+        )
         aggregated = evaluate_rule_pack(context, rule_pack)
         staging_result = _stage_mail_if_eligible(
             descriptor=descriptor,
@@ -100,6 +111,7 @@ def validate_run_snapshot(
             aggregated=aggregated,
             workflow_payload=context.workflow_payload,
             staging_result=staging_result,
+            document_save_result=document_save_result,
         )
         mail_report = _build_mail_report(run_report, rule_pack, mail_outcome)
         mail_discrepancies = _build_discrepancy_reports(
@@ -107,6 +119,7 @@ def validate_run_snapshot(
             mail=mail,
             aggregated=aggregated,
             staging_discrepancies=staging_result.discrepancies,
+            document_save_issues=document_save_result.issues,
         )
 
         mail_outcomes.append(mail_outcome)
@@ -163,10 +176,11 @@ def _build_mail_outcome(
     aggregated: AggregatedRuleEvaluation,
     workflow_payload: object | None,
     staging_result,
+    document_save_result: DocumentSaveResult,
 ) -> MailOutcomeRecord:
     final_decision = (
         FinalDecision.HARD_BLOCK
-        if staging_result.discrepancies
+        if staging_result.discrepancies or document_save_result.issues
         else aggregated.final_decision
     )
     processing_status = (
@@ -182,7 +196,11 @@ def _build_mail_outcome(
         snapshot_index=mail.snapshot_index,
         processing_status=processing_status,
         final_decision=final_decision,
-        decision_reasons=list(aggregated.decision_reasons) + list(staging_result.decision_reasons),
+        decision_reasons=(
+            list(document_save_result.decision_reasons)
+            + list(aggregated.decision_reasons)
+            + list(staging_result.decision_reasons)
+        ),
         eligible_for_write=allowed and descriptor.write_capable and bool(staging_result.staged_write_operations),
         eligible_for_print=allowed and descriptor.supports_print,
         eligible_for_mail_move=allowed,
@@ -195,8 +213,10 @@ def _build_mail_outcome(
         discrepancies=[
             _serialize_discrepancy(discrepancy) for discrepancy in aggregated.discrepancies
         ]
+        + [_serialize_document_save_issue(issue) for issue in document_save_result.issues]
         + [_serialize_staging_discrepancy(discrepancy) for discrepancy in staging_result.discrepancies],
         file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
+        saved_documents=to_jsonable(document_save_result.saved_documents),
         staged_write_operations=to_jsonable(staging_result.staged_write_operations),
     )
 
@@ -229,6 +249,7 @@ def _build_discrepancy_reports(
     mail: EmailMessage,
     aggregated: AggregatedRuleEvaluation,
     staging_discrepancies: list[ExportStagingDiscrepancy],
+    document_save_issues: list[DocumentSaveIssue],
 ) -> list[DiscrepancyReport]:
     created_at_utc = utc_timestamp()
     reports = [
@@ -250,6 +271,23 @@ def _build_discrepancy_reports(
         )
         for discrepancy in aggregated.discrepancies
     ]
+    reports.extend(
+        DiscrepancyReport(
+            run_id=run_report.run_id,
+            mail_id=mail.mail_id,
+            workflow_id=run_report.workflow_id,
+            severity=issue.severity,
+            code=issue.code,
+            message=issue.message,
+            rule_id=None,
+            details={
+                **issue.details,
+                "non_rule_source": "document_saving",
+            },
+            created_at_utc=created_at_utc,
+        )
+        for issue in document_save_issues
+    )
     reports.extend(
         DiscrepancyReport(
             run_id=run_report.run_id,
@@ -294,6 +332,18 @@ def _serialize_staging_discrepancy(discrepancy: ExportStagingDiscrepancy) -> dic
     }
 
 
+def _serialize_document_save_issue(issue: DocumentSaveIssue) -> dict:
+    return {
+        "code": issue.code,
+        "severity": issue.severity,
+        "message": issue.message,
+        "subject_scope": "mail",
+        "target_ref": None,
+        "details": dict(issue.details),
+        "source_rule_ids": [],
+    }
+
+
 def _stage_mail_if_eligible(
     *,
     descriptor: WorkflowDescriptor,
@@ -322,6 +372,28 @@ def _stage_mail_if_eligible(
         mail_id=mail.mail_id,
         payload=workflow_payload,
         workbook_snapshot=workbook_snapshot,
+    )
+
+
+def _save_mail_documents_if_configured(
+    *,
+    descriptor: WorkflowDescriptor,
+    mail: EmailMessage,
+    workflow_payload: object | None,
+    attachment_content_provider: AttachmentContentProvider | None,
+    document_root: Path | None,
+) -> DocumentSaveResult:
+    if attachment_content_provider is None or document_root is None:
+        return DocumentSaveResult(saved_documents=[], issues=[], decision_reasons=[])
+    if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
+        return DocumentSaveResult(saved_documents=[], issues=[], decision_reasons=[])
+    if not isinstance(workflow_payload, ExportMailPayload):
+        raise ValueError("Export workflow validation requires ExportMailPayload for document saving")
+    return save_export_mail_documents(
+        mail=mail,
+        verified_family=workflow_payload.verified_family,
+        document_root=document_root,
+        provider=attachment_content_provider,
     )
 
 

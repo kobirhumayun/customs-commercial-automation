@@ -50,6 +50,8 @@ Every discrepancy payload should include:
 | `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
 | `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |
 | `mail_move_runtime_error` | `hard_block` | shared | A runtime error interrupted mail-move execution for a planned move operation. |
+| `document_storage_path_unresolved` | `hard_block` | shared | Attachment storage path could not be resolved deterministically for the active mail. |
+| `document_save_runtime_error` | `hard_block` | shared | A runtime error interrupted attachment saving before validation completed. |
 | `mail_subject_missing` | `hard_block` | shared | A snapshotted mail is missing a usable subject. |
 | `mail_sender_missing` | `hard_block` | shared | A snapshotted mail is missing a canonical sender address. |
 

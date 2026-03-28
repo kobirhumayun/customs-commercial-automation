@@ -22,6 +22,7 @@ from project.reporting.persistence import (
     write_target_probes,
 )
 from project.rules import load_rule_pack
+from project.storage import Win32ComAttachmentContentProvider
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.utils.time import validate_timezone
 from project.workbook import (
@@ -256,6 +257,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON manifest of canonical ERP rows for workflow validation.",
     )
     parser.add_argument(
+        "--document-root",
+        type=Path,
+        help="Optional root directory for live attachment saving before validation.",
+    )
+    parser.add_argument(
         "--workbook-json",
         type=Path,
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
@@ -368,6 +374,8 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             rule_pack=rule_pack,
             mail_snapshot=snapshot,
         )
+        if args.document_root is not None and not args.live_outlook_snapshot:
+            raise ValueError("--document-root currently requires --live-outlook-snapshot")
         validation_result = validate_run_snapshot(
             descriptor=descriptor,
             run_report=initialized.run_report,
@@ -378,6 +386,14 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 live_workbook=args.live_workbook,
                 config=config,
             ),
+            attachment_content_provider=(
+                Win32ComAttachmentContentProvider(
+                    outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None
+                )
+                if args.document_root is not None
+                else None
+            ),
+            document_root=args.document_root,
         )
         if args.apply_live_writes and not args.live_workbook:
             raise ValueError("--apply-live-writes requires --live-workbook")

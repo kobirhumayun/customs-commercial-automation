@@ -12,6 +12,7 @@ from project.models.enums import MailProcessingStatus
 from project.outlook import ConfiguredFolderGateway
 from project.reporting.persistence import write_discrepancies, write_mail_outcomes, write_run_metadata
 from project.rules import load_rule_pack
+from project.storage import SimulatedAttachmentContentProvider
 from project.utils.json import to_jsonable
 from project.utils.time import validate_timezone
 from project.workbook import JsonManifestWorkbookSnapshotProvider
@@ -832,6 +833,118 @@ class ValidationTests(unittest.TestCase):
             self.assertIn(
                 "workbook_header_mapping_invalid",
                 [report.code for report in validation_result.discrepancy_reports],
+            )
+
+    def test_validate_run_snapshot_saves_export_pdf_attachments_when_document_root_is_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            document_root = root / "documents"
+            for directory in (report_root, run_root, backup_root, workbook_root, document_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
+                            "attachments": [
+                                {"attachment_name": "LC.pdf"},
+                                {"attachment_name": "notes.txt"},
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(snapshot[0].entry_id, 0): b"%PDF-1.4\nsaved lc\n"}
+                ),
+                document_root=document_root,
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+            self.assertEqual(len(validation_result.mail_outcomes[0].saved_documents), 1)
+            self.assertEqual(
+                validation_result.mail_outcomes[0].saved_documents[0]["save_decision"],
+                "saved_new",
+            )
+            self.assertTrue(
+                validation_result.mail_outcomes[0].saved_documents[0]["destination_path"].replace("\\", "/").endswith(
+                    "2026/ANANTA GARMENTS LTD/LC-0038/All Attachments/LC.pdf"
+                )
+            )
+            self.assertEqual(
+                [report.code for report in validation_result.discrepancy_reports],
+                [],
             )
 
 
