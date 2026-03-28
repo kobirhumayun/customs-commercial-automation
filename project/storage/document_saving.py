@@ -141,6 +141,7 @@ def save_export_mail_documents(
                 destination_path=str(destination_path),
                 file_sha256=file_sha256,
                 save_decision=save_decision,
+                attachment_index=plan.attachment_index,
             )
         )
 

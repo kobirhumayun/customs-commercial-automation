@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from project.config import load_workflow_config
+from project.documents import JsonManifestSavedDocumentAnalysisProvider, NullSavedDocumentAnalysisProvider
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
@@ -262,6 +263,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional root directory for live attachment saving before validation.",
     )
     parser.add_argument(
+        "--document-analysis-json",
+        type=Path,
+        help="Optional JSON manifest of saved-document analysis outputs for deterministic attachment classification.",
+    )
+    parser.add_argument(
         "--workbook-json",
         type=Path,
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
@@ -394,6 +400,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 else None
             ),
             document_root=args.document_root,
+            document_analysis_provider=(
+                JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
+                if args.document_analysis_json is not None
+                else NullSavedDocumentAnalysisProvider()
+            ),
         )
         if args.apply_live_writes and not args.live_workbook:
             raise ValueError("--apply-live-writes requires --live-workbook")

@@ -75,9 +75,16 @@ class SavedDocument:
     destination_path: str
     file_sha256: str
     save_decision: str
+    attachment_index: int | None = None
     document_type: str | None = None
     classification_reason: str | None = None
     print_eligible: bool = False
+    analysis_basis: str | None = None
+    extracted_lc_sc_number: str | None = None
+    extracted_pi_number: str | None = None
+    clause_related_lc_sc_number: str | None = None
+    clause_excerpt: str | None = None
+    clause_confidence: float | None = None
 
 
 @dataclass(slots=True, frozen=True)

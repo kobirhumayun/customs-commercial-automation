@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from project.documents import NullSavedDocumentAnalysisProvider, SavedDocumentAnalysisProvider
 from project.erp import ERPRowProvider
 from project.models import (
     DiscrepancyReport,
@@ -24,7 +25,11 @@ from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
 from project.workbook import WorkbookSnapshot
-from project.workflows.export_lc_sc.document_classification import classify_saved_export_documents
+from project.workflows.export_lc_sc.document_classification import (
+    ClassifiedDocumentSet,
+    DocumentClassificationDiscrepancy,
+    classify_saved_export_documents,
+)
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
 from project.workflows.export_lc_sc.staging import (
     ExportStagingDiscrepancy,
@@ -67,6 +72,7 @@ def validate_run_snapshot(
     workbook_snapshot: WorkbookSnapshot | None = None,
     attachment_content_provider: AttachmentContentProvider | None = None,
     document_root: Path | None = None,
+    document_analysis_provider: SavedDocumentAnalysisProvider | None = None,
 ) -> ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord] = []
     mail_reports: list[MailReport] = []
@@ -96,10 +102,11 @@ def validate_run_snapshot(
             attachment_content_provider=attachment_content_provider,
             document_root=document_root,
         )
-        document_save_result = _classify_saved_documents_for_workflow(
+        document_classification_result = _classify_saved_documents_for_workflow(
             descriptor=descriptor,
             workflow_payload=context.workflow_payload,
             document_save_result=document_save_result,
+            document_analysis_provider=document_analysis_provider,
         )
         aggregated = evaluate_rule_pack(context, rule_pack)
         staging_result = _stage_mail_if_eligible(
@@ -118,6 +125,7 @@ def validate_run_snapshot(
             workflow_payload=context.workflow_payload,
             staging_result=staging_result,
             document_save_result=document_save_result,
+            document_classification_result=document_classification_result,
         )
         mail_report = _build_mail_report(run_report, rule_pack, mail_outcome)
         mail_discrepancies = _build_discrepancy_reports(
@@ -126,6 +134,7 @@ def validate_run_snapshot(
             aggregated=aggregated,
             staging_discrepancies=staging_result.discrepancies,
             document_save_issues=document_save_result.issues,
+            document_classification_discrepancies=document_classification_result.discrepancies,
         )
 
         mail_outcomes.append(mail_outcome)
@@ -183,10 +192,15 @@ def _build_mail_outcome(
     workflow_payload: object | None,
     staging_result,
     document_save_result: DocumentSaveResult,
+    document_classification_result: ClassifiedDocumentSet,
 ) -> MailOutcomeRecord:
     final_decision = (
         FinalDecision.HARD_BLOCK
-        if staging_result.discrepancies or document_save_result.issues
+        if (
+            staging_result.discrepancies
+            or document_save_result.issues
+            or document_classification_result.discrepancies
+        )
         else aggregated.final_decision
     )
     processing_status = (
@@ -204,6 +218,7 @@ def _build_mail_outcome(
         final_decision=final_decision,
         decision_reasons=(
             list(document_save_result.decision_reasons)
+            + list(document_classification_result.decision_reasons)
             + list(aggregated.decision_reasons)
             + list(staging_result.decision_reasons)
         ),
@@ -220,9 +235,13 @@ def _build_mail_outcome(
             _serialize_discrepancy(discrepancy) for discrepancy in aggregated.discrepancies
         ]
         + [_serialize_document_save_issue(issue) for issue in document_save_result.issues]
+        + [
+            _serialize_document_classification_discrepancy(discrepancy)
+            for discrepancy in document_classification_result.discrepancies
+        ]
         + [_serialize_staging_discrepancy(discrepancy) for discrepancy in staging_result.discrepancies],
         file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
-        saved_documents=to_jsonable(document_save_result.saved_documents),
+        saved_documents=to_jsonable(document_classification_result.saved_documents),
         staged_write_operations=to_jsonable(staging_result.staged_write_operations),
     )
 
@@ -256,6 +275,7 @@ def _build_discrepancy_reports(
     aggregated: AggregatedRuleEvaluation,
     staging_discrepancies: list[ExportStagingDiscrepancy],
     document_save_issues: list[DocumentSaveIssue],
+    document_classification_discrepancies: list[DocumentClassificationDiscrepancy],
 ) -> list[DiscrepancyReport]:
     created_at_utc = utc_timestamp()
     reports = [
@@ -277,6 +297,23 @@ def _build_discrepancy_reports(
         )
         for discrepancy in aggregated.discrepancies
     ]
+    reports.extend(
+        DiscrepancyReport(
+            run_id=run_report.run_id,
+            mail_id=mail.mail_id,
+            workflow_id=run_report.workflow_id,
+            severity=discrepancy.severity,
+            code=discrepancy.code,
+            message=discrepancy.message,
+            rule_id=None,
+            details={
+                **discrepancy.details,
+                "non_rule_source": "document_classification",
+            },
+            created_at_utc=created_at_utc,
+        )
+        for discrepancy in document_classification_discrepancies
+    )
     reports.extend(
         DiscrepancyReport(
             run_id=run_report.run_id,
@@ -350,6 +387,20 @@ def _serialize_document_save_issue(issue: DocumentSaveIssue) -> dict:
     }
 
 
+def _serialize_document_classification_discrepancy(
+    discrepancy: DocumentClassificationDiscrepancy,
+) -> dict:
+    return {
+        "code": discrepancy.code,
+        "severity": discrepancy.severity,
+        "message": discrepancy.message,
+        "subject_scope": "mail",
+        "target_ref": None,
+        "details": dict(discrepancy.details),
+        "source_rule_ids": [],
+    }
+
+
 def _stage_mail_if_eligible(
     *,
     descriptor: WorkflowDescriptor,
@@ -408,20 +459,20 @@ def _classify_saved_documents_for_workflow(
     descriptor: WorkflowDescriptor,
     workflow_payload: object | None,
     document_save_result: DocumentSaveResult,
-) -> DocumentSaveResult:
+    document_analysis_provider: SavedDocumentAnalysisProvider | None,
+) -> ClassifiedDocumentSet:
     if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
-        return document_save_result
+        return ClassifiedDocumentSet(
+            saved_documents=list(document_save_result.saved_documents),
+            decision_reasons=[],
+            discrepancies=[],
+        )
     if not isinstance(workflow_payload, ExportMailPayload):
         raise ValueError("Export workflow validation requires ExportMailPayload for document classification")
-    classified = classify_saved_export_documents(
+    return classify_saved_export_documents(
         payload=workflow_payload,
         saved_documents=document_save_result.saved_documents,
-    )
-    return DocumentSaveResult(
-        saved_documents=classified.saved_documents,
-        issues=list(document_save_result.issues),
-        decision_reasons=list(document_save_result.decision_reasons) + list(classified.decision_reasons),
-        destination_directory=document_save_result.destination_directory,
+        analysis_provider=document_analysis_provider or NullSavedDocumentAnalysisProvider(),
     )
 
 
