@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
+from project.workflows.export_lc_sc.payloads import build_export_mail_payload
 from project.workflows.export_lc_sc.parsing import extract_file_numbers, normalize_file_number, parse_export_subject
+from project.workflows.snapshot import SourceAttachmentRecord, SourceEmailRecord, build_email_snapshot
 
 
 class ExportParsingTests(unittest.TestCase):
@@ -28,6 +30,28 @@ class ExportParsingTests(unittest.TestCase):
         self.assertEqual(parsed.lc_sc_number_end_sequence, "8")
         self.assertEqual(parsed.buyer_name, "ZYTA APPARELS LTD")
         self.assertEqual(parsed.suffix_tokens, [])
+
+    def test_build_export_mail_payload_preserves_attachment_order(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD",
+                    sender_address="sender@example.com",
+                    body_text="Please process file P/26/0042.",
+                    attachments=[
+                        SourceAttachmentRecord(attachment_name="LC.pdf"),
+                        SourceAttachmentRecord(attachment_name="PI.pdf"),
+                    ],
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+
+        payload = build_export_mail_payload(mail)
+
+        self.assertEqual([attachment.attachment_name for attachment in payload.attachments_in_order], ["LC.pdf", "PI.pdf"])
 
 
 if __name__ == "__main__":

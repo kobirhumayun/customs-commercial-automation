@@ -7,7 +7,12 @@ from typing import Protocol
 
 from project.models import EmailMessage
 from project.utils.time import validate_timezone
-from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot, load_snapshot_manifest
+from project.workflows.snapshot import (
+    SourceAttachmentRecord,
+    SourceEmailRecord,
+    build_email_snapshot,
+    load_snapshot_manifest,
+)
 
 
 class MailSnapshotProvider(Protocol):
@@ -62,6 +67,7 @@ class Win32ComMailSnapshotProvider:
                     subject_raw=_safe_string(getattr(item, "Subject", "")),
                     sender_address=_safe_string(getattr(item, "SenderEmailAddress", "")),
                     body_text=_safe_string(getattr(item, "Body", "")),
+                    attachments=_load_attachment_records(getattr(item, "Attachments", None)),
                 )
             )
         return build_email_snapshot(records, state_timezone=state_timezone)
@@ -101,6 +107,33 @@ def _safe_string(value: object) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _load_attachment_records(value: object) -> list[SourceAttachmentRecord]:
+    if value is None:
+        return []
+
+    count = getattr(value, "Count", None)
+    if isinstance(count, int):
+        items = [value.Item(index) for index in range(1, count + 1)]
+    else:
+        items = list(value)
+
+    records: list[SourceAttachmentRecord] = []
+    for item in items:
+        attachment_name = _safe_string(getattr(item, "FileName", "")).strip()
+        if not attachment_name:
+            continue
+        size_value = getattr(item, "Size", None)
+        size_bytes = size_value if isinstance(size_value, int) and size_value >= 0 else None
+        records.append(
+            SourceAttachmentRecord(
+                attachment_name=attachment_name,
+                content_type=_safe_string(getattr(item, "MimeType", "")),
+                size_bytes=size_bytes,
+            )
+        )
+    return records
 
 
 def _load_win32com_client_module():

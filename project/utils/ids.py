@@ -18,6 +18,10 @@ def build_mail_id(entry_id: str) -> str:
     return f"mail-{sha256_hex_text(entry_id)[:16]}"
 
 
+def build_attachment_id(mail_id: str, attachment_index: int, normalized_filename: str) -> str:
+    return sha256_hex_text(f"{mail_id}|{attachment_index}|{normalized_filename}")
+
+
 def build_saved_document_id(mail_id: str, normalized_filename: str, destination_path: str) -> str:
     return sha256_hex_text(f"{mail_id}|{normalized_filename}|{destination_path}")
 

@@ -44,6 +44,16 @@ class ProcessingJob:
 
 
 @dataclass(slots=True, frozen=True)
+class EmailAttachment:
+    attachment_id: str
+    attachment_index: int
+    attachment_name: str
+    normalized_filename: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class EmailMessage:
     mail_id: str
     entry_id: str
@@ -53,6 +63,7 @@ class EmailMessage:
     sender_address: str
     snapshot_index: int
     body_text: str = ""
+    attachments: list["EmailAttachment"] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

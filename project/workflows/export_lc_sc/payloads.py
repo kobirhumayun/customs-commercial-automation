@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from project.erp import ERPFamily, ERPRegisterRow, ERPRowProvider
-from project.models import EmailMessage
+from project.models import EmailAttachment, EmailMessage
 from project.workflows.export_lc_sc.parsing import ParsedExportSubject, extract_file_numbers, parse_export_subject
 
 
@@ -20,6 +20,7 @@ class ExportMailPayload:
     file_numbers: list[str]
     erp_matches: list[ExportFileNumberMatch]
     verified_family: ERPFamily | None
+    attachments_in_order: list[EmailAttachment]
 
 
 def build_export_mail_payload(
@@ -46,6 +47,7 @@ def build_export_mail_payload(
         file_numbers=file_numbers,
         erp_matches=erp_matches,
         verified_family=_derive_verified_family(erp_matches),
+        attachments_in_order=list(mail.attachments),
     )
 
 

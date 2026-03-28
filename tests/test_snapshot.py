@@ -26,6 +26,10 @@ class SnapshotTests(unittest.TestCase):
                             "received_time": "2026-03-28T03:00:00Z",
                             "subject_raw": "Only mail",
                             "sender_address": "only@example.com",
+                            "attachments": [
+                                {"attachment_name": " PI-One.pdf ", "content_type": "application/pdf", "size_bytes": 10},
+                                {"attachment_name": "LC-One.pdf", "content_type": "application/pdf", "size_bytes": 20},
+                            ],
                         }
                     ]
                 ),
@@ -37,6 +41,10 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual(len(snapshot), 1)
         self.assertEqual(snapshot[0].entry_id, "entry-001")
+        self.assertEqual(
+            [attachment.normalized_filename for attachment in snapshot[0].attachments],
+            ["PI-One.pdf", "LC-One.pdf"],
+        )
 
     def test_build_email_snapshot_orders_by_received_time_then_entry_id(self) -> None:
         source_messages = [
@@ -72,6 +80,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot[0].received_time_workflow_tz, "2026-03-28T08:59:59+06:00")
 
     def test_live_outlook_snapshot_provider_reads_folder_and_preserves_deterministic_order(self) -> None:
+        class FakeAttachments:
+            def __init__(self, attachments) -> None:
+                self._attachments = attachments
+                self.Count = len(attachments)
+
+            def Item(self, index: int):
+                return self._attachments[index - 1]
+
         class FakeNamespace:
             def __init__(self) -> None:
                 self.folder = type(
@@ -88,6 +104,7 @@ class SnapshotTests(unittest.TestCase):
                                     "Subject": "Second",
                                     "SenderEmailAddress": "b@example.com",
                                     "Body": "body-b",
+                                    "Attachments": FakeAttachments([]),
                                 },
                             )(),
                             type(
@@ -99,6 +116,7 @@ class SnapshotTests(unittest.TestCase):
                                     "Subject": "First",
                                     "SenderEmailAddress": "a@example.com",
                                     "Body": "body-a",
+                                    "Attachments": FakeAttachments([]),
                                 },
                             )(),
                             type(
@@ -110,6 +128,28 @@ class SnapshotTests(unittest.TestCase):
                                     "Subject": "Earlier",
                                     "SenderEmailAddress": "c@example.com",
                                     "Body": "body-c",
+                                    "Attachments": FakeAttachments(
+                                        [
+                                            type(
+                                                "FakeAttachment",
+                                                (),
+                                                {
+                                                    "FileName": "cover-letter.pdf",
+                                                    "MimeType": "application/pdf",
+                                                    "Size": 11,
+                                                },
+                                            )(),
+                                            type(
+                                                "FakeAttachment",
+                                                (),
+                                                {
+                                                    "FileName": "lc-scan.pdf",
+                                                    "MimeType": "application/pdf",
+                                                    "Size": 22,
+                                                },
+                                            )(),
+                                        ]
+                                    ),
                                 },
                             )(),
                         ]
@@ -147,6 +187,11 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([mail.entry_id for mail in snapshot], ["C", "A", "B"])
         self.assertEqual(snapshot[0].body_text, "body-c")
         self.assertEqual(snapshot[1].received_time_workflow_tz, "2026-03-28T09:00:00+06:00")
+        self.assertEqual(
+            [attachment.attachment_name for attachment in snapshot[0].attachments],
+            ["cover-letter.pdf", "lc-scan.pdf"],
+        )
+        self.assertEqual(snapshot[0].attachments[0].size_bytes, 11)
 
 
 if __name__ == "__main__":

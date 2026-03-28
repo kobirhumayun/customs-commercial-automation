@@ -1,5 +1,6 @@
 from project.models.entities import (
     DiscrepancyReport,
+    EmailAttachment,
     EmailMessage,
     MailMoveOperation,
     MailOutcomeRecord,
@@ -27,6 +28,7 @@ from project.models.enums import (
 
 __all__ = [
     "DiscrepancyReport",
+    "EmailAttachment",
     "EmailMessage",
     "FinalDecision",
     "MailMoveOperation",
