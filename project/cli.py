@@ -26,6 +26,7 @@ from project.workbook import (
     XLWingsWorkbookSnapshotProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
+from project.workflows.recovery import assess_recovery
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
@@ -44,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_validate_run(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
+    if args.command == "recover-run":
+        return _handle_recover_run(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -106,6 +109,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    recover_run_parser = subparsers.add_parser(
+        "recover-run",
+        help="Assess whether a prior write-capable run can be safely resumed or reapplied.",
+    )
+    recover_run_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    recover_run_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
+    recover_run_parser.add_argument("--run-id", required=True, help="Prior run id to assess for recovery.")
+    recover_run_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest for deterministic recovery probing.",
+    )
+    recover_run_parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Probe the configured yearly workbook path via xlwings for recovery.",
+    )
+    recover_run_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     return parser
 
 
@@ -136,6 +167,10 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         "--apply-live-writes",
         action="store_true",
         help="Apply the staged workbook write batch against the live workbook after validation succeeds.",
+    )
+    parser.add_argument(
+        "--recovery-run-id",
+        help="Optional prior run id to assess before applying live writes.",
     )
     parser.add_argument(
         "--set",
@@ -234,6 +269,25 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             raise ValueError("--apply-live-writes requires --live-workbook")
         if args.apply_live_writes and not descriptor.write_capable:
             raise ValueError("--apply-live-writes is supported only for write-capable workflows")
+        if args.recovery_run_id and not args.live_workbook:
+            raise ValueError("--recovery-run-id requires --live-workbook")
+        if args.recovery_run_id:
+            recovery_result = assess_recovery(
+                workflow_id=descriptor.workflow_id,
+                run_artifact_root=config.run_artifact_root,
+                backup_root=config.backup_root,
+                run_id=args.recovery_run_id,
+                workbook_snapshot=_load_workbook_snapshot(
+                    workbook_json=args.workbook_json,
+                    live_workbook=args.live_workbook,
+                    config=config,
+                ),
+                current_workbook_path=_resolve_live_workbook_path(config),
+            )
+            if args.apply_live_writes and recovery_result.outcome != "safe_reapply_staged_writes":
+                raise ValueError(
+                    f"Recovery gate for {args.recovery_run_id} returned {recovery_result.outcome}; live writes are blocked."
+                )
         if args.apply_live_writes:
             validation_result = execute_live_write_batch(
                 validation_result=validation_result,
@@ -290,6 +344,48 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             if validation_result.commit_marker is not None
             else 0
         ),
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_recover_run(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        workbook_snapshot = _load_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            live_workbook=args.live_workbook,
+            config=config,
+        )
+        if workbook_snapshot is None:
+            raise ValueError("Recovery assessment requires --workbook-json or --live-workbook")
+        recovery_result = assess_recovery(
+            workflow_id=descriptor.workflow_id,
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            run_id=args.run_id,
+            workbook_snapshot=workbook_snapshot,
+            current_workbook_path=_resolve_live_workbook_path(config),
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": recovery_result.run_id,
+        "workflow_id": recovery_result.workflow_id.value,
+        "outcome": recovery_result.outcome,
+        "current_workbook_hash": recovery_result.current_workbook_hash,
+        "backup_hash": recovery_result.backup_hash,
+        "staged_write_plan_hash": recovery_result.staged_write_plan_hash,
+        "target_probe_count": len(recovery_result.target_probes),
+        "discrepancy_count": len(recovery_result.discrepancies),
+        "details": recovery_result.details,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
