@@ -937,6 +937,11 @@ class ValidationTests(unittest.TestCase):
                 validation_result.mail_outcomes[0].saved_documents[0]["save_decision"],
                 "saved_new",
             )
+            self.assertEqual(
+                validation_result.mail_outcomes[0].saved_documents[0]["document_type"],
+                "export_lc_sc_document",
+            )
+            self.assertTrue(validation_result.mail_outcomes[0].saved_documents[0]["print_eligible"])
             self.assertTrue(
                 validation_result.mail_outcomes[0].saved_documents[0]["destination_path"].replace("\\", "/").endswith(
                     "2026/ANANTA GARMENTS LTD/LC-0038/All Attachments/LC.pdf"

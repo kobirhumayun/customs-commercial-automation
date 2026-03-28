@@ -75,6 +75,9 @@ class SavedDocument:
     destination_path: str
     file_sha256: str
     save_decision: str
+    document_type: str | None = None
+    classification_reason: str | None = None
+    print_eligible: bool = False
 
 
 @dataclass(slots=True, frozen=True)

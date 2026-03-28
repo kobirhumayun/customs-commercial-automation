@@ -24,6 +24,7 @@ from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
 from project.workbook import WorkbookSnapshot
+from project.workflows.export_lc_sc.document_classification import classify_saved_export_documents
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
 from project.workflows.export_lc_sc.staging import (
     ExportStagingDiscrepancy,
@@ -94,6 +95,11 @@ def validate_run_snapshot(
             workflow_payload=context.workflow_payload,
             attachment_content_provider=attachment_content_provider,
             document_root=document_root,
+        )
+        document_save_result = _classify_saved_documents_for_workflow(
+            descriptor=descriptor,
+            workflow_payload=context.workflow_payload,
+            document_save_result=document_save_result,
         )
         aggregated = evaluate_rule_pack(context, rule_pack)
         staging_result = _stage_mail_if_eligible(
@@ -394,6 +400,28 @@ def _save_mail_documents_if_configured(
         verified_family=workflow_payload.verified_family,
         document_root=document_root,
         provider=attachment_content_provider,
+    )
+
+
+def _classify_saved_documents_for_workflow(
+    *,
+    descriptor: WorkflowDescriptor,
+    workflow_payload: object | None,
+    document_save_result: DocumentSaveResult,
+) -> DocumentSaveResult:
+    if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
+        return document_save_result
+    if not isinstance(workflow_payload, ExportMailPayload):
+        raise ValueError("Export workflow validation requires ExportMailPayload for document classification")
+    classified = classify_saved_export_documents(
+        payload=workflow_payload,
+        saved_documents=document_save_result.saved_documents,
+    )
+    return DocumentSaveResult(
+        saved_documents=classified.saved_documents,
+        issues=list(document_save_result.issues),
+        decision_reasons=list(document_save_result.decision_reasons) + list(classified.decision_reasons),
+        destination_directory=document_save_result.destination_directory,
     )
 
 

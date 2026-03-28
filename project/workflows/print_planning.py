@@ -179,6 +179,10 @@ def _newly_saved_documents(outcome: MailOutcomeRecord) -> list[dict[str, Any]]:
         for document in outcome.saved_documents
         if str(document.get("save_decision", "")).strip() == "saved_new"
         and str(document.get("destination_path", "")).strip()
+        and (
+            "print_eligible" not in document
+            or bool(document.get("print_eligible"))
+        )
     ]
 
 
