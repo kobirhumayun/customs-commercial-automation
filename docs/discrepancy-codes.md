@@ -46,6 +46,10 @@ Every discrepancy payload should include:
 | `print_marker_mismatch` | `hard_block` | shared | A persisted print completion marker conflicted with the planned print group identity. |
 | `print_source_document_missing` | `hard_block` | shared | A planned print document path was missing at print execution time. |
 | `print_group_runtime_error` | `hard_block` | shared | A runtime error interrupted print execution for a planned print group. |
+| `mail_move_gate_unsatisfied` | `hard_block` | shared | Mail moves were attempted before required upstream phases reached terminal success. |
+| `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
+| `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |
+| `mail_move_runtime_error` | `hard_block` | shared | A runtime error interrupted mail-move execution for a planned move operation. |
 | `mail_subject_missing` | `hard_block` | shared | A snapshotted mail is missing a usable subject. |
 | `mail_sender_missing` | `hard_block` | shared | A snapshotted mail is missing a canonical sender address. |
 
