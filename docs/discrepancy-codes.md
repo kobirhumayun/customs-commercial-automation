@@ -50,6 +50,7 @@ Every discrepancy payload should include:
 | `export_file_number_missing` | `hard_block` | export_lc_sc | Export mail body did not yield any canonical file numbers. |
 | `export_erp_row_missing` | `hard_block` | export_lc_sc | One or more extracted export file numbers did not resolve to a canonical ERP row. |
 | `export_family_inconsistent` | `hard_block` | export_lc_sc | Resolved ERP rows for extracted file numbers did not belong to one LC/SC family. |
+| `export_required_erp_field_missing` | `hard_block` | export_lc_sc | A canonical ERP row is missing one or more fields required for export workbook staging. |
 | `export_subject_family_mismatch` | `hard_block` | export_lc_sc | Parsed export subject fields did not match the verified ERP family. |
 | `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Import candidate resolution remained tied after all keys. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |

@@ -14,6 +14,7 @@ from project.reporting.persistence import write_discrepancies, write_mail_outcom
 from project.rules import load_rule_pack
 from project.utils.json import to_jsonable
 from project.utils.time import validate_timezone
+from project.workbook import JsonManifestWorkbookSnapshotProvider
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import get_workflow_descriptor
 from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
@@ -443,6 +444,393 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
             self.assertIn(
                 "export_family_inconsistent",
+                [report.code for report in validation_result.discrepancy_reports],
+            )
+
+    def test_validate_run_snapshot_stages_export_append_when_workbook_snapshot_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                            "notify_bank": "ABC BANK",
+                            "current_lc_value": "10000",
+                            "ship_date": "2026-02-01",
+                            "expiry_date": "2026-03-01",
+                            "lc_qty": "5000",
+                            "lc_unit": "YDS",
+                            "amd_no": "05",
+                            "amd_date": "2026-01-15",
+                            "nego_bank": "XYZ BANK",
+                            "master_lc_no": "MLC-001",
+                            "master_lc_date": "2025-12-20",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            workbook_manifest_path = root / "workbook.json"
+            workbook_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "File No."},
+                            {"column_index": 2, "text": "L/C No."},
+                            {"column_index": 3, "text": "Buyer Name"},
+                            {"column_index": 4, "text": "L/C Issuing Bank"},
+                            {"column_index": 5, "text": "LC Issue Date"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "Shipment Date"},
+                            {"column_index": 8, "text": "Expiry Date"},
+                            {"column_index": 9, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                            {"column_index": 10, "text": "L/C Amnd No."},
+                            {"column_index": 11, "text": "L/C Amnd Date"},
+                            {"column_index": 12, "text": "Lien Bank"},
+                            {"column_index": 13, "text": "Master L/C No."},
+                            {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 22, "text": "Amount"},
+                        ],
+                        "rows": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+                workbook_snapshot=JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot(),
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+            self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
+            self.assertEqual(len(validation_result.staged_write_plan), 14)
+            self.assertEqual(validation_result.staged_write_plan[0].row_index, 3)
+            self.assertEqual(
+                [operation.column_key for operation in validation_result.staged_write_plan[:3]],
+                ["file_no", "lc_sc_no", "buyer_name"],
+            )
+
+    def test_validate_run_snapshot_skips_duplicate_file_number_in_workbook(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                            "notify_bank": "ABC BANK",
+                            "current_lc_value": "10000",
+                            "ship_date": "2026-02-01",
+                            "expiry_date": "2026-03-01",
+                            "lc_qty": "5000",
+                            "lc_unit": "YDS",
+                            "amd_no": "05",
+                            "amd_date": "2026-01-15",
+                            "nego_bank": "XYZ BANK",
+                            "master_lc_no": "MLC-001",
+                            "master_lc_date": "2025-12-20",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            workbook_manifest_path = root / "workbook.json"
+            workbook_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "File No."},
+                            {"column_index": 2, "text": "L/C No."},
+                            {"column_index": 3, "text": "Buyer Name"},
+                            {"column_index": 4, "text": "L/C Issuing Bank"},
+                            {"column_index": 5, "text": "LC Issue Date"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "Shipment Date"},
+                            {"column_index": 8, "text": "Expiry Date"},
+                            {"column_index": 9, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                            {"column_index": 10, "text": "L/C Amnd No."},
+                            {"column_index": 11, "text": "L/C Amnd Date"},
+                            {"column_index": 12, "text": "Lien Bank"},
+                            {"column_index": 13, "text": "Master L/C No."},
+                            {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 22, "text": "Amount"},
+                        ],
+                        "rows": [{"row_index": 3, "values": {"1": "P/26/0042"}}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+                workbook_snapshot=JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot(),
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+            self.assertFalse(validation_result.mail_outcomes[0].eligible_for_write)
+            self.assertEqual(validation_result.staged_write_plan, [])
+
+    def test_validate_run_snapshot_hard_blocks_invalid_workbook_header_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                            "notify_bank": "ABC BANK",
+                            "current_lc_value": "10000",
+                            "ship_date": "2026-02-01",
+                            "expiry_date": "2026-03-01",
+                            "lc_qty": "5000",
+                            "lc_unit": "YDS",
+                            "amd_no": "05",
+                            "amd_date": "2026-01-15",
+                            "nego_bank": "XYZ BANK",
+                            "master_lc_no": "MLC-001",
+                            "master_lc_date": "2025-12-20",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            workbook_manifest_path = root / "workbook.json"
+            workbook_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "File No."},
+                            {"column_index": 2, "text": "L/C No."},
+                            {"column_index": 3, "text": "Buyer Name"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 22, "text": "Amount"},
+                        ],
+                        "rows": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+                workbook_snapshot=JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot(),
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+            self.assertIn(
+                "workbook_header_mapping_invalid",
                 [report.code for report in validation_result.discrepancy_reports],
             )
 

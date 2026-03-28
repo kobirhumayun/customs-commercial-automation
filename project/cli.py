@@ -8,9 +8,15 @@ from project.config import load_workflow_config
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
-from project.reporting.persistence import write_discrepancies, write_mail_outcomes, write_run_metadata
+from project.reporting.persistence import (
+    write_discrepancies,
+    write_mail_outcomes,
+    write_run_metadata,
+    write_staged_write_plan,
+)
 from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
+from project.workbook import EmptyWorkbookSnapshotProvider, JsonManifestWorkbookSnapshotProvider
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
@@ -71,6 +77,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         "--erp-json",
         type=Path,
         help="Optional JSON manifest of canonical ERP rows for workflow validation.",
+    )
+    parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest for deterministic write staging.",
     )
     parser.add_argument(
         "--set",
@@ -159,12 +170,17 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             run_report=initialized.run_report,
             rule_pack=rule_pack,
             erp_row_provider=_load_erp_provider(args.erp_json),
+            workbook_snapshot=_load_workbook_snapshot(args.workbook_json),
         )
         write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
         write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
         write_discrepancies(
             initialized.artifact_paths,
             to_jsonable(validation_result.discrepancy_reports),
+        )
+        write_staged_write_plan(
+            initialized.artifact_paths,
+            to_jsonable(validation_result.staged_write_plan),
         )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -178,6 +194,7 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         "artifact_root": str(initialized.artifact_paths.run_root),
         "summary": validation_result.run_report.summary,
         "mail_iteration_order": validation_result.run_report.mail_iteration_order,
+        "staged_write_operation_count": len(validation_result.staged_write_plan),
     }
     print(pretty_json_dumps(payload), end="")
     return 0
@@ -216,6 +233,15 @@ def _load_erp_provider(erp_json: Path | None):
     if erp_json is None:
         return EmptyERPRowProvider()
     return JsonManifestERPRowProvider(erp_json)
+
+
+def _load_workbook_snapshot(workbook_json: Path | None):
+    provider = (
+        JsonManifestWorkbookSnapshotProvider(workbook_json)
+        if workbook_json is not None
+        else EmptyWorkbookSnapshotProvider()
+    )
+    return provider.load_snapshot()
 
 
 if __name__ == "__main__":

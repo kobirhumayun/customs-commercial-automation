@@ -13,10 +13,19 @@ from project.models import (
     OperatorContext,
     RunReport,
     WorkflowId,
+    WriteOperation,
 )
 from project.rules import AggregatedRuleEvaluation, LoadedRulePack, evaluate_rule_pack
+from project.utils.hashing import canonical_json_hash
+from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
+from project.workbook import WorkbookSnapshot
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
+from project.workflows.export_lc_sc.staging import (
+    ExportStagingDiscrepancy,
+    ExportWriteStagingResult,
+    stage_export_append_operations,
+)
 from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
 
@@ -39,6 +48,7 @@ class ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord]
     mail_reports: list[MailReport]
     discrepancy_reports: list[DiscrepancyReport]
+    staged_write_plan: list[WriteOperation]
 
 
 def validate_run_snapshot(
@@ -47,10 +57,12 @@ def validate_run_snapshot(
     run_report: RunReport,
     rule_pack: LoadedRulePack,
     erp_row_provider: ERPRowProvider | None = None,
+    workbook_snapshot: WorkbookSnapshot | None = None,
 ) -> ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord] = []
     mail_reports: list[MailReport] = []
     discrepancy_reports: list[DiscrepancyReport] = []
+    staged_write_plan: list[WriteOperation] = []
     summary = {"pass": 0, "warning": 0, "hard_block": 0}
 
     for mail in run_report.mail_snapshot:
@@ -69,24 +81,37 @@ def validate_run_snapshot(
             ),
         )
         aggregated = evaluate_rule_pack(context, rule_pack)
+        staging_result = _stage_mail_if_eligible(
+            descriptor=descriptor,
+            run_report=run_report,
+            mail=mail,
+            aggregated=aggregated,
+            workflow_payload=context.workflow_payload,
+            workbook_snapshot=workbook_snapshot,
+        )
         mail_outcome = _build_mail_outcome(
             descriptor=descriptor,
             run_report=run_report,
             mail=mail,
             aggregated=aggregated,
             workflow_payload=context.workflow_payload,
+            staging_result=staging_result,
         )
         mail_report = _build_mail_report(run_report, rule_pack, mail_outcome)
         mail_discrepancies = _build_discrepancy_reports(
             run_report=run_report,
             mail=mail,
             aggregated=aggregated,
+            staging_discrepancies=staging_result.discrepancies,
         )
 
         mail_outcomes.append(mail_outcome)
         mail_reports.append(mail_report)
         discrepancy_reports.extend(mail_discrepancies)
+        staged_write_plan.extend(staging_result.staged_write_operations)
         summary[mail_outcome.final_decision.value] += 1
+
+    staged_write_plan_hash = canonical_json_hash(to_jsonable(staged_write_plan))
 
     updated_run_report = RunReport(
         run_id=run_report.run_id,
@@ -105,7 +130,7 @@ def validate_run_snapshot(
         hash_algorithm=run_report.hash_algorithm,
         run_start_backup_hash=run_report.run_start_backup_hash,
         current_workbook_hash=run_report.current_workbook_hash,
-        staged_write_plan_hash=run_report.staged_write_plan_hash,
+        staged_write_plan_hash=staged_write_plan_hash,
         summary=summary,
         operator_context=run_report.operator_context,
         mail_snapshot=list(run_report.mail_snapshot),
@@ -118,6 +143,7 @@ def validate_run_snapshot(
         mail_outcomes=mail_outcomes,
         mail_reports=mail_reports,
         discrepancy_reports=discrepancy_reports,
+        staged_write_plan=staged_write_plan,
     )
 
 
@@ -128,8 +154,13 @@ def _build_mail_outcome(
     mail: EmailMessage,
     aggregated: AggregatedRuleEvaluation,
     workflow_payload: object | None,
+    staging_result,
 ) -> MailOutcomeRecord:
-    final_decision = aggregated.final_decision
+    final_decision = (
+        FinalDecision.HARD_BLOCK
+        if staging_result.discrepancies
+        else aggregated.final_decision
+    )
     processing_status = (
         MailProcessingStatus.BLOCKED
         if final_decision == FinalDecision.HARD_BLOCK
@@ -143,8 +174,8 @@ def _build_mail_outcome(
         snapshot_index=mail.snapshot_index,
         processing_status=processing_status,
         final_decision=final_decision,
-        decision_reasons=list(aggregated.decision_reasons),
-        eligible_for_write=allowed and descriptor.write_capable,
+        decision_reasons=list(aggregated.decision_reasons) + list(staging_result.decision_reasons),
+        eligible_for_write=allowed and descriptor.write_capable and bool(staging_result.staged_write_operations),
         eligible_for_print=allowed and descriptor.supports_print,
         eligible_for_mail_move=allowed,
         source_entry_id=mail.entry_id,
@@ -153,8 +184,12 @@ def _build_mail_outcome(
         rule_pack_id=run_report.rule_pack_id,
         rule_pack_version=run_report.rule_pack_version,
         applied_rule_ids=list(aggregated.applied_rule_ids),
-        discrepancies=[_serialize_discrepancy(discrepancy) for discrepancy in aggregated.discrepancies],
+        discrepancies=[
+            _serialize_discrepancy(discrepancy) for discrepancy in aggregated.discrepancies
+        ]
+        + [_serialize_staging_discrepancy(discrepancy) for discrepancy in staging_result.discrepancies],
         file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
+        staged_write_operations=to_jsonable(staging_result.staged_write_operations),
     )
 
 
@@ -185,9 +220,10 @@ def _build_discrepancy_reports(
     run_report: RunReport,
     mail: EmailMessage,
     aggregated: AggregatedRuleEvaluation,
+    staging_discrepancies: list[ExportStagingDiscrepancy],
 ) -> list[DiscrepancyReport]:
     created_at_utc = utc_timestamp()
-    return [
+    reports = [
         DiscrepancyReport(
             run_id=run_report.run_id,
             mail_id=mail.mail_id,
@@ -206,6 +242,24 @@ def _build_discrepancy_reports(
         )
         for discrepancy in aggregated.discrepancies
     ]
+    reports.extend(
+        DiscrepancyReport(
+            run_id=run_report.run_id,
+            mail_id=mail.mail_id,
+            workflow_id=run_report.workflow_id,
+            severity=discrepancy.severity,
+            code=discrepancy.code,
+            message=discrepancy.message,
+            rule_id=None,
+            details={
+                **discrepancy.details,
+                "non_rule_source": "workbook_staging",
+            },
+            created_at_utc=created_at_utc,
+        )
+        for discrepancy in staging_discrepancies
+    )
+    return reports
 
 
 def _serialize_discrepancy(discrepancy) -> dict:
@@ -218,6 +272,49 @@ def _serialize_discrepancy(discrepancy) -> dict:
         "details": dict(discrepancy.details),
         "source_rule_ids": list(discrepancy.source_rule_ids),
     }
+
+
+def _serialize_staging_discrepancy(discrepancy: ExportStagingDiscrepancy) -> dict:
+    return {
+        "code": discrepancy.code,
+        "severity": discrepancy.severity,
+        "message": discrepancy.message,
+        "subject_scope": "mail",
+        "target_ref": None,
+        "details": dict(discrepancy.details),
+        "source_rule_ids": [],
+    }
+
+
+def _stage_mail_if_eligible(
+    *,
+    descriptor: WorkflowDescriptor,
+    run_report: RunReport,
+    mail: EmailMessage,
+    aggregated: AggregatedRuleEvaluation,
+    workflow_payload: object | None,
+    workbook_snapshot: WorkbookSnapshot | None,
+):
+    if aggregated.final_decision == FinalDecision.HARD_BLOCK:
+        return ExportWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=[],
+        )
+    if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
+        return ExportWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=[],
+        )
+    if not isinstance(workflow_payload, ExportMailPayload):
+        raise ValueError("Export workflow validation requires ExportMailPayload for staging")
+    return stage_export_append_operations(
+        run_id=run_report.run_id,
+        mail_id=mail.mail_id,
+        payload=workflow_payload,
+        workbook_snapshot=workbook_snapshot,
+    )
 
 
 def _extract_file_numbers(descriptor: WorkflowDescriptor, workflow_payload: object | None) -> list[str]:

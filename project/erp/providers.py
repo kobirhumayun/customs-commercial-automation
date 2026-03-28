@@ -65,6 +65,17 @@ def _load_manifest_rows(path: Path) -> list[ERPRegisterRow]:
                 buyer_name=buyer_name,
                 lc_sc_date=lc_sc_date,
                 source_row_index=source_row_index,
+                notify_bank=_optional_string(item.get("notify_bank")),
+                current_lc_value=_optional_string(item.get("current_lc_value")),
+                ship_date=_optional_string(item.get("ship_date")),
+                expiry_date=_optional_string(item.get("expiry_date")),
+                lc_qty=_optional_string(item.get("lc_qty")),
+                lc_unit=_optional_string(item.get("lc_unit")),
+                amd_no=_optional_string(item.get("amd_no")),
+                amd_date=_optional_string(item.get("amd_date")),
+                nego_bank=_optional_string(item.get("nego_bank")),
+                master_lc_no=_optional_string(item.get("master_lc_no")),
+                master_lc_date=_optional_string(item.get("master_lc_date")),
             )
         )
     return rows
@@ -82,3 +93,7 @@ def _require_int(item: dict, key: str, index: int) -> int:
     if isinstance(value, int):
         return value
     raise ValueError(f"ERP row at index {index} is missing integer '{key}'")
+
+
+def _optional_string(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""

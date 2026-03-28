@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from project.models import FinalDecision, WriteOperation
+from project.utils.ids import build_write_operation_id
+from project.workbook import EXPORT_HEADER_SPECS, WorkbookSnapshot, resolve_header_mapping
+from project.workflows.export_lc_sc.payloads import ExportMailPayload
+
+
+@dataclass(slots=True, frozen=True)
+class ExportStagingDiscrepancy:
+    code: str
+    severity: FinalDecision
+    message: str
+    details: dict
+
+
+@dataclass(slots=True, frozen=True)
+class ExportWriteStagingResult:
+    staged_write_operations: list[WriteOperation]
+    discrepancies: list[ExportStagingDiscrepancy]
+    decision_reasons: list[str]
+
+
+EXPORT_FIELD_VALUE_MAP = (
+    ("file_no", lambda match: match.file_number),
+    ("lc_sc_no", lambda match: match.canonical_row.lc_sc_number),
+    ("buyer_name", lambda match: match.canonical_row.buyer_name),
+    ("lc_issuing_bank", lambda match: match.canonical_row.notify_bank),
+    ("lc_issue_date", lambda match: match.canonical_row.lc_sc_date),
+    ("export_amount", lambda match: match.canonical_row.current_lc_value),
+    ("shipment_date", lambda match: match.canonical_row.ship_date),
+    ("expiry_date", lambda match: match.canonical_row.expiry_date),
+    ("quantity_fabrics", lambda match: match.canonical_row.lc_qty),
+    ("lc_amnd_no", lambda match: match.canonical_row.amd_no),
+    ("lc_amnd_date", lambda match: match.canonical_row.amd_date),
+    ("lien_bank", lambda match: match.canonical_row.nego_bank),
+    ("master_lc_no", lambda match: match.canonical_row.master_lc_no),
+    ("master_lc_issue_date", lambda match: match.canonical_row.master_lc_date),
+)
+
+REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty")
+
+
+def stage_export_append_operations(
+    *,
+    run_id: str,
+    mail_id: str,
+    payload: ExportMailPayload,
+    workbook_snapshot: WorkbookSnapshot | None,
+) -> ExportWriteStagingResult:
+    if workbook_snapshot is None:
+        return ExportWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=["Workbook snapshot not supplied; write staging deferred."],
+        )
+
+    header_mapping = resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+    if header_mapping is None:
+        return ExportWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[
+                ExportStagingDiscrepancy(
+                    code="workbook_header_mapping_invalid",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message="Required workbook headers could not be resolved deterministically.",
+                    details={"sheet_name": workbook_snapshot.sheet_name},
+                )
+            ],
+            decision_reasons=["Workbook header mapping failed."],
+        )
+
+    existing_file_numbers = {
+        row.values.get(header_mapping["file_no"], "").strip().upper()
+        for row in workbook_snapshot.rows
+    }
+    next_row_index = max((row.row_index for row in workbook_snapshot.rows), default=2) + 1
+    operation_index = 0
+    staged_write_operations: list[WriteOperation] = []
+    discrepancies: list[ExportStagingDiscrepancy] = []
+    decision_reasons: list[str] = []
+
+    for match in payload.erp_matches:
+        if match.canonical_row is None:
+            continue
+        if match.file_number.upper() in existing_file_numbers:
+            decision_reasons.append(
+                f"Skipped workbook append for {match.file_number} because the file number already exists."
+            )
+            continue
+
+        missing_fields = [
+            field_name
+            for field_name in REQUIRED_ERP_STAGE_FIELDS
+            if not getattr(match.canonical_row, field_name).strip()
+        ]
+        if missing_fields:
+            discrepancies.append(
+                ExportStagingDiscrepancy(
+                    code="export_required_erp_field_missing",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message="Canonical ERP row is missing required fields for export workbook staging.",
+                    details={
+                        "file_number": match.file_number,
+                        "missing_fields": missing_fields,
+                    },
+                )
+            )
+            continue
+
+        for column_key, value_getter in EXPORT_FIELD_VALUE_MAP:
+            staged_write_operations.append(
+                WriteOperation(
+                    write_operation_id=build_write_operation_id(
+                        run_id=run_id,
+                        mail_id=mail_id,
+                        operation_index_within_mail=operation_index,
+                        sheet_name=workbook_snapshot.sheet_name,
+                        row_index=next_row_index,
+                        column_key=column_key,
+                    ),
+                    run_id=run_id,
+                    mail_id=mail_id,
+                    operation_index_within_mail=operation_index,
+                    sheet_name=workbook_snapshot.sheet_name,
+                    row_index=next_row_index,
+                    column_key=column_key,
+                    expected_pre_write_value=None,
+                    expected_post_write_value=value_getter(match),
+                    row_eligibility_checks=[
+                        "append_target_row_is_new",
+                        "target_cell_blank_by_construction",
+                    ],
+                )
+            )
+            operation_index += 1
+        decision_reasons.append(f"Staged workbook append for {match.file_number} at row {next_row_index}.")
+        existing_file_numbers.add(match.file_number.upper())
+        next_row_index += 1
+
+    if not decision_reasons:
+        decision_reasons.append("No workbook staging decisions were produced.")
+
+    return ExportWriteStagingResult(
+        staged_write_operations=staged_write_operations,
+        discrepancies=discrepancies,
+        decision_reasons=decision_reasons,
+    )
