@@ -5,12 +5,23 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from project.cli import main
+from project.models import (
+    FinalDecision,
+    MailMovePhaseStatus,
+    MailOutcomeRecord,
+    MailProcessingStatus,
+    PrintPhaseStatus,
+    RunReport,
+    WorkflowId,
+    WriteOperation,
+    WritePhaseStatus,
+)
 from project.workbook import WorkbookHeader
-from project.models import WorkflowId
 
 
 class CLITests(unittest.TestCase):
@@ -146,6 +157,109 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["outcome"], "safe_reapply_staged_writes")
         self.assertEqual(payload["run_id"], "run-123")
+
+    def test_plan_print_command_prints_group_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=[],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="subject",
+                    sender_address="a@example.com",
+                    saved_documents=[{"destination_path": "C:/docs/doc.pdf", "save_decision": "saved_new"}],
+                )
+            ]
+            staged_write_plan = [
+                WriteOperation(
+                    write_operation_id="op-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    operation_index_within_mail=0,
+                    sheet_name="Sheet1",
+                    row_index=3,
+                    column_key="file_no",
+                    expected_pre_write_value=None,
+                    expected_post_write_value="P/26/0042",
+                    row_eligibility_checks=[],
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, staged_write_plan),
+            ):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "plan-print",
+                            "export_lc_sc",
+                            "--config",
+                            str(config_path),
+                            "--run-id",
+                            "run-123",
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["print_group_count"], 1)
+        self.assertEqual(payload["print_phase_status"], "planned")
 
 
 if __name__ == "__main__":

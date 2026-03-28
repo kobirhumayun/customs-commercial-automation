@@ -13,6 +13,7 @@ from project.reporting.persistence import (
     write_commit_marker,
     write_discrepancies,
     write_mail_outcomes,
+    write_print_plan,
     write_run_metadata,
     write_staged_write_plan,
     write_target_probes,
@@ -26,6 +27,11 @@ from project.workbook import (
     XLWingsWorkbookSnapshotProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
+from project.workflows.print_planning import (
+    build_print_plan_payload,
+    load_print_planning_bundle,
+    plan_print_batches,
+)
 from project.workflows.recovery import assess_recovery
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
@@ -47,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_workbook(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
+    if args.command == "plan-print":
+        return _handle_plan_print(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -130,6 +138,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Probe the configured yearly workbook path via xlwings for recovery.",
     )
     recover_run_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    plan_print_parser = subparsers.add_parser(
+        "plan-print",
+        help="Build deterministic print-group planning for a committed or safely resumable run.",
+    )
+    plan_print_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    plan_print_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
+    plan_print_parser.add_argument("--run-id", required=True, help="Run id whose print phase should be planned.")
+    plan_print_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest for recovery-gated print planning.",
+    )
+    plan_print_parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Use the configured live workbook for recovery-gated print planning.",
+    )
+    plan_print_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -391,6 +427,78 @@ def _handle_recover_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_plan_print(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        if not descriptor.supports_print:
+            raise ValueError("Print planning is not supported for this workflow")
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        recovery_outcome = None
+        if run_report.write_phase_status.value != "committed":
+            workbook_snapshot = _load_workbook_snapshot(
+                workbook_json=args.workbook_json,
+                live_workbook=args.live_workbook,
+                config=config,
+            )
+            if workbook_snapshot is None:
+                raise ValueError(
+                    "Print planning for non-committed runs requires --workbook-json or --live-workbook."
+                )
+            recovery_result = assess_recovery(
+                workflow_id=descriptor.workflow_id,
+                run_artifact_root=config.run_artifact_root,
+                backup_root=config.backup_root,
+                run_id=args.run_id,
+                workbook_snapshot=workbook_snapshot,
+                current_workbook_path=_resolve_live_workbook_path(config),
+            )
+            recovery_outcome = recovery_result.outcome
+            if recovery_outcome != "safe_resume":
+                raise ValueError(
+                    f"Recovery gate for {args.run_id} returned {recovery_outcome}; print planning is blocked."
+                )
+        planning_result = plan_print_batches(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
+            recovery_outcome=recovery_outcome,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        write_run_metadata(artifact_paths, to_jsonable(planning_result.run_report))
+        write_mail_outcomes(artifact_paths, to_jsonable(planning_result.mail_outcomes))
+        write_print_plan(
+            artifact_paths,
+            build_print_plan_payload(planning_result.print_batches),
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": planning_result.run_report.run_id,
+        "workflow_id": planning_result.run_report.workflow_id.value,
+        "print_phase_status": planning_result.run_report.print_phase_status.value,
+        "print_group_order": planning_result.run_report.print_group_order,
+        "print_group_count": len(planning_result.print_batches),
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
 def _handle_inspect_workbook(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -477,6 +585,17 @@ def _load_workbook_snapshot(
 def _resolve_live_workbook_path(config):
     workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
     return config.resolve_master_workbook_path(workflow_year)
+
+
+def _resolve_run_artifact_paths(*, run_artifact_root: Path, backup_root: Path, workflow_id: str, run_id: str):
+    from project.storage import create_run_artifact_layout
+
+    return create_run_artifact_layout(
+        run_artifact_root=run_artifact_root,
+        backup_root=backup_root,
+        workflow_id=workflow_id,
+        run_id=run_id,
+    )
 
 
 if __name__ == "__main__":

@@ -217,6 +217,8 @@ class MailOutcomeRecord:
     saved_documents: list[dict[str, Any]] = field(default_factory=list)
     staged_write_operations: list[dict[str, Any]] = field(default_factory=list)
     import_keyword_revision: str | None = None
+    print_group_id: str | None = None
+    mail_move_operation_id: str | None = None
     schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID
     schema_version: str = REPORT_SCHEMA_VERSION
     report_schema_version: str = REPORT_SCHEMA_VERSION
