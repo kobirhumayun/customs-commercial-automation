@@ -1,0 +1,3 @@
+RULE_PACK_ID = "core.default"
+RULE_PACK_VERSION = "1.0.0"
+RULE_DEFINITIONS = ()

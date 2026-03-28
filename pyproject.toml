@@ -1,9 +1,9 @@
 [project]
 name = "customs-commercial-automation"
 version = "0.1.0"
-description = "Add your description here"
+description = "Windows-first customs and commercial workflow automation toolkit."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "img2table>=1.4.2",
     "ocrmypdf>=16.13.0",
@@ -13,5 +13,13 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "pytesseract>=0.3.13",
     "pywin32>=311",
+    "tzdata>=2025.2",
     "xlwings>=0.33.22",
 ]
+
+[project.scripts]
+customs-automation = "project.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

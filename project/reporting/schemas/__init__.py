@@ -1,0 +1,6 @@
+REPORT_SCHEMA_VERSION = "1.0.0"
+
+RUN_REPORT_SCHEMA_ID = "run_report"
+MAIL_REPORT_SCHEMA_ID = "mail_report"
+DISCREPANCY_REPORT_SCHEMA_ID = "discrepancy_report"
+RECOVERY_ARTIFACT_SCHEMA_ID = "recovery_artifact"
