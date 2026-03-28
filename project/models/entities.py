@@ -154,6 +154,14 @@ class MailOutcomeRecord:
     source_entry_id: str
     subject_raw: str
     sender_address: str
+    rule_pack_id: str | None = None
+    rule_pack_version: str | None = None
+    applied_rule_ids: list[str] = field(default_factory=list)
+    discrepancies: list[dict[str, Any]] = field(default_factory=list)
+    file_numbers_extracted: list[str] = field(default_factory=list)
+    saved_documents: list[dict[str, Any]] = field(default_factory=list)
+    staged_write_operations: list[dict[str, Any]] = field(default_factory=list)
+    import_keyword_revision: str | None = None
     schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID
     schema_version: str = REPORT_SCHEMA_VERSION
     report_schema_version: str = REPORT_SCHEMA_VERSION

@@ -7,10 +7,12 @@ from pathlib import Path
 from project.config import load_workflow_config
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
+from project.reporting.persistence import write_discrepancies, write_mail_outcomes, write_run_metadata
 from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
+from project.workflows.validation import validate_run_snapshot
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +23,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_validate_config(args)
     if args.command == "init-run":
         return _handle_init_run(args)
+    if args.command == "validate-run":
+        return _handle_validate_run(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -44,6 +48,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Validate startup contracts and create the initial run artifact layout.",
     )
     _add_common_workflow_args(init_parser)
+
+    validate_run_parser = subparsers.add_parser(
+        "validate-run",
+        help="Initialize a run and evaluate the snapshotted mails through the current rule pack.",
+    )
+    _add_common_workflow_args(validate_run_parser)
 
     return parser
 
@@ -117,6 +127,50 @@ def _handle_init_run(args: argparse.Namespace) -> int:
         "master_workbook_path": initialized.master_workbook_path,
         "snapshot_count": len(initialized.run_report.mail_snapshot),
         "mail_iteration_order": initialized.run_report.mail_iteration_order,
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_validate_run(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
+        rule_pack = load_rule_pack(descriptor.workflow_id)
+        initialized = initialize_workflow_run(
+            descriptor=descriptor,
+            config=config,
+            rule_pack=rule_pack,
+            mail_snapshot=snapshot,
+        )
+        validation_result = validate_run_snapshot(
+            descriptor=descriptor,
+            run_report=initialized.run_report,
+            rule_pack=rule_pack,
+        )
+        write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
+        write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
+        write_discrepancies(
+            initialized.artifact_paths,
+            to_jsonable(validation_result.discrepancy_reports),
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": validation_result.run_report.run_id,
+        "workflow_id": validation_result.run_report.workflow_id.value,
+        "rule_pack_id": validation_result.run_report.rule_pack_id,
+        "rule_pack_version": validation_result.run_report.rule_pack_version,
+        "artifact_root": str(initialized.artifact_paths.run_root),
+        "summary": validation_result.run_report.summary,
+        "mail_iteration_order": validation_result.run_report.mail_iteration_order,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
