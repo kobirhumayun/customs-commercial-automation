@@ -149,6 +149,7 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         )
         self.assertEqual(classified.saved_documents[1].analysis_basis, "json_manifest")
         self.assertEqual(classified.saved_documents[1].extracted_pi_number, "PDL-26-0042")
+        self.assertEqual(classified.saved_documents[1].extracted_pi_confidence, None)
 
     def test_classify_saved_export_documents_marks_equal_cross_class_evidence_as_ambiguous(self) -> None:
         mail = build_email_snapshot(
@@ -185,6 +186,68 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(classified.saved_documents[0].document_type, "ambiguous_export_pdf")
         self.assertFalse(classified.saved_documents[0].print_eligible)
         self.assertEqual([item.code for item in classified.discrepancies], ["attachment_classification_ambiguous"])
+
+    def test_classify_saved_export_documents_hard_blocks_selected_ocr_pi_below_threshold(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD",
+                    sender_address="sender@example.com",
+                    body_text="Please process file P/26/0042.",
+                    attachments=[
+                        SourceAttachmentRecord(attachment_name="LC-0038.pdf"),
+                        SourceAttachmentRecord(attachment_name="scan.pdf"),
+                    ],
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+        payload = build_export_mail_payload(mail)
+
+        class OCRLikeProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                from project.documents import SavedDocumentAnalysis
+
+                if saved_document.normalized_filename == "scan.pdf":
+                    return SavedDocumentAnalysis(
+                        analysis_basis="ocr_text",
+                        extracted_pi_number="PDL-26-0042",
+                        extracted_pi_confidence=0.94,
+                        clause_confidence=0.94,
+                    )
+                return SavedDocumentAnalysis(analysis_basis="pymupdf_text")
+
+        classified = classify_saved_export_documents(
+            payload=payload,
+            saved_documents=[
+                SavedDocument(
+                    saved_document_id="doc-1",
+                    mail_id=mail.mail_id,
+                    attachment_name="LC-0038.pdf",
+                    normalized_filename="LC-0038.pdf",
+                    destination_path="C:/docs/LC-0038.pdf",
+                    file_sha256="a" * 64,
+                    save_decision="saved_new",
+                    attachment_index=0,
+                ),
+                SavedDocument(
+                    saved_document_id="doc-2",
+                    mail_id=mail.mail_id,
+                    attachment_name="scan.pdf",
+                    normalized_filename="scan.pdf",
+                    destination_path="C:/docs/scan.pdf",
+                    file_sha256="b" * 64,
+                    save_decision="saved_new",
+                    attachment_index=1,
+                ),
+            ],
+            analysis_provider=OCRLikeProvider(),
+        )
+
+        self.assertIn("ocr_required_field_below_threshold", [item.code for item in classified.discrepancies])
+        self.assertFalse(any(document.print_eligible for document in classified.saved_documents))
 
 
 if __name__ == "__main__":

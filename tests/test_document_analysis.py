@@ -90,7 +90,9 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
 
         self.assertEqual(analysis.analysis_basis, "pymupdf_text")
         self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_lc_sc_confidence, 1.0)
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042-R1")
+        self.assertEqual(analysis.extracted_pi_confidence, 1.0)
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 1.0)
         self.assertIn("LC-0038", analysis.clause_excerpt)
@@ -154,7 +156,9 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
 
         self.assertEqual(analysis.analysis_basis, "ocr_text")
         self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_lc_sc_confidence, 0.99)
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
+        self.assertEqual(analysis.extracted_pi_confidence, 0.97)
         self.assertAlmostEqual(analysis.clause_confidence, 0.9567, places=4)
 
     def test_layered_provider_falls_back_to_ocr_when_text_analysis_has_no_identifiers(self) -> None:
@@ -183,6 +187,7 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
                 return SavedDocumentAnalysis(
                     analysis_basis="ocr_text",
                     extracted_pi_number="PDL-26-0042",
+                    extracted_pi_confidence=0.97,
                     clause_confidence=0.97,
                 )
 

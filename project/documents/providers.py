@@ -19,7 +19,9 @@ PI_CANDIDATE_PATTERN = re.compile(r"(?i)\bPDL\s*[- ]*\s*\d{2}\s*[- ]*\s*\d{1,4}(
 class SavedDocumentAnalysis:
     analysis_basis: str
     extracted_lc_sc_number: str | None = None
+    extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
+    extracted_pi_confidence: float | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
@@ -49,7 +51,9 @@ class JsonManifestSavedDocumentAnalysisProvider:
         return SavedDocumentAnalysis(
             analysis_basis="json_manifest",
             extracted_lc_sc_number=_optional_string(match.get("extracted_lc_sc_number")),
+            extracted_lc_sc_confidence=_optional_float(match.get("extracted_lc_sc_confidence")),
             extracted_pi_number=_optional_string(match.get("extracted_pi_number")),
+            extracted_pi_confidence=_optional_float(match.get("extracted_pi_confidence")),
             clause_related_lc_sc_number=_optional_string(match.get("clause_related_lc_sc_number")),
             clause_excerpt=_optional_string(match.get("clause_excerpt")),
             clause_confidence=_optional_float(match.get("clause_confidence")),
@@ -79,7 +83,9 @@ class PyMuPDFSavedDocumentAnalysisProvider:
         return SavedDocumentAnalysis(
             analysis_basis="pymupdf_text",
             extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            extracted_lc_sc_confidence=1.0 if lc_sc_match is not None else None,
             extracted_pi_number=pi_match[0] if pi_match is not None else None,
+            extracted_pi_confidence=1.0 if pi_match is not None else None,
             clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
             clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
             clause_confidence=1.0 if excerpt_seed is not None else None,
@@ -103,7 +109,7 @@ class OCRSavedDocumentAnalysisProvider:
             return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
 
         try:
-            extracted_text, confidence = _extract_pdf_text_with_ocr(
+            extracted_text, confidence, tokens, confidences = _extract_pdf_text_with_ocr(
                 document_path=document_path,
                 fitz_module=self._get_fitz_module(),
                 pytesseract_module=self._get_pytesseract_module(),
@@ -117,11 +123,23 @@ class OCRSavedDocumentAnalysisProvider:
 
         lc_sc_match = _first_lc_sc_match(extracted_text)
         pi_match = _first_pi_match(extracted_text)
+        lc_sc_confidence = (
+            _field_confidence_from_tokens(tokens, confidences, lc_sc_match[0], normalize_lc_sc_number)
+            if lc_sc_match is not None
+            else None
+        )
+        pi_confidence = (
+            _field_confidence_from_tokens(tokens, confidences, pi_match[0], _normalize_pi_number)
+            if pi_match is not None
+            else None
+        )
         excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
         return SavedDocumentAnalysis(
             analysis_basis="ocr_text",
             extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            extracted_lc_sc_confidence=lc_sc_confidence,
             extracted_pi_number=pi_match[0] if pi_match is not None else None,
+            extracted_pi_confidence=pi_confidence,
             clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
             clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
             clause_confidence=confidence,
@@ -219,7 +237,7 @@ def _extract_pdf_text_with_ocr(
     fitz_module: object,
     pytesseract_module: object,
     pil_image_module: object,
-) -> tuple[str, float | None]:
+) -> tuple[str, float | None, list[str], list[float]]:
     document = fitz_module.open(str(document_path))
     try:
         page_payloads = [_extract_ocr_page_payload(page, pytesseract_module, pil_image_module) for page in document]
@@ -228,21 +246,12 @@ def _extract_pdf_text_with_ocr(
         if callable(close):
             close()
 
-    tokens = [
-        token
-        for payload in page_payloads
-        for token in payload["tokens"]
-        if token
-    ]
-    confidences = [
-        confidence
-        for payload in page_payloads
-        for confidence in payload["confidences"]
-    ]
+    tokens = [token for payload in page_payloads for token in payload["tokens"]]
+    confidences = [confidence for payload in page_payloads for confidence in payload["confidences"]]
     text = " ".join(tokens)
     if not confidences:
-        return text, None
-    return text, round(sum(confidences) / len(confidences), 4)
+        return text, None, tokens, confidences
+    return text, round(sum(confidences) / len(confidences), 4), tokens, confidences
 
 
 def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_image_module: object) -> dict[str, list]:
@@ -259,9 +268,15 @@ def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_imag
     data = pytesseract_module.image_to_data(image, output_type=output_type)
     texts = list(data.get("text", [])) if isinstance(data, dict) else []
     raw_confidences = list(data.get("conf", [])) if isinstance(data, dict) else []
-    tokens = [str(value).strip() for value in texts if str(value).strip()]
-    confidences = [_normalize_ocr_confidence(value) for value in raw_confidences]
-    confidences = [value for value in confidences if value is not None]
+    tokens: list[str] = []
+    confidences: list[float] = []
+    for raw_text, raw_confidence in zip(texts, raw_confidences):
+        token = str(raw_text).strip()
+        confidence = _normalize_ocr_confidence(raw_confidence)
+        if not token or confidence is None:
+            continue
+        tokens.append(token)
+        confidences.append(confidence)
     return {"tokens": tokens, "confidences": confidences}
 
 
@@ -334,6 +349,30 @@ def _normalize_ocr_confidence(value: object) -> float | None:
     if numeric < 0:
         return None
     return round(numeric / 100.0, 4)
+
+
+def _field_confidence_from_tokens(
+    tokens: list[str],
+    confidences: list[float],
+    target: str,
+    normalizer,
+) -> float | None:
+    if not tokens or len(tokens) != len(confidences):
+        return None
+    normalized_target = normalizer(target)
+    if normalized_target is None:
+        return None
+    best: float | None = None
+    for start in range(len(tokens)):
+        for end in range(start + 1, min(len(tokens), start + 6) + 1):
+            candidate = " ".join(tokens[start:end])
+            candidate_normalized = normalizer(candidate)
+            if candidate_normalized != normalized_target:
+                continue
+            average_confidence = round(sum(confidences[start:end]) / (end - start), 4)
+            if best is None or average_confidence > best:
+                best = average_confidence
+    return best
 
 
 def _load_pymupdf_module():

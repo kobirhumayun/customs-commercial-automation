@@ -10,6 +10,8 @@ from project.workflows.export_lc_sc.payloads import ExportMailPayload
 
 PI_FILENAME_PATTERN = re.compile(r"(?i)\bPDL[-_ ]?\d{2}[-_ ]?\d{1,4}(?:[-_ ]?R\d+)?\b")
 PI_TOKEN_PATTERN = re.compile(r"(?i)(?:^|[^A-Z0-9])PI(?:[^A-Z0-9]|$)")
+EXPORT_LC_SC_OCR_MIN_CONFIDENCE = 0.98
+EXPORT_PI_OCR_MIN_CONFIDENCE = 0.95
 
 
 @dataclass(slots=True, frozen=True)
@@ -109,6 +111,13 @@ def classify_saved_export_documents(
             f"Selected {pi_selected.normalized_filename} as the export PI print document."
         )
 
+    discrepancies.extend(
+        _build_ocr_quality_discrepancies(
+            finalized_candidates=classified_documents,
+            selected_document_ids=selected_document_ids,
+        )
+    )
+
     finalized_documents = [
         replace(
             document,
@@ -147,7 +156,9 @@ def _annotate_saved_document(
         saved_document,
         analysis_basis=analysis.analysis_basis,
         extracted_lc_sc_number=analysis.extracted_lc_sc_number,
+        extracted_lc_sc_confidence=analysis.extracted_lc_sc_confidence,
         extracted_pi_number=analysis.extracted_pi_number,
+        extracted_pi_confidence=analysis.extracted_pi_confidence,
         clause_related_lc_sc_number=analysis.clause_related_lc_sc_number,
         clause_excerpt=analysis.clause_excerpt,
         clause_confidence=analysis.clause_confidence,
@@ -319,6 +330,93 @@ def _final_classification_reason(
     if document.document_type in {"export_lc_sc_document", "export_pi_document"}:
         return f"{base_reason} Not selected as the primary document for this export class."
     return base_reason
+
+
+def _build_ocr_quality_discrepancies(
+    *,
+    finalized_candidates: list[SavedDocument],
+    selected_document_ids: set[str],
+) -> list[DocumentClassificationDiscrepancy]:
+    discrepancies: list[DocumentClassificationDiscrepancy] = []
+    for document in finalized_candidates:
+        if document.saved_document_id not in selected_document_ids:
+            continue
+        if document.analysis_basis != "ocr_text":
+            continue
+        if document.document_type == "export_lc_sc_document":
+            if not document.extracted_lc_sc_number:
+                discrepancies.append(
+                    _build_ocr_discrepancy(
+                        code="ocr_required_field_missing",
+                        message="OCR-selected export LC/SC document did not yield an LC/SC number.",
+                        details={
+                            "saved_document_id": document.saved_document_id,
+                            "normalized_filename": document.normalized_filename,
+                            "required_field": "lc_sc_number",
+                            "document_type": document.document_type,
+                        },
+                    )
+                )
+            elif (
+                document.extracted_lc_sc_confidence is None
+                or document.extracted_lc_sc_confidence < EXPORT_LC_SC_OCR_MIN_CONFIDENCE
+            ):
+                discrepancies.append(
+                    _build_ocr_discrepancy(
+                        code="ocr_required_field_below_threshold",
+                        message="OCR-selected export LC/SC document did not meet the LC/SC confidence threshold.",
+                        details={
+                            "saved_document_id": document.saved_document_id,
+                            "normalized_filename": document.normalized_filename,
+                            "required_field": "lc_sc_number",
+                            "document_type": document.document_type,
+                            "observed_confidence": document.extracted_lc_sc_confidence,
+                            "minimum_confidence": EXPORT_LC_SC_OCR_MIN_CONFIDENCE,
+                        },
+                    )
+                )
+        if document.document_type == "export_pi_document":
+            if not document.extracted_pi_number:
+                discrepancies.append(
+                    _build_ocr_discrepancy(
+                        code="ocr_required_field_missing",
+                        message="OCR-selected export PI document did not yield a PI reference.",
+                        details={
+                            "saved_document_id": document.saved_document_id,
+                            "normalized_filename": document.normalized_filename,
+                            "required_field": "pi_reference",
+                            "document_type": document.document_type,
+                        },
+                    )
+                )
+            elif (
+                document.extracted_pi_confidence is None
+                or document.extracted_pi_confidence < EXPORT_PI_OCR_MIN_CONFIDENCE
+            ):
+                discrepancies.append(
+                    _build_ocr_discrepancy(
+                        code="ocr_required_field_below_threshold",
+                        message="OCR-selected export PI document did not meet the PI confidence threshold.",
+                        details={
+                            "saved_document_id": document.saved_document_id,
+                            "normalized_filename": document.normalized_filename,
+                            "required_field": "pi_reference",
+                            "document_type": document.document_type,
+                            "observed_confidence": document.extracted_pi_confidence,
+                            "minimum_confidence": EXPORT_PI_OCR_MIN_CONFIDENCE,
+                        },
+                    )
+                )
+    return discrepancies
+
+
+def _build_ocr_discrepancy(*, code: str, message: str, details: dict[str, object]) -> DocumentClassificationDiscrepancy:
+    return DocumentClassificationDiscrepancy(
+        code=code,
+        severity=FinalDecision.HARD_BLOCK,
+        message=message,
+        details=details,
+    )
 
 
 def _compact_alnum(value: str) -> str:
