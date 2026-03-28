@@ -7,6 +7,8 @@ from pathlib import Path
 
 from project.config import load_workflow_config
 from project.models import FinalDecision, WorkflowId
+from project.models.enums import MailProcessingStatus
+from project.outlook import ConfiguredFolderGateway
 from project.reporting.persistence import write_discrepancies, write_mail_outcomes, write_run_metadata
 from project.rules import load_rule_pack
 from project.utils.json import to_jsonable
@@ -18,6 +20,47 @@ from project.workflows.validation import validate_run_snapshot
 
 
 class ValidationTests(unittest.TestCase):
+    def test_configured_folder_gateway_returns_entry_id_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                        'source_working_folder_display_name = "working"',
+                        'destination_success_display_name = "UD and LC"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_workflow_config(
+                descriptor=get_workflow_descriptor(WorkflowId.EXPORT_LC_SC),
+                config_path=config_path,
+            )
+
+        resolved = ConfiguredFolderGateway().resolve_configured_folders(config=config)
+
+        self.assertEqual(resolved.resolution_mode, "entry_id")
+        self.assertEqual(resolved.source_working_folder.entry_id, "src-folder")
+        self.assertEqual(resolved.source_working_folder.display_name, "working")
+        self.assertEqual(resolved.destination_success_folder.entry_id, "dst-folder")
+
     def test_validate_run_snapshot_marks_empty_rule_pack_mails_as_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -113,6 +156,84 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(len(mail_outcome_records), 2)
             self.assertEqual([record["final_decision"] for record in mail_outcome_records], ["pass", "pass"])
             self.assertEqual(initialized.artifact_paths.discrepancies_path.read_text(encoding="utf-8"), "")
+
+    def test_validate_run_snapshot_hard_blocks_blank_subject(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "   ",
+                            "sender_address": "one@example.com",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+            )
+
+            self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+            self.assertEqual(
+                validation_result.mail_outcomes[0].processing_status,
+                MailProcessingStatus.BLOCKED,
+            )
+            self.assertEqual(validation_result.discrepancy_reports[0].code, "mail_subject_missing")
 
 
 if __name__ == "__main__":

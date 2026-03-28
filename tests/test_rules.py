@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from project.models import FinalDecision, OperatorContext, RunReport, WorkflowId
-from project.models.enums import MailMovePhaseStatus, PrintPhaseStatus, RuleStage, WritePhaseStatus
+from project.models import FinalDecision, OperatorContext, WorkflowId
+from project.models.enums import RuleStage
 from project.rules import (
     LoadedRulePack,
     RuleDefinition,
@@ -22,7 +22,10 @@ class RuleLoaderTests(unittest.TestCase):
 
         self.assertEqual(rule_pack.rule_pack_id, "export_lc_sc.default")
         self.assertEqual(rule_pack.rule_pack_version, "1.0.0")
-        self.assertEqual(rule_pack.rule_definitions, ())
+        self.assertEqual(
+            [rule.rule_id for rule in rule_pack.rule_definitions],
+            ["core.mail.sender_present.v1", "core.mail.subject_present.v1"],
+        )
 
     def test_rule_engine_aggregates_precedence_and_deduplicates_discrepancies(self) -> None:
         def warning_rule(context: WorkflowValidationContext) -> RuleEvaluationResult:

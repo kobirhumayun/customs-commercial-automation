@@ -37,8 +37,8 @@ def load_snapshot_manifest(path: Path) -> list[SourceEmailRecord]:
             raise ValueError(f"Snapshot message at index {index} must be a JSON object")
         entry_id = _require_non_empty_string(item, "entry_id", index)
         received_time = _require_non_empty_string(item, "received_time", index)
-        subject_raw = _require_non_empty_string(item, "subject_raw", index)
-        sender_address = _require_non_empty_string(item, "sender_address", index)
+        subject_raw = _require_string(item, "subject_raw", index)
+        sender_address = _require_string(item, "sender_address", index)
         records.append(
             SourceEmailRecord(
                 entry_id=entry_id,
@@ -97,4 +97,11 @@ def _require_non_empty_string(item: dict[str, Any], key: str, index: int) -> str
     value = item.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Snapshot message at index {index} is missing a non-empty '{key}'")
+    return value
+
+
+def _require_string(item: dict[str, Any], key: str, index: int) -> str:
+    value = item.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"Snapshot message at index {index} is missing a string '{key}'")
     return value

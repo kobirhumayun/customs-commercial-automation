@@ -17,6 +17,7 @@ from project.models import (
     RunReport,
     WritePhaseStatus,
 )
+from project.outlook import ConfiguredFolderGateway, OutlookFolderGateway
 from project.rules import LoadedRulePack
 from project.storage import (
     RunArtifactPaths,
@@ -50,6 +51,7 @@ def initialize_workflow_run(
     config: ResolvedWorkflowConfig,
     rule_pack: LoadedRulePack,
     mail_snapshot: list[EmailMessage] | None = None,
+    folder_gateway: OutlookFolderGateway | None = None,
 ) -> InitializedWorkflowRun:
     workflow_timezone = validate_timezone(config.state_timezone)
     workflow_year = datetime.now(tz=workflow_timezone).year
@@ -60,6 +62,9 @@ def initialize_workflow_run(
         username=getpass.getuser(),
         host_name=socket.gethostname(),
         process_id=os.getpid(),
+    )
+    resolved_folders = (folder_gateway or ConfiguredFolderGateway()).resolve_configured_folders(
+        config=config
     )
     artifact_paths = create_run_artifact_layout(
         run_artifact_root=config.run_artifact_root,
@@ -107,9 +112,17 @@ def initialize_workflow_run(
         summary={"pass": 0, "warning": 0, "hard_block": 0},
         operator_context=operator_context,
         mail_snapshot=snapshot,
-        resolved_source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")) or None,
-        resolved_destination_folder_entry_id=str(config.values.get("destination_success_entry_id", "")) or None,
-        folder_resolution_mode="entry_id" if descriptor.requires_mail_folders else None,
+        resolved_source_folder_entry_id=(
+            resolved_folders.source_working_folder.entry_id
+            if resolved_folders.source_working_folder is not None
+            else None
+        ),
+        resolved_destination_folder_entry_id=(
+            resolved_folders.destination_success_folder.entry_id
+            if resolved_folders.destination_success_folder is not None
+            else None
+        ),
+        folder_resolution_mode=resolved_folders.resolution_mode if descriptor.requires_mail_folders else None,
     )
     mail_outcomes = initialize_mail_outcomes(
         run_id=run_id,

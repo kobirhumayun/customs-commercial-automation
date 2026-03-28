@@ -1,1 +1,4 @@
-rule_ids = []
+rule_ids = [
+  "core.mail.sender_present.v1",
+  "core.mail.subject_present.v1",
+]
