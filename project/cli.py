@@ -9,7 +9,7 @@ from project.config import load_workflow_config
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
-from project.outlook import SimulatedMailMoveProvider
+from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
 from project.printing import SimulatedPrintProvider
 from project.reporting.persistence import (
     append_discrepancy,
@@ -220,6 +220,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--simulate",
         action="store_true",
         help="Use the simulated mail-move provider instead of a live Outlook adapter.",
+    )
+    execute_mail_moves_parser.add_argument(
+        "--live-outlook",
+        action="store_true",
+        help="Use the configured Outlook desktop profile via pywin32 for real mail moves.",
     )
     execute_mail_moves_parser.add_argument(
         "--set",
@@ -617,10 +622,10 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         descriptor = _descriptor_from_args(args.workflow_id)
         if not descriptor.requires_mail_folders:
             raise ValueError("Mail moves are not supported for this workflow")
-        if not args.simulate:
-            raise ValueError(
-                "A live Outlook move adapter is not implemented yet; rerun with --simulate to exercise the mail-move phase safely."
-            )
+        if args.simulate and args.live_outlook:
+            raise ValueError("Choose either --simulate or --live-outlook, not both")
+        if not args.simulate and not args.live_outlook:
+            raise ValueError("Choose one mail-move adapter mode: --simulate or --live-outlook")
         config = load_workflow_config(
             descriptor=descriptor,
             config_path=args.config,
@@ -637,11 +642,18 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
             workflow_id=descriptor.workflow_id.value,
             run_id=args.run_id,
         )
+        provider = (
+            SimulatedMailMoveProvider()
+            if args.simulate
+            else Win32ComMailMoveProvider(
+                outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None
+            )
+        )
         updated_run_report, updated_mail_outcomes, move_operations, discrepancies = execute_mail_moves(
             run_report=run_report,
             mail_outcomes=mail_outcomes,
             artifact_paths=artifact_paths,
-            provider=SimulatedMailMoveProvider(),
+            provider=provider,
             require_write_committed=descriptor.write_capable,
             require_print_completed=descriptor.supports_print,
             run_report_persistor=lambda report: write_run_metadata(artifact_paths, to_jsonable(report)),
