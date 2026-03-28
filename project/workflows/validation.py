@@ -12,6 +12,7 @@ from project.models import (
     MailReport,
     OperatorContext,
     RunReport,
+    WriteCommitMarker,
     WorkbookTargetProbe,
     WorkflowId,
     WriteOperation,
@@ -51,6 +52,7 @@ class ValidationBatchResult:
     discrepancy_reports: list[DiscrepancyReport]
     staged_write_plan: list[WriteOperation]
     target_probes: list[WorkbookTargetProbe]
+    commit_marker: WriteCommitMarker | None
 
 
 def validate_run_snapshot(
@@ -149,6 +151,7 @@ def validate_run_snapshot(
         discrepancy_reports=discrepancy_reports,
         staged_write_plan=staged_write_plan,
         target_probes=[],
+        commit_marker=None,
     )
 
 

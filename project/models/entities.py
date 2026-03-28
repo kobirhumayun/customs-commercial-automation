@@ -100,6 +100,7 @@ class WorkbookTargetProbe:
     write_operation_id: str
     run_id: str
     mail_id: str
+    probe_stage: str
     sheet_name: str
     row_index: int
     column_key: str
@@ -117,6 +118,20 @@ class WorkbookTargetPrevalidationSummary:
     matches_post_write: int
     mismatch_unknown: int
     status: str
+
+
+@dataclass(slots=True, frozen=True)
+class WriteCommitMarker:
+    run_id: str
+    workflow_id: WorkflowId
+    tool_version: str
+    rule_pack_version: str
+    committed_at_utc: str
+    operation_count: int
+    mail_iteration_order_hash: str
+    staged_write_plan_hash: str
+    run_start_backup_hash: str
+    post_write_probe_summary: dict[str, int]
 
 
 @dataclass(slots=True, frozen=True)

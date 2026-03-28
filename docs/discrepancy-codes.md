@@ -40,6 +40,8 @@ Every discrepancy payload should include:
 | `invalid_phase_state_transition` | `hard_block` | shared | Attempted workflow phase-state transition outside allowed state machine. |
 | `workbook_header_mapping_invalid` | `hard_block` | shared | Required workbook header missing/duplicated/ambiguous for canonical mapping. |
 | `workbook_target_prevalidation_failed` | `hard_block` | shared | A staged workbook target failed live prevalidation before any write attempt. |
+| `workbook_post_write_probe_mismatch` | `hard_block` | shared | A staged workbook target did not match its expected post-write value before commit marker creation. |
+| `workbook_apply_runtime_error` | `hard_block` | shared | A runtime error occurred after write application began and before a commit marker could be created. |
 | `mail_subject_missing` | `hard_block` | shared | A snapshotted mail is missing a usable subject. |
 | `mail_sender_missing` | `hard_block` | shared | A snapshotted mail is missing a canonical sender address. |
 

@@ -22,6 +22,7 @@ class RunArtifactPaths:
     target_probes_path: Path
     print_plan_path: Path
     discrepancies_path: Path
+    commit_marker_path: Path
     print_markers_dir: Path
     mail_move_markers_dir: Path
     logs_dir: Path
@@ -47,6 +48,7 @@ def create_run_artifact_layout(
         target_probes_path=run_root / "target_probes.jsonl",
         print_plan_path=run_root / "print_plan.json",
         discrepancies_path=run_root / "discrepancies.jsonl",
+        commit_marker_path=run_root / "write_commit_marker.json",
         print_markers_dir=run_root / "print_markers",
         mail_move_markers_dir=run_root / "mail_move_markers",
         logs_dir=run_root / "logs",
@@ -78,6 +80,7 @@ def initialize_run_artifacts(
     _write_jsonl(paths.mail_outcomes_path, mail_outcomes or [])
     atomic_write_text(paths.target_probes_path, "")
     atomic_write_text(paths.discrepancies_path, "")
+    atomic_write_text(paths.commit_marker_path, "")
 
 
 def copy_workbook_backup(source_workbook: Path, destination_path: Path) -> str:

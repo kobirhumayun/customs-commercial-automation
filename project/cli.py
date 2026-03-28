@@ -10,6 +10,7 @@ from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
 from project.reporting.persistence import (
+    write_commit_marker,
     write_discrepancies,
     write_mail_outcomes,
     write_run_metadata,
@@ -25,6 +26,7 @@ from project.workbook import (
     XLWingsWorkbookSnapshotProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
+from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
 from project.workflows.write_preparation import prepare_live_write_batch
@@ -131,6 +133,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Use a read-only live workbook snapshot instead of a JSON workbook manifest.",
     )
     parser.add_argument(
+        "--apply-live-writes",
+        action="store_true",
+        help="Apply the staged workbook write batch against the live workbook after validation succeeds.",
+    )
+    parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -223,7 +230,23 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 config=config,
             ),
         )
-        if args.live_workbook and descriptor.write_capable:
+        if args.apply_live_writes and not args.live_workbook:
+            raise ValueError("--apply-live-writes requires --live-workbook")
+        if args.apply_live_writes and not descriptor.write_capable:
+            raise ValueError("--apply-live-writes is supported only for write-capable workflows")
+        if args.apply_live_writes:
+            validation_result = execute_live_write_batch(
+                validation_result=validation_result,
+                workbook_path=_resolve_live_workbook_path(config),
+                operator_context=initialized.run_report.operator_context,
+                run_report_persistor=lambda report: write_run_metadata(
+                    initialized.artifact_paths, to_jsonable(report)
+                ),
+                target_probe_persistor=lambda probes: write_target_probes(
+                    initialized.artifact_paths, to_jsonable(probes)
+                ),
+            )
+        elif args.live_workbook and descriptor.write_capable:
             validation_result = prepare_live_write_batch(
                 validation_result=validation_result,
                 workbook_path=_resolve_live_workbook_path(config),
@@ -243,6 +266,10 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             initialized.artifact_paths,
             to_jsonable(validation_result.target_probes),
         )
+        write_commit_marker(
+            initialized.artifact_paths,
+            to_jsonable(validation_result.commit_marker),
+        )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -258,6 +285,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         "staged_write_operation_count": len(validation_result.staged_write_plan),
         "target_probe_count": len(validation_result.target_probes),
         "write_phase_status": validation_result.run_report.write_phase_status.value,
+        "committed_write_operations": (
+            validation_result.commit_marker.operation_count
+            if validation_result.commit_marker is not None
+            else 0
+        ),
     }
     print(pretty_json_dumps(payload), end="")
     return 0

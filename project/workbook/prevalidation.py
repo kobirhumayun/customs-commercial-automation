@@ -83,6 +83,7 @@ def prevalidate_staged_write_plan(
                 write_operation_id=operation.write_operation_id,
                 run_id=operation.run_id,
                 mail_id=operation.mail_id,
+                probe_stage="prevalidation",
                 sheet_name=operation.sheet_name,
                 row_index=operation.row_index,
                 column_key=operation.column_key,

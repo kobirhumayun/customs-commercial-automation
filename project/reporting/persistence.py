@@ -47,5 +47,12 @@ def write_target_probes(paths: RunArtifactPaths, payloads: list[Any]) -> None:
     atomic_write_text(paths.target_probes_path, content)
 
 
+def write_commit_marker(paths: RunArtifactPaths, payload: Any | None) -> None:
+    if payload is None:
+        atomic_write_text(paths.commit_marker_path, "")
+        return
+    write_json(paths.commit_marker_path, payload)
+
+
 def write_print_plan(paths: RunArtifactPaths, payload: Any) -> None:
     write_json(paths.print_plan_path, payload)

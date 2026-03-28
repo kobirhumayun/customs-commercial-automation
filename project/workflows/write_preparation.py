@@ -10,7 +10,6 @@ from project.models import (
     OperatorContext,
     RunReport,
     WorkbookTargetPrevalidationSummary,
-    WorkflowId,
     WritePhaseStatus,
 )
 from project.utils.time import utc_timestamp
@@ -72,6 +71,7 @@ def prepare_live_write_batch(
             discrepancy_reports=discrepancy_reports,
             staged_write_plan=validation_result.staged_write_plan,
             target_probes=[],
+            commit_marker=None,
         )
 
     prevalidation_result = prevalidate_staged_write_plan(
@@ -103,6 +103,7 @@ def prepare_live_write_batch(
         + list(prevalidation_result.discrepancy_reports),
         staged_write_plan=validation_result.staged_write_plan,
         target_probes=prevalidation_result.probes,
+        commit_marker=None,
     )
 
 
