@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from project.config import load_workflow_config
@@ -16,7 +17,12 @@ from project.reporting.persistence import (
 )
 from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
-from project.workbook import EmptyWorkbookSnapshotProvider, JsonManifestWorkbookSnapshotProvider
+from project.utils.time import validate_timezone
+from project.workbook import (
+    EmptyWorkbookSnapshotProvider,
+    JsonManifestWorkbookSnapshotProvider,
+    XLWingsWorkbookSnapshotProvider,
+)
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
@@ -32,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_init_run(args)
     if args.command == "validate-run":
         return _handle_validate_run(args)
+    if args.command == "inspect-workbook":
+        return _handle_inspect_workbook(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -62,6 +70,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_common_workflow_args(validate_run_parser)
 
+    inspect_workbook_parser = subparsers.add_parser(
+        "inspect-workbook",
+        help="Load a read-only workbook snapshot from JSON or the live workbook path.",
+    )
+    inspect_workbook_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_workbook_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_workbook_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest.",
+    )
+    inspect_workbook_parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Inspect the configured yearly workbook path via xlwings.",
+    )
+    inspect_workbook_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     return parser
 
 
@@ -82,6 +122,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         "--workbook-json",
         type=Path,
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
+    )
+    parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Use a read-only live workbook snapshot instead of a JSON workbook manifest.",
     )
     parser.add_argument(
         "--set",
@@ -170,7 +215,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             run_report=initialized.run_report,
             rule_pack=rule_pack,
             erp_row_provider=_load_erp_provider(args.erp_json),
-            workbook_snapshot=_load_workbook_snapshot(args.workbook_json),
+            workbook_snapshot=_load_workbook_snapshot(
+                workbook_json=args.workbook_json,
+                live_workbook=args.live_workbook,
+                config=config,
+            ),
         )
         write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
         write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
@@ -196,6 +245,36 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         "mail_iteration_order": validation_result.run_report.mail_iteration_order,
         "staged_write_operation_count": len(validation_result.staged_write_plan),
     }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_workbook(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        snapshot = _load_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            live_workbook=args.live_workbook,
+            config=config,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if snapshot is None:
+        payload = {"workbook_snapshot": None}
+    else:
+        payload = {
+            "sheet_name": snapshot.sheet_name,
+            "header_count": len(snapshot.headers),
+            "row_count": len(snapshot.rows),
+            "headers": to_jsonable(snapshot.headers),
+        }
     print(pretty_json_dumps(payload), end="")
     return 0
 
@@ -235,12 +314,21 @@ def _load_erp_provider(erp_json: Path | None):
     return JsonManifestERPRowProvider(erp_json)
 
 
-def _load_workbook_snapshot(workbook_json: Path | None):
-    provider = (
-        JsonManifestWorkbookSnapshotProvider(workbook_json)
-        if workbook_json is not None
-        else EmptyWorkbookSnapshotProvider()
-    )
+def _load_workbook_snapshot(
+    *,
+    workbook_json: Path | None,
+    live_workbook: bool,
+    config,
+):
+    if workbook_json is not None and live_workbook:
+        raise ValueError("Choose either --workbook-json or --live-workbook, not both")
+    if workbook_json is not None:
+        provider = JsonManifestWorkbookSnapshotProvider(workbook_json)
+    elif live_workbook:
+        workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
+        provider = XLWingsWorkbookSnapshotProvider(config.resolve_master_workbook_path(workflow_year))
+    else:
+        provider = EmptyWorkbookSnapshotProvider()
     return provider.load_snapshot()
 
 

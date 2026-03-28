@@ -3,6 +3,7 @@ from project.workbook.models import WorkbookHeader, WorkbookRow, WorkbookSnapsho
 from project.workbook.providers import (
     EmptyWorkbookSnapshotProvider,
     JsonManifestWorkbookSnapshotProvider,
+    XLWingsWorkbookSnapshotProvider,
     WorkbookSnapshotProvider,
 )
 
@@ -11,6 +12,7 @@ __all__ = [
     "EmptyWorkbookSnapshotProvider",
     "HeaderMappingSpec",
     "JsonManifestWorkbookSnapshotProvider",
+    "XLWingsWorkbookSnapshotProvider",
     "WorkbookHeader",
     "WorkbookRow",
     "WorkbookSnapshot",
