@@ -12,7 +12,7 @@ name = "appscript"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "lxml", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "lxml" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ca/52/2fa70edfd98f0058219ecc2e365a3ba7aabd42db14ff9d7f44bbdcc5400d/appscript-1.4.0.tar.gz", hash = "sha256:b2c6fc770bf822ea45529c7084bc0ee340e67ab260016b01d28e0449ec8723be", size = 295279, upload-time = "2025-10-08T07:56:39.126Z" }
 wheels = [
@@ -163,7 +163,7 @@ wheels = [
 [[package]]
 name = "customs-commercial-automation"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "img2table" },
     { name = "ocrmypdf" },
@@ -173,6 +173,7 @@ dependencies = [
     { name = "pymupdf" },
     { name = "pytesseract" },
     { name = "pywin32" },
+    { name = "tzdata" },
     { name = "xlwings" },
 ]
 
@@ -186,6 +187,7 @@ requires-dist = [
     { name = "pymupdf", specifier = ">=1.27.2.2" },
     { name = "pytesseract", specifier = ">=0.3.13" },
     { name = "pywin32", specifier = ">=311" },
+    { name = "tzdata", specifier = ">=2025.2" },
     { name = "xlwings", specifier = ">=0.33.22" },
 ]
 
