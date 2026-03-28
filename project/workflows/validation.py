@@ -12,6 +12,7 @@ from project.models import (
     MailReport,
     OperatorContext,
     RunReport,
+    WorkbookTargetProbe,
     WorkflowId,
     WriteOperation,
 )
@@ -49,6 +50,7 @@ class ValidationBatchResult:
     mail_reports: list[MailReport]
     discrepancy_reports: list[DiscrepancyReport]
     staged_write_plan: list[WriteOperation]
+    target_probes: list[WorkbookTargetProbe]
 
 
 def validate_run_snapshot(
@@ -137,6 +139,8 @@ def validate_run_snapshot(
         resolved_source_folder_entry_id=run_report.resolved_source_folder_entry_id,
         resolved_destination_folder_entry_id=run_report.resolved_destination_folder_entry_id,
         folder_resolution_mode=run_report.folder_resolution_mode,
+        workbook_session_preflight=run_report.workbook_session_preflight,
+        target_prevalidation_summary=run_report.target_prevalidation_summary,
     )
     return ValidationBatchResult(
         run_report=updated_run_report,
@@ -144,6 +148,7 @@ def validate_run_snapshot(
         mail_reports=mail_reports,
         discrepancy_reports=discrepancy_reports,
         staged_write_plan=staged_write_plan,
+        target_probes=[],
     )
 
 

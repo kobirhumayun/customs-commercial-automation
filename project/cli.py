@@ -14,6 +14,7 @@ from project.reporting.persistence import (
     write_mail_outcomes,
     write_run_metadata,
     write_staged_write_plan,
+    write_target_probes,
 )
 from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
@@ -26,6 +27,7 @@ from project.workbook import (
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
+from project.workflows.write_preparation import prepare_live_write_batch
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -221,6 +223,12 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 config=config,
             ),
         )
+        if args.live_workbook and descriptor.write_capable:
+            validation_result = prepare_live_write_batch(
+                validation_result=validation_result,
+                workbook_path=_resolve_live_workbook_path(config),
+                operator_context=initialized.run_report.operator_context,
+            )
         write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
         write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
         write_discrepancies(
@@ -230,6 +238,10 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         write_staged_write_plan(
             initialized.artifact_paths,
             to_jsonable(validation_result.staged_write_plan),
+        )
+        write_target_probes(
+            initialized.artifact_paths,
+            to_jsonable(validation_result.target_probes),
         )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -244,6 +256,8 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         "summary": validation_result.run_report.summary,
         "mail_iteration_order": validation_result.run_report.mail_iteration_order,
         "staged_write_operation_count": len(validation_result.staged_write_plan),
+        "target_probe_count": len(validation_result.target_probes),
+        "write_phase_status": validation_result.run_report.write_phase_status.value,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
@@ -330,6 +344,11 @@ def _load_workbook_snapshot(
     else:
         provider = EmptyWorkbookSnapshotProvider()
     return provider.load_snapshot()
+
+
+def _resolve_live_workbook_path(config):
+    workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
+    return config.resolve_master_workbook_path(workflow_year)
 
 
 if __name__ == "__main__":

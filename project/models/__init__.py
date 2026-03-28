@@ -9,6 +9,9 @@ from project.models.entities import (
     ProcessingJob,
     RunReport,
     SavedDocument,
+    WorkbookSessionPreflight,
+    WorkbookTargetPrevalidationSummary,
+    WorkbookTargetProbe,
     WriteOperation,
 )
 from project.models.enums import (
@@ -38,6 +41,9 @@ __all__ = [
     "RunReport",
     "SavedDocument",
     "WorkflowId",
+    "WorkbookSessionPreflight",
+    "WorkbookTargetPrevalidationSummary",
+    "WorkbookTargetProbe",
     "WriteOperation",
     "WritePhaseStatus",
 ]

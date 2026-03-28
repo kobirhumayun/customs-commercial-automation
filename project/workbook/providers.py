@@ -65,39 +65,7 @@ class XLWingsWorkbookSnapshotProvider:
         book = None
         try:
             book = app.books.open(str(self.workbook_path), update_links=False, read_only=True)
-            sheet = book.sheets[0]
-            used_range = sheet.used_range
-            last_row = int(used_range.last_cell.row)
-            last_column = int(used_range.last_cell.column)
-            header_values = sheet.range((2, 1), (2, last_column)).value or []
-            if not isinstance(header_values, list):
-                header_values = [header_values]
-            headers = [
-                WorkbookHeader(column_index=index, text=str(value).strip())
-                for index, value in enumerate(header_values, start=1)
-                if str(value or "").strip()
-            ]
-
-            rows: list[WorkbookRow] = []
-            if last_row >= 3:
-                body_values = sheet.range((3, 1), (last_row, last_column)).value
-                if body_values is None:
-                    body_matrix: list[list[object]] = []
-                elif last_row == 3 and not isinstance(body_values, list):
-                    body_matrix = [[body_values]]
-                elif body_values and isinstance(body_values, list) and body_values and not isinstance(body_values[0], list):
-                    body_matrix = [body_values]
-                else:
-                    body_matrix = body_values or []
-
-                for row_offset, row_values in enumerate(body_matrix, start=3):
-                    values = {
-                        column_index: _stringify_cell(cell_value)
-                        for column_index, cell_value in enumerate(row_values, start=1)
-                    }
-                    rows.append(WorkbookRow(row_index=row_offset, values=values))
-
-            return WorkbookSnapshot(sheet_name=sheet.name, headers=headers, rows=rows)
+            return _build_snapshot_from_book(book)
         finally:
             if book is not None:
                 book.close()
@@ -141,6 +109,42 @@ def _load_xlwings_module():
     except ImportError as exc:
         raise ValueError("xlwings is required for live workbook inspection") from exc
     return xlwings
+
+
+def _build_snapshot_from_book(book) -> WorkbookSnapshot:
+    sheet = book.sheets[0]
+    used_range = sheet.used_range
+    last_row = int(used_range.last_cell.row)
+    last_column = int(used_range.last_cell.column)
+    header_values = sheet.range((2, 1), (2, last_column)).value or []
+    if not isinstance(header_values, list):
+        header_values = [header_values]
+    headers = [
+        WorkbookHeader(column_index=index, text=str(value).strip())
+        for index, value in enumerate(header_values, start=1)
+        if str(value or "").strip()
+    ]
+
+    rows: list[WorkbookRow] = []
+    if last_row >= 3:
+        body_values = sheet.range((3, 1), (last_row, last_column)).value
+        if body_values is None:
+            body_matrix: list[list[object]] = []
+        elif last_row == 3 and not isinstance(body_values, list):
+            body_matrix = [[body_values]]
+        elif body_values and isinstance(body_values, list) and body_values and not isinstance(body_values[0], list):
+            body_matrix = [body_values]
+        else:
+            body_matrix = body_values or []
+
+        for row_offset, row_values in enumerate(body_matrix, start=3):
+            values = {
+                column_index: _stringify_cell(cell_value)
+                for column_index, cell_value in enumerate(row_values, start=1)
+            }
+            rows.append(WorkbookRow(row_index=row_offset, values=values))
+
+    return WorkbookSnapshot(sheet_name=sheet.name, headers=headers, rows=rows)
 
 
 def _stringify_cell(value: object) -> str:

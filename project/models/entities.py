@@ -81,6 +81,45 @@ class WriteOperation:
 
 
 @dataclass(slots=True, frozen=True)
+class WorkbookSessionPreflight:
+    workbook_path: str
+    adapter_name: str
+    status: str
+    attempt_count: int
+    host_name: str
+    process_id: int
+    session_id: str | None = None
+    opened_at_utc: str | None = None
+    read_only: bool | None = None
+    save_capable: bool | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class WorkbookTargetProbe:
+    write_operation_id: str
+    run_id: str
+    mail_id: str
+    sheet_name: str
+    row_index: int
+    column_key: str
+    column_index: int | None
+    expected_pre_write_value: str | int | float | None
+    expected_post_write_value: str | int | float | None
+    observed_value: str | int | float | None
+    classification: str
+
+
+@dataclass(slots=True, frozen=True)
+class WorkbookTargetPrevalidationSummary:
+    total_targets: int
+    matches_pre_write: int
+    matches_post_write: int
+    mismatch_unknown: int
+    status: str
+
+
+@dataclass(slots=True, frozen=True)
 class PrintBatch:
     print_group_id: str
     run_id: str
@@ -193,6 +232,8 @@ class RunReport:
     resolved_source_folder_entry_id: str | None = None
     resolved_destination_folder_entry_id: str | None = None
     folder_resolution_mode: str | None = None
+    workbook_session_preflight: WorkbookSessionPreflight | None = None
+    target_prevalidation_summary: WorkbookTargetPrevalidationSummary | None = None
     schema_id: str = RUN_REPORT_SCHEMA_ID
     schema_version: str = REPORT_SCHEMA_VERSION
     report_schema_version: str = REPORT_SCHEMA_VERSION

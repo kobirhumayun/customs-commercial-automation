@@ -39,5 +39,13 @@ def write_staged_write_plan(paths: RunArtifactPaths, payload: Any) -> None:
     write_json(paths.staged_write_plan_path, payload)
 
 
+def write_target_probes(paths: RunArtifactPaths, payloads: list[Any]) -> None:
+    if not payloads:
+        atomic_write_text(paths.target_probes_path, "")
+        return
+    content = "".join(f"{canonical_json_dumps(payload)}\n" for payload in payloads)
+    atomic_write_text(paths.target_probes_path, content)
+
+
 def write_print_plan(paths: RunArtifactPaths, payload: Any) -> None:
     write_json(paths.print_plan_path, payload)

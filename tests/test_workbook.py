@@ -6,9 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from project.models import WorkflowId, WriteOperation
 from project.workbook import (
     JsonManifestWorkbookSnapshotProvider,
+    WorkbookHeader,
+    WorkbookRow,
+    WorkbookSnapshot,
     XLWingsWorkbookSnapshotProvider,
+    XLWingsWorkbookWriteSessionProvider,
+    prevalidate_staged_write_plan,
     resolve_header_mapping,
 )
 from project.workbook.mapping import EXPORT_HEADER_SPECS
@@ -112,6 +118,164 @@ class WorkbookTests(unittest.TestCase):
         self.assertEqual(snapshot.sheet_name, "Sheet1")
         self.assertEqual(mapping["export_amount"], 6)
         self.assertEqual(mapping["file_no"], 1)
+
+    def test_xlwings_write_session_provider_reports_read_only_conflict(self) -> None:
+        class FakeCell:
+            def __init__(self, row: int, column: int) -> None:
+                self.row = row
+                self.column = column
+
+        class FakeUsedRange:
+            last_cell = FakeCell(2, 2)
+
+        class FakeSheet:
+            name = "Sheet1"
+            used_range = FakeUsedRange()
+
+            def range(self, *_args, **_kwargs):
+                raise AssertionError("Snapshot capture should not run for read-only conflict")
+
+        class FakeBook:
+            def __init__(self) -> None:
+                self.sheets = [FakeSheet()]
+                self.api = type("FakeApi", (), {"ReadOnly": True})()
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeBooks:
+            def open(self, *_args, **_kwargs):
+                return FakeBook()
+
+        class FakeApp:
+            def __init__(self, **_kwargs) -> None:
+                self.books = FakeBooks()
+
+            def quit(self) -> None:
+                self.quit_called = True
+
+        class FakeXLWings:
+            App = FakeApp
+
+        with patch("project.workbook.providers._load_xlwings_module", return_value=FakeXLWings()):
+            with patch("project.workbook.session._load_xlwings_module", return_value=FakeXLWings()):
+                result = XLWingsWorkbookWriteSessionProvider(Path("C:/fake.xlsx")).open_preflight_session(
+                    operator_context=None
+                )
+
+        self.assertEqual(result.discrepancy_code, "workbook_open_readonly")
+        self.assertIsNone(result.snapshot)
+        self.assertEqual(result.preflight.status, "read_only_conflict")
+        self.assertFalse(result.preflight.save_capable)
+
+    def test_prevalidate_staged_write_plan_matches_append_targets(self) -> None:
+        snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="File No."),
+                WorkbookHeader(column_index=2, text="L/C No."),
+                WorkbookHeader(column_index=3, text="Buyer Name"),
+                WorkbookHeader(column_index=4, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=5, text="LC Issue Date"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=22, text="Amount"),
+            ],
+            rows=[],
+        )
+        staged_write_plan = [
+            WriteOperation(
+                write_operation_id="op-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                operation_index_within_mail=0,
+                sheet_name="Sheet1",
+                row_index=3,
+                column_key="file_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="P/26/0042",
+                row_eligibility_checks=["append_target_row_is_new", "target_cell_blank_by_construction"],
+            ),
+            WriteOperation(
+                write_operation_id="op-2",
+                run_id="run-1",
+                mail_id="mail-1",
+                operation_index_within_mail=1,
+                sheet_name="Sheet1",
+                row_index=3,
+                column_key="lc_sc_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="LC-0038",
+                row_eligibility_checks=["append_target_row_is_new", "target_cell_blank_by_construction"],
+            ),
+        ]
+
+        result = prevalidate_staged_write_plan(
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            run_id="run-1",
+            workbook_snapshot=snapshot,
+            staged_write_plan=staged_write_plan,
+        )
+
+        self.assertEqual(result.summary.status, "passed")
+        self.assertEqual(result.summary.matches_pre_write, 2)
+        self.assertEqual(result.discrepancy_reports, [])
+        self.assertEqual([probe.classification for probe in result.probes], ["matches_pre_write", "matches_pre_write"])
+
+    def test_prevalidate_staged_write_plan_hard_blocks_existing_append_target(self) -> None:
+        snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="File No."),
+                WorkbookHeader(column_index=2, text="L/C No."),
+                WorkbookHeader(column_index=3, text="Buyer Name"),
+                WorkbookHeader(column_index=4, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=5, text="LC Issue Date"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=22, text="Amount"),
+            ],
+            rows=[WorkbookRow(row_index=3, values={1: "P/26/0042"})],
+        )
+        staged_write_plan = [
+            WriteOperation(
+                write_operation_id="op-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                operation_index_within_mail=0,
+                sheet_name="Sheet1",
+                row_index=3,
+                column_key="file_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="P/26/0042",
+                row_eligibility_checks=["append_target_row_is_new", "target_cell_blank_by_construction"],
+            )
+        ]
+
+        result = prevalidate_staged_write_plan(
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            run_id="run-1",
+            workbook_snapshot=snapshot,
+            staged_write_plan=staged_write_plan,
+        )
+
+        self.assertEqual(result.summary.status, "hard_blocked")
+        self.assertEqual(result.probes[0].classification, "mismatch_unknown")
+        self.assertEqual(result.discrepancy_reports[0].code, "workbook_target_prevalidation_failed")
 
 
 if __name__ == "__main__":
