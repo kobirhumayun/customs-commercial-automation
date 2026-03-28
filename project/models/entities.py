@@ -140,6 +140,7 @@ class PrintBatch:
     run_id: str
     mail_id: str
     print_group_index: int
+    document_paths: list[str]
     document_path_hashes: list[str]
     completion_marker_id: str
 

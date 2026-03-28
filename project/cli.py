@@ -9,7 +9,9 @@ from project.config import load_workflow_config
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
+from project.printing import SimulatedPrintProvider
 from project.reporting.persistence import (
+    append_discrepancy,
     write_commit_marker,
     write_discrepancies,
     write_mail_outcomes,
@@ -27,8 +29,10 @@ from project.workbook import (
     XLWingsWorkbookSnapshotProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
+from project.workflows.print_execution import execute_print_batches
 from project.workflows.print_planning import (
     build_print_plan_payload,
+    load_print_batches,
     load_print_planning_bundle,
     plan_print_batches,
 )
@@ -55,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_recover_run(args)
     if args.command == "plan-print":
         return _handle_plan_print(args)
+    if args.command == "execute-print":
+        return _handle_execute_print(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -166,6 +172,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use the configured live workbook for recovery-gated print planning.",
     )
     plan_print_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    execute_print_parser = subparsers.add_parser(
+        "execute-print",
+        help="Execute a previously planned print batch and persist completion markers.",
+    )
+    execute_print_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    execute_print_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
+    execute_print_parser.add_argument("--run-id", required=True, help="Run id whose print plan should be executed.")
+    execute_print_parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Use the simulated print provider instead of a live desktop print adapter.",
+    )
+    execute_print_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -494,6 +523,63 @@ def _handle_plan_print(args: argparse.Namespace) -> int:
         "print_phase_status": planning_result.run_report.print_phase_status.value,
         "print_group_order": planning_result.run_report.print_group_order,
         "print_group_count": len(planning_result.print_batches),
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_execute_print(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        if not descriptor.supports_print:
+            raise ValueError("Print execution is not supported for this workflow")
+        if not args.simulate:
+            raise ValueError(
+                "A live desktop print adapter is not implemented yet; rerun with --simulate to exercise the print phase safely."
+            )
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        print_batches = load_print_batches(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        updated_run_report, updated_mail_outcomes, discrepancies = execute_print_batches(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            artifact_paths=artifact_paths,
+            provider=SimulatedPrintProvider(),
+            run_report_persistor=lambda report: write_run_metadata(artifact_paths, to_jsonable(report)),
+        )
+        write_run_metadata(artifact_paths, to_jsonable(updated_run_report))
+        write_mail_outcomes(artifact_paths, to_jsonable(updated_mail_outcomes))
+        for discrepancy in discrepancies:
+            append_discrepancy(artifact_paths, to_jsonable(discrepancy))
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": updated_run_report.run_id,
+        "workflow_id": updated_run_report.workflow_id.value,
+        "print_phase_status": updated_run_report.print_phase_status.value,
+        "executed_group_count": len(print_batches),
+        "discrepancy_count": len(discrepancies),
     }
     print(pretty_json_dumps(payload), end="")
     return 0

@@ -75,6 +75,10 @@ def plan_print_batches(
                 run_id=run_report.run_id,
                 mail_id=outcome.mail_id,
                 print_group_index=print_group_index,
+                document_paths=[
+                    str(saved_document["destination_path"])
+                    for saved_document in _newly_saved_documents(outcome)
+                ],
                 document_path_hashes=document_path_hashes,
                 completion_marker_id=build_print_completion_marker_id(
                     run_report.run_id,
@@ -123,6 +127,7 @@ def build_print_plan_payload(print_batches: list[PrintBatch]) -> dict[str, Any]:
                 "run_id": batch.run_id,
                 "mail_id": batch.mail_id,
                 "print_group_index": batch.print_group_index,
+                "document_paths": list(batch.document_paths),
                 "document_path_hashes": list(batch.document_path_hashes),
                 "completion_marker_id": batch.completion_marker_id,
                 "blank_page_after_group": True,
@@ -266,4 +271,32 @@ def _parse_write_operation(payload: dict[str, Any]) -> WriteOperation:
         expected_pre_write_value=payload.get("expected_pre_write_value"),
         expected_post_write_value=payload.get("expected_post_write_value"),
         row_eligibility_checks=[str(value) for value in payload.get("row_eligibility_checks", [])],
+    )
+
+
+def load_print_batches(
+    *,
+    run_artifact_root: Path,
+    workflow_id: WorkflowId,
+    run_id: str,
+) -> list[PrintBatch]:
+    run_dir = run_artifact_root / workflow_id.value / run_id
+    payload = _load_json(run_dir / "print_plan.json")
+    if not isinstance(payload, dict):
+        raise ValueError("Persisted print plan must be a JSON object")
+    groups_payload = payload.get("print_groups", [])
+    if not isinstance(groups_payload, list):
+        raise ValueError("Persisted print plan groups must be a JSON array")
+    return [_parse_print_batch(item) for item in groups_payload]
+
+
+def _parse_print_batch(payload: dict[str, Any]) -> PrintBatch:
+    return PrintBatch(
+        print_group_id=str(payload["print_group_id"]),
+        run_id=str(payload["run_id"]),
+        mail_id=str(payload["mail_id"]),
+        print_group_index=int(payload["print_group_index"]),
+        document_paths=[str(value) for value in payload.get("document_paths", [])],
+        document_path_hashes=[str(value) for value in payload.get("document_path_hashes", [])],
+        completion_marker_id=str(payload["completion_marker_id"]),
     )

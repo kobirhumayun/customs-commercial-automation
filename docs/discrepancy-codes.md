@@ -42,6 +42,10 @@ Every discrepancy payload should include:
 | `workbook_target_prevalidation_failed` | `hard_block` | shared | A staged workbook target failed live prevalidation before any write attempt. |
 | `workbook_post_write_probe_mismatch` | `hard_block` | shared | A staged workbook target did not match its expected post-write value before commit marker creation. |
 | `workbook_apply_runtime_error` | `hard_block` | shared | A runtime error occurred after write application began and before a commit marker could be created. |
+| `print_adapter_unavailable` | `hard_block` | shared | Print adapter unavailable or not configured for the requested print execution path. |
+| `print_marker_mismatch` | `hard_block` | shared | A persisted print completion marker conflicted with the planned print group identity. |
+| `print_source_document_missing` | `hard_block` | shared | A planned print document path was missing at print execution time. |
+| `print_group_runtime_error` | `hard_block` | shared | A runtime error interrupted print execution for a planned print group. |
 | `mail_subject_missing` | `hard_block` | shared | A snapshotted mail is missing a usable subject. |
 | `mail_sender_missing` | `hard_block` | shared | A snapshotted mail is missing a canonical sender address. |
 
