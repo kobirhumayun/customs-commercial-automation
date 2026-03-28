@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from project.config import load_workflow_config
+from project.erp import JsonManifestERPRowProvider
 from project.models import FinalDecision, WorkflowId
 from project.models.enums import MailProcessingStatus
 from project.outlook import ConfiguredFolderGateway
@@ -112,7 +113,29 @@ class ValidationTests(unittest.TestCase):
                             "received_time": "2026-03-28T04:00:00Z",
                             "subject_raw": "SC-010-PDL-8-ZYTA APPARELS LTD",
                             "sender_address": "two@example.com",
-                            "body_text": "Related files are P-26-0007 and P/26/42.",
+                            "body_text": "Related file is P-26-0007.",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                        },
+                        {
+                            "file_number": "P/26/0007",
+                            "lc_sc_number": "SC-010-PDL-8",
+                            "buyer_name": "ZYTA APPARELS LTD",
+                            "lc_sc_date": "2026-01-12",
+                            "source_row_index": 7,
                         },
                     ]
                 ),
@@ -137,6 +160,7 @@ class ValidationTests(unittest.TestCase):
                 descriptor=descriptor,
                 run_report=initialized.run_report,
                 rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
             )
             write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
             write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
@@ -159,7 +183,7 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual([record["final_decision"] for record in mail_outcome_records], ["pass", "pass"])
             self.assertEqual(
                 [record["file_numbers_extracted"] for record in mail_outcome_records],
-                [["P/26/0042"], ["P/26/0007", "P/26/0042"]],
+                [["P/26/0042"], ["P/26/0007"]],
             )
             self.assertEqual(initialized.artifact_paths.discrepancies_path.read_text(encoding="utf-8"), "")
 
@@ -241,6 +265,186 @@ class ValidationTests(unittest.TestCase):
                 MailProcessingStatus.BLOCKED,
             )
             self.assertEqual(validation_result.discrepancy_reports[0].code, "mail_subject_missing")
+
+    def test_validate_run_snapshot_hard_blocks_missing_erp_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(json.dumps([]), encoding="utf-8")
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+            self.assertIn(
+                "export_erp_row_missing",
+                [report.code for report in validation_result.discrepancy_reports],
+            )
+
+    def test_validate_run_snapshot_hard_blocks_inconsistent_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 and P/26/0007 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0042",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "ANANTA GARMENTS LTD",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 5,
+                        },
+                        {
+                            "file_number": "P/26/0007",
+                            "lc_sc_number": "SC-010-PDL-8",
+                            "buyer_name": "ZYTA APPARELS LTD",
+                            "lc_sc_date": "2026-01-12",
+                            "source_row_index": 7,
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+            )
+
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+            self.assertIn(
+                "export_family_inconsistent",
+                [report.code for report in validation_result.discrepancy_reports],
+            )
 
 
 if __name__ == "__main__":

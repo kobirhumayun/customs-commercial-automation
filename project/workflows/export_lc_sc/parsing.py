@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from project.erp.normalization import normalize_buyer_name, normalize_lc_sc_number
+
 
 FILE_NUMBER_CANDIDATE_PATTERN = re.compile(r"(?i)\bP(?:[\\/ -]?\d{2}){1}(?:[\\/ -]?\d{1,4})\b")
 SUBJECT_PREFIX_PATTERN = re.compile(r"^(LC|SC)\s*-\s*(.+)$", re.IGNORECASE)
@@ -66,11 +68,16 @@ def parse_export_subject(subject_raw: str) -> ParsedExportSubject | None:
     if not number_body or not buyer_name:
         return None
 
+    lc_sc_number = normalize_lc_sc_number(f"{prefix}-{number_body}")
+    canonical_buyer_name = normalize_buyer_name(buyer_name)
+    if lc_sc_number is None or canonical_buyer_name is None:
+        return None
+
     return ParsedExportSubject(
         prefix=prefix,
-        lc_sc_number=f"{prefix}-{number_body}",
+        lc_sc_number=lc_sc_number,
         lc_sc_number_end_sequence=tokens[buyer_start_index - 1].strip(),
-        buyer_name=buyer_name,
+        buyer_name=canonical_buyer_name,
         suffix_tokens=suffix_tokens,
     )
 

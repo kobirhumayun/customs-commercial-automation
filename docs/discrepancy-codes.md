@@ -48,6 +48,9 @@ Every discrepancy payload should include:
 | `export_candidate_tie_after_full_tiebreak` | `hard_block` | export_lc_sc | Export candidate resolution remained tied after all keys. |
 | `export_subject_unparseable` | `hard_block` | export_lc_sc | Export mail subject could not be parsed into prefix, LC/SC number, buyer, and suffix context. |
 | `export_file_number_missing` | `hard_block` | export_lc_sc | Export mail body did not yield any canonical file numbers. |
+| `export_erp_row_missing` | `hard_block` | export_lc_sc | One or more extracted export file numbers did not resolve to a canonical ERP row. |
+| `export_family_inconsistent` | `hard_block` | export_lc_sc | Resolved ERP rows for extracted file numbers did not belong to one LC/SC family. |
+| `export_subject_family_mismatch` | `hard_block` | export_lc_sc | Parsed export subject fields did not match the verified ERP family. |
 | `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Import candidate resolution remained tied after all keys. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from project.erp import ERPRowProvider
 from project.models import (
     DiscrepancyReport,
     EmailMessage,
@@ -45,6 +46,7 @@ def validate_run_snapshot(
     descriptor: WorkflowDescriptor,
     run_report: RunReport,
     rule_pack: LoadedRulePack,
+    erp_row_provider: ERPRowProvider | None = None,
 ) -> ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord] = []
     mail_reports: list[MailReport] = []
@@ -60,7 +62,11 @@ def validate_run_snapshot(
             state_timezone=run_report.state_timezone,
             operator_context=run_report.operator_context,
             mail=mail,
-            workflow_payload=build_workflow_payload(run_report.workflow_id, mail),
+            workflow_payload=build_workflow_payload(
+                run_report.workflow_id,
+                mail,
+                erp_row_provider=erp_row_provider,
+            ),
         )
         aggregated = evaluate_rule_pack(context, rule_pack)
         mail_outcome = _build_mail_outcome(

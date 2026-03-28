@@ -27,7 +27,10 @@ class RuleLoaderTests(unittest.TestCase):
             [
                 "core.mail.sender_present.v1",
                 "core.mail.subject_present.v1",
+                "export_lc_sc.erp_rows_present.v1",
+                "export_lc_sc.family_consistent.v1",
                 "export_lc_sc.file_number_present.v1",
+                "export_lc_sc.subject_family_match.v1",
                 "export_lc_sc.subject_parseable.v1",
             ],
         )

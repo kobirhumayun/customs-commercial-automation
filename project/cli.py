@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from project.config import load_workflow_config
+from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider
 from project.reporting.persistence import write_discrepancies, write_mail_outcomes, write_run_metadata
@@ -65,6 +66,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         "--snapshot-json",
         type=Path,
         help="Optional JSON manifest of source emails to bind into the run snapshot.",
+    )
+    parser.add_argument(
+        "--erp-json",
+        type=Path,
+        help="Optional JSON manifest of canonical ERP rows for workflow validation.",
     )
     parser.add_argument(
         "--set",
@@ -152,6 +158,7 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             descriptor=descriptor,
             run_report=initialized.run_report,
             rule_pack=rule_pack,
+            erp_row_provider=_load_erp_provider(args.erp_json),
         )
         write_run_metadata(initialized.artifact_paths, to_jsonable(validation_result.run_report))
         write_mail_outcomes(initialized.artifact_paths, to_jsonable(validation_result.mail_outcomes))
@@ -203,6 +210,12 @@ def _load_snapshot_if_supplied(snapshot_json: Path | None, state_timezone: str):
         else EmptyMailSnapshotProvider()
     )
     return provider.load_snapshot(state_timezone=state_timezone)
+
+
+def _load_erp_provider(erp_json: Path | None):
+    if erp_json is None:
+        return EmptyERPRowProvider()
+    return JsonManifestERPRowProvider(erp_json)
 
 
 if __name__ == "__main__":
