@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from project.documents import JsonManifestSavedDocumentAnalysisProvider, PyMuPDFSavedDocumentAnalysisProvider
+from project.documents import (
+    JsonManifestSavedDocumentAnalysisProvider,
+    LayeredSavedDocumentAnalysisProvider,
+    OCRSavedDocumentAnalysisProvider,
+    PyMuPDFSavedDocumentAnalysisProvider,
+)
 from project.models import SavedDocument
 
 
@@ -89,6 +94,105 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 1.0)
         self.assertIn("LC-0038", analysis.clause_excerpt)
+
+    def test_ocr_provider_extracts_identifiers_from_rendered_page_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "scan.pdf"
+            pdf_path.write_bytes(b"fake scanned pdf")
+
+            class FakePixmap:
+                def tobytes(self, image_format: str) -> bytes:
+                    self.last_format = image_format
+                    return b"png-bytes"
+
+            class FakePage:
+                def get_pixmap(self) -> FakePixmap:
+                    return FakePixmap()
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    self.closed = True
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    return FakeDocument()
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    return {"opened": True, "stream_type": type(stream).__name__}
+
+            class FakeTesseract:
+                class Output:
+                    DICT = "DICT"
+
+                @staticmethod
+                def image_to_data(image, output_type=None):
+                    return {
+                        "text": ["Scanned", "LC-0038", "PDL-26-0042"],
+                        "conf": ["91", "99", "97"],
+                    }
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                    with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                        analysis = OCRSavedDocumentAnalysisProvider().analyze(
+                            saved_document=SavedDocument(
+                                saved_document_id="doc-2",
+                                mail_id="mail-1",
+                                attachment_name="scan.pdf",
+                                normalized_filename="scan.pdf",
+                                destination_path=str(pdf_path),
+                                file_sha256="b" * 64,
+                                save_decision="saved_new",
+                            )
+                        )
+
+        self.assertEqual(analysis.analysis_basis, "ocr_text")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
+        self.assertAlmostEqual(analysis.clause_confidence, 0.9567, places=4)
+
+    def test_layered_provider_falls_back_to_ocr_when_text_analysis_has_no_identifiers(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="doc-3",
+            mail_id="mail-1",
+            attachment_name="scan.pdf",
+            normalized_filename="scan.pdf",
+            destination_path="C:/docs/scan.pdf",
+            file_sha256="c" * 64,
+            save_decision="saved_new",
+        )
+
+        class EmptyTextProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(analysis_basis="pymupdf_text_empty")
+
+        class OCRProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="ocr_text",
+                    extracted_pi_number="PDL-26-0042",
+                    clause_confidence=0.97,
+                )
+
+        analysis = LayeredSavedDocumentAnalysisProvider(
+            text_provider=EmptyTextProvider(),
+            ocr_provider=OCRProvider(),
+        ).analyze(saved_document=saved_document)
+
+        self.assertEqual(analysis.analysis_basis, "ocr_text")
+        self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
 
 
 if __name__ == "__main__":

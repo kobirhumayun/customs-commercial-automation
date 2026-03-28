@@ -1,4 +1,6 @@
 from project.documents.providers import (
+    LayeredSavedDocumentAnalysisProvider,
+    OCRSavedDocumentAnalysisProvider,
     JsonManifestSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
     PyMuPDFSavedDocumentAnalysisProvider,
@@ -7,6 +9,8 @@ from project.documents.providers import (
 )
 
 __all__ = [
+    "LayeredSavedDocumentAnalysisProvider",
+    "OCRSavedDocumentAnalysisProvider",
     "JsonManifestSavedDocumentAnalysisProvider",
     "NullSavedDocumentAnalysisProvider",
     "PyMuPDFSavedDocumentAnalysisProvider",

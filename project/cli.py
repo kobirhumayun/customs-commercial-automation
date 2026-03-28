@@ -8,8 +8,8 @@ from pathlib import Path
 from project.config import load_workflow_config
 from project.documents import (
     JsonManifestSavedDocumentAnalysisProvider,
+    LayeredSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
-    PyMuPDFSavedDocumentAnalysisProvider,
 )
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
@@ -408,7 +408,7 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
                 else (
-                    PyMuPDFSavedDocumentAnalysisProvider()
+                    LayeredSavedDocumentAnalysisProvider()
                     if args.document_root is not None
                     else NullSavedDocumentAnalysisProvider()
                 )

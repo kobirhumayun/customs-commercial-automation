@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from io import BytesIO
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -90,6 +91,73 @@ class PyMuPDFSavedDocumentAnalysisProvider:
         return self._fitz_module
 
 
+@dataclass(slots=True)
+class OCRSavedDocumentAnalysisProvider:
+    _fitz_module: object | None = field(default=None, init=False, repr=False)
+    _pytesseract_module: object | None = field(default=None, init=False, repr=False)
+    _pil_image_module: object | None = field(default=None, init=False, repr=False)
+
+    def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
+        document_path = Path(saved_document.destination_path)
+        if not document_path.exists():
+            return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
+
+        try:
+            extracted_text, confidence = _extract_pdf_text_with_ocr(
+                document_path=document_path,
+                fitz_module=self._get_fitz_module(),
+                pytesseract_module=self._get_pytesseract_module(),
+                pil_image_module=self._get_pil_image_module(),
+            )
+        except Exception:
+            return SavedDocumentAnalysis(analysis_basis="ocr_text_error")
+
+        if not extracted_text.strip():
+            return SavedDocumentAnalysis(analysis_basis="ocr_text_empty")
+
+        lc_sc_match = _first_lc_sc_match(extracted_text)
+        pi_match = _first_pi_match(extracted_text)
+        excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
+        return SavedDocumentAnalysis(
+            analysis_basis="ocr_text",
+            extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            extracted_pi_number=pi_match[0] if pi_match is not None else None,
+            clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
+            clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
+            clause_confidence=confidence,
+        )
+
+    def _get_fitz_module(self):
+        if self._fitz_module is None:
+            self._fitz_module = _load_pymupdf_module()
+        return self._fitz_module
+
+    def _get_pytesseract_module(self):
+        if self._pytesseract_module is None:
+            self._pytesseract_module = _load_pytesseract_module()
+        return self._pytesseract_module
+
+    def _get_pil_image_module(self):
+        if self._pil_image_module is None:
+            self._pil_image_module = _load_pil_image_module()
+        return self._pil_image_module
+
+
+@dataclass(slots=True)
+class LayeredSavedDocumentAnalysisProvider:
+    text_provider: SavedDocumentAnalysisProvider = field(default_factory=PyMuPDFSavedDocumentAnalysisProvider)
+    ocr_provider: SavedDocumentAnalysisProvider = field(default_factory=OCRSavedDocumentAnalysisProvider)
+
+    def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
+        text_analysis = self.text_provider.analyze(saved_document=saved_document)
+        if _analysis_has_identifier(text_analysis):
+            return text_analysis
+        ocr_analysis = self.ocr_provider.analyze(saved_document=saved_document)
+        if _analysis_has_identifier(ocr_analysis):
+            return ocr_analysis
+        return text_analysis
+
+
 def _load_manifest(path: Path) -> list[dict]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -143,6 +211,58 @@ def _extract_pdf_text(path: Path, fitz_module: object) -> str:
         close = getattr(document, "close", None)
         if callable(close):
             close()
+
+
+def _extract_pdf_text_with_ocr(
+    *,
+    document_path: Path,
+    fitz_module: object,
+    pytesseract_module: object,
+    pil_image_module: object,
+) -> tuple[str, float | None]:
+    document = fitz_module.open(str(document_path))
+    try:
+        page_payloads = [_extract_ocr_page_payload(page, pytesseract_module, pil_image_module) for page in document]
+    finally:
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+
+    tokens = [
+        token
+        for payload in page_payloads
+        for token in payload["tokens"]
+        if token
+    ]
+    confidences = [
+        confidence
+        for payload in page_payloads
+        for confidence in payload["confidences"]
+    ]
+    text = " ".join(tokens)
+    if not confidences:
+        return text, None
+    return text, round(sum(confidences) / len(confidences), 4)
+
+
+def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_image_module: object) -> dict[str, list]:
+    get_pixmap = getattr(page, "get_pixmap", None)
+    if not callable(get_pixmap):
+        return {"tokens": [], "confidences": []}
+    pixmap = get_pixmap()
+    tobytes = getattr(pixmap, "tobytes", None)
+    if not callable(tobytes):
+        return {"tokens": [], "confidences": []}
+    image_bytes = tobytes("png")
+    image = pil_image_module.open(BytesIO(image_bytes))
+    output_type = getattr(getattr(pytesseract_module, "Output", object()), "DICT", None)
+    data = pytesseract_module.image_to_data(image, output_type=output_type)
+    texts = list(data.get("text", [])) if isinstance(data, dict) else []
+    raw_confidences = list(data.get("conf", [])) if isinstance(data, dict) else []
+    tokens = [str(value).strip() for value in texts if str(value).strip()]
+    confidences = [_normalize_ocr_confidence(value) for value in raw_confidences]
+    confidences = [value for value in confidences if value is not None]
+    return {"tokens": tokens, "confidences": confidences}
 
 
 def _extract_page_text(page: object) -> str:
@@ -199,9 +319,42 @@ def _build_clause_excerpt(text: str, seed_index: int | None) -> str | None:
     return excerpt or None
 
 
+def _analysis_has_identifier(analysis: SavedDocumentAnalysis) -> bool:
+    return bool(
+        (analysis.extracted_lc_sc_number and analysis.extracted_lc_sc_number.strip())
+        or (analysis.extracted_pi_number and analysis.extracted_pi_number.strip())
+    )
+
+
+def _normalize_ocr_confidence(value: object) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < 0:
+        return None
+    return round(numeric / 100.0, 4)
+
+
 def _load_pymupdf_module():
     try:
         import fitz  # type: ignore
     except ImportError as exc:
         raise ValueError("PyMuPDF is required for live saved-document analysis") from exc
     return fitz
+
+
+def _load_pytesseract_module():
+    try:
+        import pytesseract  # type: ignore
+    except ImportError as exc:
+        raise ValueError("pytesseract is required for OCR saved-document analysis") from exc
+    return pytesseract
+
+
+def _load_pil_image_module():
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError as exc:
+        raise ValueError("Pillow is required for OCR saved-document analysis") from exc
+    return Image
