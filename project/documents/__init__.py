@@ -1,6 +1,7 @@
 from project.documents.providers import (
     JsonManifestSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
+    PyMuPDFSavedDocumentAnalysisProvider,
     SavedDocumentAnalysis,
     SavedDocumentAnalysisProvider,
 )
@@ -8,6 +9,7 @@ from project.documents.providers import (
 __all__ = [
     "JsonManifestSavedDocumentAnalysisProvider",
     "NullSavedDocumentAnalysisProvider",
+    "PyMuPDFSavedDocumentAnalysisProvider",
     "SavedDocumentAnalysis",
     "SavedDocumentAnalysisProvider",
 ]

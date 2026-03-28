@@ -6,7 +6,11 @@ from datetime import datetime
 from pathlib import Path
 
 from project.config import load_workflow_config
-from project.documents import JsonManifestSavedDocumentAnalysisProvider, NullSavedDocumentAnalysisProvider
+from project.documents import (
+    JsonManifestSavedDocumentAnalysisProvider,
+    NullSavedDocumentAnalysisProvider,
+    PyMuPDFSavedDocumentAnalysisProvider,
+)
 from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
@@ -403,7 +407,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             document_analysis_provider=(
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
-                else NullSavedDocumentAnalysisProvider()
+                else (
+                    PyMuPDFSavedDocumentAnalysisProvider()
+                    if args.document_root is not None
+                    else NullSavedDocumentAnalysisProvider()
+                )
             ),
         )
         if args.apply_live_writes and not args.live_workbook:
