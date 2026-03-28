@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import getpass
+import os
+import socket
 from dataclasses import dataclass
 from datetime import datetime
 
 from project import __version__
 from project.config import ResolvedWorkflowConfig
-from project.models import MailMovePhaseStatus, PrintPhaseStatus, ProcessingJob, RunReport, WritePhaseStatus
+from project.models import (
+    EmailMessage,
+    MailMovePhaseStatus,
+    OperatorContext,
+    PrintPhaseStatus,
+    ProcessingJob,
+    RunReport,
+    WritePhaseStatus,
+)
 from project.rules import LoadedRulePack
 from project.storage import (
     RunArtifactPaths,
@@ -36,10 +46,18 @@ def initialize_workflow_run(
     descriptor: WorkflowDescriptor,
     config: ResolvedWorkflowConfig,
     rule_pack: LoadedRulePack,
+    mail_snapshot: list[EmailMessage] | None = None,
 ) -> InitializedWorkflowRun:
     workflow_timezone = validate_timezone(config.state_timezone)
     workflow_year = datetime.now(tz=workflow_timezone).year
     run_id = build_run_id(descriptor.workflow_id)
+    snapshot = mail_snapshot or []
+    operator_context = OperatorContext(
+        operator_id=getpass.getuser(),
+        username=getpass.getuser(),
+        host_name=socket.gethostname(),
+        process_id=os.getpid(),
+    )
     artifact_paths = create_run_artifact_layout(
         run_artifact_root=config.run_artifact_root,
         backup_root=config.backup_root,
@@ -56,8 +74,8 @@ def initialize_workflow_run(
         run_id=run_id,
         workflow_id=descriptor.workflow_id,
         started_at_utc=started_at_utc,
-        operator_id=getpass.getuser(),
-        mail_iteration_order=[],
+        operator_id=operator_context.operator_id,
+        mail_iteration_order=[mail.mail_id for mail in snapshot],
         hash_algorithm=HASH_ALGORITHM,
         run_start_backup_hash=backup_hash,
         staged_write_plan_hash=staged_write_plan_hash,
@@ -74,7 +92,7 @@ def initialize_workflow_run(
         started_at_utc=started_at_utc,
         completed_at_utc=None,
         state_timezone=str(getattr(workflow_timezone, "key", config.state_timezone)),
-        mail_iteration_order=[],
+        mail_iteration_order=[mail.mail_id for mail in snapshot],
         print_group_order=[],
         write_phase_status=WritePhaseStatus.NOT_STARTED,
         print_phase_status=PrintPhaseStatus.NOT_STARTED,
@@ -84,6 +102,11 @@ def initialize_workflow_run(
         current_workbook_hash=current_workbook_hash,
         staged_write_plan_hash=staged_write_plan_hash,
         summary={"pass": 0, "warning": 0, "hard_block": 0},
+        operator_context=operator_context,
+        mail_snapshot=snapshot,
+        resolved_source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")) or None,
+        resolved_destination_folder_entry_id=str(config.values.get("destination_success_entry_id", "")) or None,
+        folder_resolution_mode="entry_id" if descriptor.requires_mail_folders else None,
     )
     initialize_run_artifacts(
         paths=artifact_paths,

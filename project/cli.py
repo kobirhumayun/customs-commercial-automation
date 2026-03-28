@@ -10,6 +10,7 @@ from project.rules import load_rule_pack
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
+from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +52,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("workflow_id", choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY])
     parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
     parser.add_argument(
+        "--snapshot-json",
+        type=Path,
+        help="Optional JSON manifest of source emails to bind into the run snapshot.",
+    )
+    parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -67,11 +73,16 @@ def _handle_validate_config(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
+        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
     except (ConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    payload = {"workflow_id": descriptor.workflow_id.value, "config": to_jsonable(config.values)}
+    payload = {
+        "workflow_id": descriptor.workflow_id.value,
+        "config": to_jsonable(config.values),
+        "snapshot_count": len(snapshot),
+    }
     print(pretty_json_dumps(payload), end="")
     return 0
 
@@ -84,8 +95,14 @@ def _handle_init_run(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
+        snapshot = _load_snapshot_if_supplied(args.snapshot_json, config.state_timezone)
         rule_pack = load_rule_pack(descriptor.workflow_id)
-        initialized = initialize_workflow_run(descriptor=descriptor, config=config, rule_pack=rule_pack)
+        initialized = initialize_workflow_run(
+            descriptor=descriptor,
+            config=config,
+            rule_pack=rule_pack,
+            mail_snapshot=snapshot,
+        )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -98,6 +115,8 @@ def _handle_init_run(args: argparse.Namespace) -> int:
         "artifact_root": str(initialized.artifact_paths.run_root),
         "backup_root": str(initialized.artifact_paths.backup_root),
         "master_workbook_path": initialized.master_workbook_path,
+        "snapshot_count": len(initialized.run_report.mail_snapshot),
+        "mail_iteration_order": initialized.run_report.mail_iteration_order,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
@@ -121,6 +140,13 @@ def _parse_overrides(items: list[str]) -> dict[str, str]:
             raise ValueError(f"Override key cannot be empty: {item}")
         overrides[key] = value
     return overrides
+
+
+def _load_snapshot_if_supplied(snapshot_json: Path | None, state_timezone: str):
+    if snapshot_json is None:
+        return []
+    source_messages = load_snapshot_manifest(snapshot_json)
+    return build_email_snapshot(source_messages, state_timezone=state_timezone)
 
 
 if __name__ == "__main__":

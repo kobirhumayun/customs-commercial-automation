@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from project.rules import load_rule_pack
 from project.utils.time import validate_timezone
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import get_workflow_descriptor
+from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
 
 
 class WorkflowBootstrapTests(unittest.TestCase):
@@ -52,11 +54,36 @@ class WorkflowBootstrapTests(unittest.TestCase):
             descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
             config = load_workflow_config(descriptor=descriptor, config_path=config_path)
             rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-002",
+                            "received_time": "2026-03-28T04:00:00Z",
+                            "subject_raw": "Later mail",
+                            "sender_address": "later@example.com",
+                        },
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:59:59Z",
+                            "subject_raw": "Earlier mail",
+                            "sender_address": "earlier@example.com",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            mail_snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
 
             initialized = initialize_workflow_run(
                 descriptor=descriptor,
                 config=config,
                 rule_pack=rule_pack,
+                mail_snapshot=mail_snapshot,
             )
 
             self.assertTrue(initialized.artifact_paths.run_metadata_path.exists())
@@ -66,6 +93,19 @@ class WorkflowBootstrapTests(unittest.TestCase):
             self.assertTrue(initialized.artifact_paths.discrepancies_path.exists())
             self.assertTrue(initialized.artifact_paths.backup_workbook_path.exists())
             self.assertTrue(initialized.artifact_paths.backup_hash_path.exists())
+            self.assertEqual(
+                initialized.run_report.mail_iteration_order,
+                [mail.mail_id for mail in mail_snapshot],
+            )
+            self.assertEqual(
+                [mail.entry_id for mail in initialized.run_report.mail_snapshot],
+                ["entry-001", "entry-002"],
+            )
+            run_metadata = json.loads(
+                initialized.artifact_paths.run_metadata_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(run_metadata["resolved_source_folder_entry_id"], "src-folder")
+            self.assertEqual(run_metadata["mail_iteration_order"], [mail.mail_id for mail in mail_snapshot])
 
 
 if __name__ == "__main__":

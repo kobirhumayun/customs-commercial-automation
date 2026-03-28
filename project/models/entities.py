@@ -19,6 +19,14 @@ from project.reporting.schemas import (
 
 
 @dataclass(slots=True, frozen=True)
+class OperatorContext:
+    operator_id: str
+    username: str
+    host_name: str
+    process_id: int
+
+
+@dataclass(slots=True, frozen=True)
 class ProcessingJob:
     run_id: str
     workflow_id: WorkflowId
@@ -149,6 +157,11 @@ class RunReport:
     current_workbook_hash: str
     staged_write_plan_hash: str
     summary: dict[str, int]
+    operator_context: OperatorContext | None = None
+    mail_snapshot: list[EmailMessage] = field(default_factory=list)
+    resolved_source_folder_entry_id: str | None = None
+    resolved_destination_folder_entry_id: str | None = None
+    folder_resolution_mode: str | None = None
     schema_id: str = RUN_REPORT_SCHEMA_ID
     schema_version: str = REPORT_SCHEMA_VERSION
     report_schema_version: str = REPORT_SCHEMA_VERSION
