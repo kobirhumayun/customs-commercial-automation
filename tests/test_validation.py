@@ -103,14 +103,16 @@ class ValidationTests(unittest.TestCase):
                         {
                             "entry_id": "entry-001",
                             "received_time": "2026-03-28T03:00:00Z",
-                            "subject_raw": "Mail one",
+                            "subject_raw": "LC-0038-ANANTA GARMENTS LTD_AMD_05",
                             "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/42 today.",
                         },
                         {
                             "entry_id": "entry-002",
                             "received_time": "2026-03-28T04:00:00Z",
-                            "subject_raw": "Mail two",
+                            "subject_raw": "SC-010-PDL-8-ZYTA APPARELS LTD",
                             "sender_address": "two@example.com",
+                            "body_text": "Related files are P-26-0007 and P/26/42.",
                         },
                     ]
                 ),
@@ -155,6 +157,10 @@ class ValidationTests(unittest.TestCase):
             ]
             self.assertEqual(len(mail_outcome_records), 2)
             self.assertEqual([record["final_decision"] for record in mail_outcome_records], ["pass", "pass"])
+            self.assertEqual(
+                [record["file_numbers_extracted"] for record in mail_outcome_records],
+                [["P/26/0042"], ["P/26/0007", "P/26/0042"]],
+            )
             self.assertEqual(initialized.artifact_paths.discrepancies_path.read_text(encoding="utf-8"), "")
 
     def test_validate_run_snapshot_hard_blocks_blank_subject(self) -> None:
@@ -201,6 +207,7 @@ class ValidationTests(unittest.TestCase):
                             "received_time": "2026-03-28T03:00:00Z",
                             "subject_raw": "   ",
                             "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/0042.",
                         }
                     ]
                 ),

@@ -17,6 +17,7 @@ class SourceEmailRecord:
     received_time: str
     subject_raw: str
     sender_address: str
+    body_text: str = ""
 
 
 def load_snapshot_manifest(path: Path) -> list[SourceEmailRecord]:
@@ -39,12 +40,14 @@ def load_snapshot_manifest(path: Path) -> list[SourceEmailRecord]:
         received_time = _require_non_empty_string(item, "received_time", index)
         subject_raw = _require_string(item, "subject_raw", index)
         sender_address = _require_string(item, "sender_address", index)
+        body_text = _optional_string(item.get("body_text"))
         records.append(
             SourceEmailRecord(
                 entry_id=entry_id,
                 received_time=received_time,
                 subject_raw=subject_raw,
                 sender_address=sender_address,
+                body_text=body_text,
             )
         )
     return records
@@ -78,6 +81,7 @@ def build_email_snapshot(
                 subject_raw=message.subject_raw,
                 sender_address=message.sender_address,
                 snapshot_index=snapshot_index,
+                body_text=message.body_text,
             )
         )
     return snapshot
@@ -105,3 +109,7 @@ def _require_string(item: dict[str, Any], key: str, index: int) -> str:
     if not isinstance(value, str):
         raise ValueError(f"Snapshot message at index {index} is missing a string '{key}'")
     return value
+
+
+def _optional_string(value: object) -> str:
+    return value if isinstance(value, str) else ""

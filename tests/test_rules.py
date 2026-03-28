@@ -24,7 +24,12 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertEqual(rule_pack.rule_pack_version, "1.0.0")
         self.assertEqual(
             [rule.rule_id for rule in rule_pack.rule_definitions],
-            ["core.mail.sender_present.v1", "core.mail.subject_present.v1"],
+            [
+                "core.mail.sender_present.v1",
+                "core.mail.subject_present.v1",
+                "export_lc_sc.file_number_present.v1",
+                "export_lc_sc.subject_parseable.v1",
+            ],
         )
 
     def test_rule_engine_aggregates_precedence_and_deduplicates_discrepancies(self) -> None:
@@ -102,6 +107,7 @@ class RuleLoaderTests(unittest.TestCase):
                 process_id=1,
             ),
             mail=mail,
+            workflow_payload=None,
         )
 
         aggregated = evaluate_rule_pack(context, rule_pack)

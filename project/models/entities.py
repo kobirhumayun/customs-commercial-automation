@@ -52,6 +52,7 @@ class EmailMessage:
     subject_raw: str
     sender_address: str
     snapshot_index: int
+    body_text: str = ""
 
 
 @dataclass(slots=True, frozen=True)

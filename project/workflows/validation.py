@@ -15,6 +15,8 @@ from project.models import (
 )
 from project.rules import AggregatedRuleEvaluation, LoadedRulePack, evaluate_rule_pack
 from project.utils.time import utc_timestamp
+from project.workflows.export_lc_sc.payloads import ExportMailPayload
+from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
 
 
@@ -27,6 +29,7 @@ class WorkflowValidationContext:
     state_timezone: str
     operator_context: OperatorContext | None
     mail: EmailMessage
+    workflow_payload: object | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -57,6 +60,7 @@ def validate_run_snapshot(
             state_timezone=run_report.state_timezone,
             operator_context=run_report.operator_context,
             mail=mail,
+            workflow_payload=build_workflow_payload(run_report.workflow_id, mail),
         )
         aggregated = evaluate_rule_pack(context, rule_pack)
         mail_outcome = _build_mail_outcome(
@@ -64,6 +68,7 @@ def validate_run_snapshot(
             run_report=run_report,
             mail=mail,
             aggregated=aggregated,
+            workflow_payload=context.workflow_payload,
         )
         mail_report = _build_mail_report(run_report, rule_pack, mail_outcome)
         mail_discrepancies = _build_discrepancy_reports(
@@ -116,6 +121,7 @@ def _build_mail_outcome(
     run_report: RunReport,
     mail: EmailMessage,
     aggregated: AggregatedRuleEvaluation,
+    workflow_payload: object | None,
 ) -> MailOutcomeRecord:
     final_decision = aggregated.final_decision
     processing_status = (
@@ -142,6 +148,7 @@ def _build_mail_outcome(
         rule_pack_version=run_report.rule_pack_version,
         applied_rule_ids=list(aggregated.applied_rule_ids),
         discrepancies=[_serialize_discrepancy(discrepancy) for discrepancy in aggregated.discrepancies],
+        file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
     )
 
 
@@ -205,3 +212,11 @@ def _serialize_discrepancy(discrepancy) -> dict:
         "details": dict(discrepancy.details),
         "source_rule_ids": list(discrepancy.source_rule_ids),
     }
+
+
+def _extract_file_numbers(descriptor: WorkflowDescriptor, workflow_payload: object | None) -> list[str]:
+    if descriptor.workflow_id.value != "export_lc_sc":
+        return []
+    if not isinstance(workflow_payload, ExportMailPayload):
+        return []
+    return list(workflow_payload.file_numbers)
