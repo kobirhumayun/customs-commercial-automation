@@ -103,6 +103,7 @@ class ExportDocumentClassificationTests(unittest.TestCase):
                         {
                             "normalized_filename": "supporting.pdf",
                             "extracted_pi_number": "PDL-26-0042",
+                            "extracted_pi_page_number": 2,
                             "clause_related_lc_sc_number": "LC-0038",
                             "clause_excerpt": "PI PDL-26-0042 is issued under LC-0038",
                             "clause_confidence": 0.98,
@@ -150,6 +151,8 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(classified.saved_documents[1].analysis_basis, "json_manifest")
         self.assertEqual(classified.saved_documents[1].extracted_pi_number, "PDL-26-0042")
         self.assertEqual(classified.saved_documents[1].extracted_pi_confidence, None)
+        self.assertEqual(classified.saved_documents[1].extracted_pi_provenance["page_number"], 2)
+        self.assertEqual(classified.saved_documents[1].extracted_pi_provenance["extraction_method"], "json_manifest")
 
     def test_classify_saved_export_documents_marks_equal_cross_class_evidence_as_ambiguous(self) -> None:
         mail = build_email_snapshot(
@@ -216,6 +219,11 @@ class ExportDocumentClassificationTests(unittest.TestCase):
                         extracted_pi_number="PDL-26-0042",
                         extracted_pi_confidence=0.94,
                         clause_confidence=0.94,
+                        extracted_pi_provenance={
+                            "page_number": 4,
+                            "extraction_method": "ocr",
+                            "confidence": 0.94,
+                        },
                     )
                 return SavedDocumentAnalysis(analysis_basis="pymupdf_text")
 
@@ -247,6 +255,7 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         )
 
         self.assertIn("ocr_required_field_below_threshold", [item.code for item in classified.discrepancies])
+        self.assertEqual(classified.discrepancies[0].details["field_provenance"]["page_number"], 4)
         self.assertFalse(any(document.print_eligible for document in classified.saved_documents))
 
     def test_classify_saved_export_documents_prefers_amendment_match_from_analysis_context(self) -> None:

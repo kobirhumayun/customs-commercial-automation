@@ -29,6 +29,10 @@ class SavedDocumentAnalysis:
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
+    extracted_lc_sc_provenance: dict[str, object] | None = None
+    extracted_pi_provenance: dict[str, object] | None = None
+    extracted_amendment_provenance: dict[str, object] | None = None
+    clause_provenance: dict[str, object] | None = None
 
 
 class SavedDocumentAnalysisProvider(Protocol):
@@ -96,16 +100,55 @@ class JsonManifestSavedDocumentAnalysisProvider:
         match = _match_manifest_record(payload, saved_document)
         if match is None:
             return SavedDocumentAnalysis(analysis_basis="none")
+        extracted_lc_sc_number = _optional_string(match.get("extracted_lc_sc_number"))
+        extracted_lc_sc_confidence = _optional_float(match.get("extracted_lc_sc_confidence"))
+        extracted_pi_number = _optional_string(match.get("extracted_pi_number"))
+        extracted_pi_confidence = _optional_float(match.get("extracted_pi_confidence"))
+        extracted_amendment_number = _optional_amendment_number(match.get("extracted_amendment_number"))
+        clause_related_lc_sc_number = _optional_string(match.get("clause_related_lc_sc_number"))
+        clause_excerpt = _optional_string(match.get("clause_excerpt"))
+        clause_confidence = _optional_float(match.get("clause_confidence"))
         return SavedDocumentAnalysis(
             analysis_basis="json_manifest",
-            extracted_lc_sc_number=_optional_string(match.get("extracted_lc_sc_number")),
-            extracted_lc_sc_confidence=_optional_float(match.get("extracted_lc_sc_confidence")),
-            extracted_pi_number=_optional_string(match.get("extracted_pi_number")),
-            extracted_pi_confidence=_optional_float(match.get("extracted_pi_confidence")),
-            extracted_amendment_number=_optional_amendment_number(match.get("extracted_amendment_number")),
-            clause_related_lc_sc_number=_optional_string(match.get("clause_related_lc_sc_number")),
-            clause_excerpt=_optional_string(match.get("clause_excerpt")),
-            clause_confidence=_optional_float(match.get("clause_confidence")),
+            extracted_lc_sc_number=extracted_lc_sc_number,
+            extracted_lc_sc_confidence=extracted_lc_sc_confidence,
+            extracted_pi_number=extracted_pi_number,
+            extracted_pi_confidence=extracted_pi_confidence,
+            extracted_amendment_number=extracted_amendment_number,
+            clause_related_lc_sc_number=clause_related_lc_sc_number,
+            clause_excerpt=clause_excerpt,
+            clause_confidence=clause_confidence,
+            extracted_lc_sc_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="extracted_lc_sc",
+                default_confidence=extracted_lc_sc_confidence,
+                default_excerpt=clause_excerpt,
+            )
+            if extracted_lc_sc_number
+            else None,
+            extracted_pi_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="extracted_pi",
+                default_confidence=extracted_pi_confidence,
+                default_excerpt=clause_excerpt,
+            )
+            if extracted_pi_number
+            else None,
+            extracted_amendment_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="extracted_amendment",
+                default_excerpt=clause_excerpt,
+            )
+            if extracted_amendment_number
+            else None,
+            clause_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="clause",
+                default_confidence=clause_confidence,
+                default_excerpt=clause_excerpt,
+            )
+            if clause_excerpt or clause_confidence is not None or clause_related_lc_sc_number
+            else None,
         )
 
 
@@ -119,27 +162,17 @@ class PyMuPDFSavedDocumentAnalysisProvider:
             return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
 
         try:
-            extracted_text = _extract_pdf_text(document_path, self._get_fitz_module())
+            text_report = _build_text_extraction_report(document_path, self._get_fitz_module())
         except Exception:
             return SavedDocumentAnalysis(analysis_basis="pymupdf_text_error")
 
-        if not extracted_text.strip():
+        if not str(text_report.get("combined_text", "")).strip():
             return SavedDocumentAnalysis(analysis_basis="pymupdf_text_empty")
-
-        lc_sc_match = _first_lc_sc_match(extracted_text)
-        pi_match = _first_pi_match(extracted_text)
-        amendment_match = _first_amendment_number_match(extracted_text)
-        excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
-        return SavedDocumentAnalysis(
+        return _analysis_from_page_text_report(
+            report=text_report,
             analysis_basis="pymupdf_text",
-            extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            extracted_lc_sc_confidence=1.0 if lc_sc_match is not None else None,
-            extracted_pi_number=pi_match[0] if pi_match is not None else None,
-            extracted_pi_confidence=1.0 if pi_match is not None else None,
-            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
-            clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
-            clause_confidence=1.0 if excerpt_seed is not None else None,
+            extraction_method_resolver=lambda page: str(page.get("strategy", "text") or "text"),
+            default_confidence=1.0,
         )
 
     def _get_fitz_module(self):
@@ -158,35 +191,84 @@ class PDFPlumberSavedDocumentAnalysisProvider:
             return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
 
         try:
-            extracted_text = _extract_pdf_table_text(document_path, self._get_pdfplumber_module())
+            table_report = _build_table_extraction_report(document_path, self._get_pdfplumber_module())
         except Exception:
             return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_error")
 
-        if not extracted_text.strip():
+        if not str(table_report.get("combined_text", "")).strip():
             return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
-
-        lc_sc_match = _first_lc_sc_match(extracted_text)
-        pi_match = _first_pi_match(extracted_text)
-        amendment_match = _first_amendment_number_match(extracted_text)
-        excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
-        if lc_sc_match is None and pi_match is None and amendment_match is None:
-            return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
-        return SavedDocumentAnalysis(
+        analysis = _analysis_from_page_text_report(
+            report=table_report,
             analysis_basis="pdfplumber_table",
-            extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            extracted_lc_sc_confidence=1.0 if lc_sc_match is not None else None,
-            extracted_pi_number=pi_match[0] if pi_match is not None else None,
-            extracted_pi_confidence=1.0 if pi_match is not None else None,
-            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
-            clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
-            clause_confidence=1.0 if excerpt_seed is not None else None,
+            extraction_method_resolver=lambda page: "table",
+            page_text_resolver=lambda page: _combine_table_page_text(page.get("tables", [])),
+            default_confidence=1.0,
         )
+        if not _analysis_has_identifier(analysis) and analysis.extracted_amendment_number is None:
+            return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+        return analysis
 
     def _get_pdfplumber_module(self):
         if self._pdfplumber_module is None:
             self._pdfplumber_module = _load_pdfplumber_module()
         return self._pdfplumber_module
+
+
+@dataclass(slots=True)
+class Img2TableSavedDocumentAnalysisProvider:
+    _pdf_class: object | None = field(default=None, init=False, repr=False)
+    _ocr_class: object | None = field(default=None, init=False, repr=False)
+
+    def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
+        document_path = Path(saved_document.destination_path)
+        if not document_path.exists():
+            return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
+
+        try:
+            report = _build_img2table_extraction_report(
+                document_path=document_path,
+                pdf_class=self._get_pdf_class(),
+                ocr_class=self._get_ocr_class(),
+            )
+        except Exception:
+            return SavedDocumentAnalysis(analysis_basis="img2table_table_error")
+
+        if not str(report.get("combined_text", "")).strip():
+            return SavedDocumentAnalysis(analysis_basis="img2table_table_empty")
+
+        analysis = _analysis_from_page_text_report(
+            report=report,
+            analysis_basis="img2table_table",
+            extraction_method_resolver=lambda page: "img2table",
+            page_text_resolver=lambda page: _combine_table_page_text(page.get("tables", [])),
+            default_confidence=1.0,
+        )
+        if not _analysis_has_identifier(analysis) and analysis.extracted_amendment_number is None:
+            return SavedDocumentAnalysis(analysis_basis="img2table_table_empty")
+        return analysis
+
+    def _get_pdf_class(self):
+        if self._pdf_class is None:
+            self._pdf_class = _load_img2table_pdf_class()
+        return self._pdf_class
+
+    def _get_ocr_class(self):
+        if self._ocr_class is None:
+            self._ocr_class = _load_img2table_tesseract_ocr_class()
+        return self._ocr_class
+
+
+@dataclass(slots=True)
+class LayeredTableSavedDocumentAnalysisProvider:
+    primary_provider: SavedDocumentAnalysisProvider = field(default_factory=PDFPlumberSavedDocumentAnalysisProvider)
+    fallback_provider: SavedDocumentAnalysisProvider = field(default_factory=Img2TableSavedDocumentAnalysisProvider)
+
+    def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
+        primary_analysis = self.primary_provider.analyze(saved_document=saved_document)
+        if _analysis_has_identifier(primary_analysis) or primary_analysis.extracted_amendment_number is not None:
+            return primary_analysis
+        fallback_analysis = self.fallback_provider.analyze(saved_document=saved_document)
+        return _merge_analysis(primary_analysis, fallback_analysis)
 
 
 @dataclass(slots=True)
@@ -201,7 +283,7 @@ class OCRSavedDocumentAnalysisProvider:
             return SavedDocumentAnalysis(analysis_basis="missing_saved_document")
 
         try:
-            extracted_text, confidence, tokens, confidences = _extract_pdf_text_with_ocr(
+            ocr_report = _build_ocr_extraction_report(
                 document_path=document_path,
                 fitz_module=self._get_fitz_module(),
                 pytesseract_module=self._get_pytesseract_module(),
@@ -210,34 +292,9 @@ class OCRSavedDocumentAnalysisProvider:
         except Exception:
             return SavedDocumentAnalysis(analysis_basis="ocr_text_error")
 
-        if not extracted_text.strip():
+        if not str(ocr_report.get("combined_text", "")).strip():
             return SavedDocumentAnalysis(analysis_basis="ocr_text_empty")
-
-        lc_sc_match = _first_lc_sc_match(extracted_text)
-        pi_match = _first_pi_match(extracted_text)
-        amendment_match = _first_amendment_number_match(extracted_text)
-        lc_sc_confidence = (
-            _field_confidence_from_tokens(tokens, confidences, lc_sc_match[0], normalize_lc_sc_number)
-            if lc_sc_match is not None
-            else None
-        )
-        pi_confidence = (
-            _field_confidence_from_tokens(tokens, confidences, pi_match[0], _normalize_pi_number)
-            if pi_match is not None
-            else None
-        )
-        excerpt_seed = lc_sc_match[1] if lc_sc_match is not None else pi_match[1] if pi_match is not None else None
-        return SavedDocumentAnalysis(
-            analysis_basis="ocr_text",
-            extracted_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            extracted_lc_sc_confidence=lc_sc_confidence,
-            extracted_pi_number=pi_match[0] if pi_match is not None else None,
-            extracted_pi_confidence=pi_confidence,
-            extracted_amendment_number=amendment_match[0] if amendment_match is not None else None,
-            clause_related_lc_sc_number=lc_sc_match[0] if lc_sc_match is not None else None,
-            clause_excerpt=_build_clause_excerpt(extracted_text, excerpt_seed),
-            clause_confidence=confidence,
-        )
+        return _analysis_from_ocr_report(ocr_report, analysis_basis="ocr_text")
 
     def _get_fitz_module(self):
         if self._fitz_module is None:
@@ -258,7 +315,7 @@ class OCRSavedDocumentAnalysisProvider:
 @dataclass(slots=True)
 class LayeredSavedDocumentAnalysisProvider:
     text_provider: SavedDocumentAnalysisProvider = field(default_factory=PyMuPDFSavedDocumentAnalysisProvider)
-    table_provider: SavedDocumentAnalysisProvider = field(default_factory=PDFPlumberSavedDocumentAnalysisProvider)
+    table_provider: SavedDocumentAnalysisProvider = field(default_factory=LayeredTableSavedDocumentAnalysisProvider)
     ocr_provider: SavedDocumentAnalysisProvider = field(default_factory=OCRSavedDocumentAnalysisProvider)
 
     def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:
@@ -331,6 +388,59 @@ def _optional_amendment_number(value: object) -> str | None:
         if stripped.isdigit():
             return str(int(stripped))
     raise ValueError("Saved-document analysis manifest extracted_amendment_number must be numeric when present.")
+
+
+def _manifest_field_provenance(
+    *,
+    record: dict[str, object],
+    field_name: str,
+    default_confidence: float | None = None,
+    default_excerpt: str | None = None,
+) -> dict[str, object] | None:
+    nested = record.get(f"{field_name}_provenance")
+    page_number: int | None = None
+    extraction_method: str | None = None
+    confidence = default_confidence
+    excerpt = default_excerpt
+    if isinstance(nested, dict):
+        page_number = _optional_int(nested.get("page_number"))
+        extraction_method = _optional_string(nested.get("extraction_method"))
+        confidence = _optional_float_or_default(nested.get("confidence"), default=confidence)
+        excerpt = _optional_string(nested.get("excerpt")) or excerpt
+    page_number = page_number if page_number is not None else _optional_int(record.get(f"{field_name}_page_number"))
+    extraction_method = extraction_method or _optional_string(record.get(f"{field_name}_extraction_method")) or "json_manifest"
+    excerpt = excerpt or _optional_string(record.get(f"{field_name}_excerpt"))
+    if (
+        page_number is None
+        and extraction_method is None
+        and confidence is None
+        and (excerpt is None or not excerpt.strip())
+    ):
+        return None
+    payload: dict[str, object] = {"extraction_method": extraction_method}
+    if page_number is not None:
+        payload["page_number"] = page_number
+    if confidence is not None:
+        payload["confidence"] = confidence
+    if excerpt is not None and excerpt.strip():
+        payload["excerpt"] = excerpt.strip()
+    return payload
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise ValueError("Saved-document analysis manifest provenance page_number must be an integer when present.")
+
+
+def _optional_float_or_default(value: object, *, default: float | None) -> float | None:
+    if value is None:
+        return default
+    return _optional_float(value)
 
 
 def _extract_pdf_text(path: Path, fitz_module: object) -> str:
@@ -523,6 +633,57 @@ def _build_table_extraction_report(path: Path, pdfplumber_module: object) -> dic
     }
 
 
+def _build_img2table_extraction_report(
+    *,
+    document_path: Path,
+    pdf_class: object,
+    ocr_class: object,
+) -> dict[str, object]:
+    pdf_document = pdf_class(str(document_path))
+    ocr_instance = ocr_class(n_threads=1, lang="eng")
+    extracted = pdf_document.extract_tables(
+        ocr=ocr_instance,
+        implicit_rows=True,
+        implicit_columns=True,
+        borderless_tables=True,
+        min_confidence=50,
+    )
+    normalized_pages = _normalize_img2table_page_payload(extracted)
+    combined_rows: list[str] = []
+    pages: list[dict[str, object]] = []
+    for page_number in sorted(normalized_pages):
+        page_tables: list[dict[str, object]] = []
+        for table_index, raw_table in enumerate(normalized_pages[page_number], start=1):
+            normalized_rows = _normalize_img2table_rows(raw_table)
+            combined_table_rows: list[str] = []
+            for normalized_row in normalized_rows:
+                row_text = " | ".join(cell for cell in normalized_row if cell)
+                if row_text:
+                    combined_table_rows.append(row_text)
+                    combined_rows.append(row_text)
+            page_tables.append(
+                {
+                    "table_index": table_index,
+                    "rows": normalized_rows,
+                    "combined_text": "\n".join(combined_table_rows),
+                }
+            )
+        pages.append(
+            {
+                "page_number": page_number,
+                "tables": page_tables,
+            }
+        )
+
+    return {
+        "mode": "img2table",
+        "document_path": str(document_path),
+        "page_count": len(pages),
+        "combined_text": "\n".join(combined_rows),
+        "pages": pages,
+    }
+
+
 def _extract_pdf_text_with_ocr(
     *,
     document_path: Path,
@@ -620,6 +781,195 @@ def _build_ocr_page_report(
         "confidences": confidences,
         "average_confidence": page_confidence,
     }
+
+
+def _analysis_from_page_text_report(
+    report: dict[str, object],
+    *,
+    analysis_basis: str,
+    extraction_method_resolver,
+    page_text_resolver=None,
+    default_confidence: float | None = None,
+) -> SavedDocumentAnalysis:
+    pages = report.get("pages", [])
+    if not isinstance(pages, list):
+        pages = []
+    lc_sc_match = _first_match_from_pages(
+        pages,
+        matcher=_first_lc_sc_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
+    pi_match = _first_match_from_pages(
+        pages,
+        matcher=_first_pi_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
+    amendment_match = _first_match_from_pages(
+        pages,
+        matcher=_first_amendment_number_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
+    clause_match = lc_sc_match or pi_match
+    return SavedDocumentAnalysis(
+        analysis_basis=analysis_basis,
+        extracted_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
+        extracted_lc_sc_confidence=lc_sc_match["confidence"] if lc_sc_match is not None else None,
+        extracted_pi_number=pi_match["value"] if pi_match is not None else None,
+        extracted_pi_confidence=pi_match["confidence"] if pi_match is not None else None,
+        extracted_amendment_number=amendment_match["value"] if amendment_match is not None else None,
+        clause_related_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
+        clause_excerpt=clause_match["excerpt"] if clause_match is not None else None,
+        clause_confidence=clause_match["confidence"] if clause_match is not None else None,
+        extracted_lc_sc_provenance=_provenance_from_match(lc_sc_match),
+        extracted_pi_provenance=_provenance_from_match(pi_match),
+        extracted_amendment_provenance=_provenance_from_match(amendment_match),
+        clause_provenance=_provenance_from_match(clause_match),
+    )
+
+
+def _analysis_from_ocr_report(report: dict[str, object], *, analysis_basis: str) -> SavedDocumentAnalysis:
+    pages = report.get("pages", [])
+    if not isinstance(pages, list):
+        pages = []
+    lc_sc_match = _first_match_from_pages(
+        pages,
+        matcher=_first_lc_sc_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, value: _field_confidence_from_tokens(
+            _string_list(page.get("tokens")),
+            _float_list(page.get("confidences")),
+            value,
+            normalize_lc_sc_number,
+        ),
+    )
+    pi_match = _first_match_from_pages(
+        pages,
+        matcher=_first_pi_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, value: _field_confidence_from_tokens(
+            _string_list(page.get("tokens")),
+            _float_list(page.get("confidences")),
+            value,
+            _normalize_pi_number,
+        ),
+    )
+    amendment_match = _first_match_from_pages(
+        pages,
+        matcher=_first_amendment_number_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, _value: _safe_float(page.get("average_confidence")),
+    )
+    clause_match = _clause_match_with_page_confidence(pages, lc_sc_match or pi_match)
+    return SavedDocumentAnalysis(
+        analysis_basis=analysis_basis,
+        extracted_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
+        extracted_lc_sc_confidence=lc_sc_match["confidence"] if lc_sc_match is not None else None,
+        extracted_pi_number=pi_match["value"] if pi_match is not None else None,
+        extracted_pi_confidence=pi_match["confidence"] if pi_match is not None else None,
+        extracted_amendment_number=amendment_match["value"] if amendment_match is not None else None,
+        clause_related_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
+        clause_excerpt=clause_match["excerpt"] if clause_match is not None else None,
+        clause_confidence=clause_match["confidence"] if clause_match is not None else None,
+        extracted_lc_sc_provenance=_provenance_from_match(lc_sc_match),
+        extracted_pi_provenance=_provenance_from_match(pi_match),
+        extracted_amendment_provenance=_provenance_from_match(amendment_match),
+        clause_provenance=_provenance_from_match(clause_match),
+    )
+
+
+def _first_match_from_pages(
+    pages: list[object],
+    *,
+    matcher,
+    extraction_method_resolver,
+    page_text_resolver=None,
+    confidence_resolver=None,
+) -> dict[str, object] | None:
+    for raw_page in pages:
+        if not isinstance(raw_page, dict):
+            continue
+        text = (
+            page_text_resolver(raw_page)
+            if callable(page_text_resolver)
+            else str(raw_page.get("text", "") or "")
+        )
+        if not text.strip():
+            continue
+        match = matcher(text)
+        if match is None:
+            continue
+        confidence = confidence_resolver(raw_page, match[0]) if callable(confidence_resolver) else None
+        return {
+            "value": match[0],
+            "page_number": _safe_int(raw_page.get("page_number")),
+            "extraction_method": extraction_method_resolver(raw_page),
+            "confidence": confidence,
+            "excerpt": _build_clause_excerpt(text, match[1]),
+        }
+    return None
+
+
+def _provenance_from_match(match: dict[str, object] | None) -> dict[str, object] | None:
+    if match is None:
+        return None
+    payload: dict[str, object] = {}
+    page_number = _safe_int(match.get("page_number"))
+    extraction_method = _optional_string(match.get("extraction_method"))
+    confidence = _safe_float(match.get("confidence"))
+    excerpt = _optional_string(match.get("excerpt"))
+    if page_number is not None:
+        payload["page_number"] = page_number
+    if extraction_method is not None:
+        payload["extraction_method"] = extraction_method
+    if confidence is not None:
+        payload["confidence"] = confidence
+    if excerpt is not None:
+        payload["excerpt"] = excerpt
+    return payload or None
+
+
+def _clause_match_with_page_confidence(
+    pages: list[object],
+    match: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if match is None:
+        return None
+    page_number = _safe_int(match.get("page_number"))
+    if page_number is None:
+        return match
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        if _safe_int(page.get("page_number")) != page_number:
+            continue
+        page_confidence = _safe_float(page.get("average_confidence"))
+        if page_confidence is None:
+            return match
+        return {**match, "confidence": page_confidence}
+    return match
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _float_list(value: object) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    floats: list[float] = []
+    for item in value:
+        numeric = _safe_float(item)
+        if numeric is not None:
+            floats.append(numeric)
+    return floats
 
 
 def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_image_module: object) -> dict[str, list]:
@@ -797,6 +1147,46 @@ def _average_confidence_for_pages(pages: list[dict[str, object]]) -> float | Non
 
 def _join_non_empty_sections(*sections: str) -> str:
     return "\n".join(section.strip() for section in sections if section and section.strip())
+
+
+def _normalize_img2table_page_payload(extracted: object) -> dict[int, list[object]]:
+    if not isinstance(extracted, dict):
+        return {}
+    raw_page_numbers = [page_number for page_number in extracted if isinstance(page_number, int)]
+    zero_based = 0 in raw_page_numbers
+    normalized: dict[int, list[object]] = {}
+    for raw_page_number, tables in extracted.items():
+        if not isinstance(raw_page_number, int):
+            continue
+        page_number = raw_page_number + 1 if zero_based else raw_page_number
+        if page_number < 1:
+            continue
+        if not isinstance(tables, list):
+            continue
+        normalized[page_number] = list(tables)
+    return normalized
+
+
+def _normalize_img2table_rows(raw_table: object) -> list[list[str]]:
+    dataframe = getattr(raw_table, "df", None)
+    if dataframe is None:
+        return []
+    fillna = getattr(dataframe, "fillna", None)
+    if callable(fillna):
+        dataframe = fillna("")
+    values = getattr(dataframe, "values", None)
+    if values is None:
+        return []
+    tolist = getattr(values, "tolist", None)
+    raw_rows = tolist() if callable(tolist) else values
+    if not isinstance(raw_rows, list):
+        return []
+    normalized_rows: list[list[str]] = []
+    for raw_row in raw_rows:
+        if not isinstance(raw_row, list):
+            continue
+        normalized_rows.append([" ".join(str(cell or "").split()) for cell in raw_row])
+    return normalized_rows
 
 
 def _search_extraction_report(
@@ -978,6 +1368,12 @@ def _merge_analysis(primary: SavedDocumentAnalysis, secondary: SavedDocumentAnal
         clause_related_lc_sc_number=primary.clause_related_lc_sc_number or secondary.clause_related_lc_sc_number,
         clause_excerpt=primary.clause_excerpt or secondary.clause_excerpt,
         clause_confidence=primary.clause_confidence or secondary.clause_confidence,
+        extracted_lc_sc_provenance=primary.extracted_lc_sc_provenance or secondary.extracted_lc_sc_provenance,
+        extracted_pi_provenance=primary.extracted_pi_provenance or secondary.extracted_pi_provenance,
+        extracted_amendment_provenance=(
+            primary.extracted_amendment_provenance or secondary.extracted_amendment_provenance
+        ),
+        clause_provenance=primary.clause_provenance or secondary.clause_provenance,
     )
 
 
@@ -987,6 +1383,8 @@ def _merge_analysis_basis(primary_basis: str, secondary_basis: str) -> str:
         "missing_saved_document",
         "pdfplumber_table_empty",
         "pdfplumber_table_error",
+        "img2table_table_empty",
+        "img2table_table_error",
         "ocr_text_empty",
         "ocr_text_error",
         "pymupdf_text_empty",
@@ -1057,6 +1455,22 @@ def _load_pdfplumber_module():
     except ImportError as exc:
         raise ValueError("pdfplumber is required for table-aware saved-document analysis") from exc
     return pdfplumber
+
+
+def _load_img2table_pdf_class():
+    try:
+        from img2table.document import PDF  # type: ignore
+    except ImportError as exc:
+        raise ValueError("img2table is required for scanned-table saved-document analysis") from exc
+    return PDF
+
+
+def _load_img2table_tesseract_ocr_class():
+    try:
+        from img2table.ocr import TesseractOCR  # type: ignore
+    except ImportError as exc:
+        raise ValueError("img2table OCR support is required for scanned-table saved-document analysis") from exc
+    return TesseractOCR
 
 
 def _load_pil_image_module():

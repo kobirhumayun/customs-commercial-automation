@@ -1,6 +1,8 @@
 from project.documents.providers import (
     extract_saved_document_raw_report,
+    Img2TableSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
+    LayeredTableSavedDocumentAnalysisProvider,
     OCRSavedDocumentAnalysisProvider,
     PDFPlumberSavedDocumentAnalysisProvider,
     JsonManifestSavedDocumentAnalysisProvider,
@@ -12,7 +14,9 @@ from project.documents.providers import (
 
 __all__ = [
     "extract_saved_document_raw_report",
+    "Img2TableSavedDocumentAnalysisProvider",
     "LayeredSavedDocumentAnalysisProvider",
+    "LayeredTableSavedDocumentAnalysisProvider",
     "OCRSavedDocumentAnalysisProvider",
     "PDFPlumberSavedDocumentAnalysisProvider",
     "JsonManifestSavedDocumentAnalysisProvider",

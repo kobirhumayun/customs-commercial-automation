@@ -164,6 +164,10 @@ def _annotate_saved_document(
         clause_related_lc_sc_number=analysis.clause_related_lc_sc_number,
         clause_excerpt=analysis.clause_excerpt,
         clause_confidence=analysis.clause_confidence,
+        extracted_lc_sc_provenance=analysis.extracted_lc_sc_provenance,
+        extracted_pi_provenance=analysis.extracted_pi_provenance,
+        extracted_amendment_provenance=analysis.extracted_amendment_provenance,
+        clause_provenance=analysis.clause_provenance,
     )
 
 
@@ -383,6 +387,7 @@ def _build_ocr_quality_discrepancies(
                             "normalized_filename": document.normalized_filename,
                             "required_field": "lc_sc_number",
                             "document_type": document.document_type,
+                            "field_provenance": dict(document.extracted_lc_sc_provenance or {}),
                         },
                     )
                 )
@@ -401,6 +406,7 @@ def _build_ocr_quality_discrepancies(
                             "document_type": document.document_type,
                             "observed_confidence": document.extracted_lc_sc_confidence,
                             "minimum_confidence": EXPORT_LC_SC_OCR_MIN_CONFIDENCE,
+                            "field_provenance": dict(document.extracted_lc_sc_provenance or {}),
                         },
                     )
                 )
@@ -415,6 +421,7 @@ def _build_ocr_quality_discrepancies(
                             "normalized_filename": document.normalized_filename,
                             "required_field": "pi_reference",
                             "document_type": document.document_type,
+                            "field_provenance": dict(document.extracted_pi_provenance or {}),
                         },
                     )
                 )
@@ -433,6 +440,7 @@ def _build_ocr_quality_discrepancies(
                             "document_type": document.document_type,
                             "observed_confidence": document.extracted_pi_confidence,
                             "minimum_confidence": EXPORT_PI_OCR_MIN_CONFIDENCE,
+                            "field_provenance": dict(document.extracted_pi_provenance or {}),
                         },
                     )
                 )

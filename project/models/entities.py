@@ -88,6 +88,10 @@ class SavedDocument:
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
+    extracted_lc_sc_provenance: dict[str, Any] | None = None
+    extracted_pi_provenance: dict[str, Any] | None = None
+    extracted_amendment_provenance: dict[str, Any] | None = None
+    clause_provenance: dict[str, Any] | None = None
 
 
 @dataclass(slots=True, frozen=True)

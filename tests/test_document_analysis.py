@@ -8,8 +8,10 @@ from unittest.mock import patch
 
 from project.documents import (
     extract_saved_document_raw_report,
+    Img2TableSavedDocumentAnalysisProvider,
     JsonManifestSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
+    LayeredTableSavedDocumentAnalysisProvider,
     OCRSavedDocumentAnalysisProvider,
     PDFPlumberSavedDocumentAnalysisProvider,
     PyMuPDFSavedDocumentAnalysisProvider,
@@ -264,6 +266,8 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
                         {
                             "destination_path": "C:/docs/supporting.pdf",
                             "extracted_pi_number": "PDL-26-0042",
+                            "extracted_pi_page_number": 3,
+                            "extracted_pi_extraction_method": "json_manifest",
                             "clause_related_lc_sc_number": "LC-0038",
                             "clause_excerpt": "PI ref PDL-26-0042 under LC-0038",
                             "clause_confidence": 0.99,
@@ -289,6 +293,9 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 0.99)
+        self.assertEqual(analysis.extracted_pi_provenance["page_number"], 3)
+        self.assertEqual(analysis.extracted_pi_provenance["extraction_method"], "json_manifest")
+        self.assertEqual(analysis.clause_provenance["confidence"], 0.99)
 
     def test_pdfplumber_provider_extracts_identifiers_and_amendment_from_table_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -340,6 +347,106 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
         self.assertEqual(analysis.extracted_amendment_number, "5")
 
+    def test_img2table_provider_extracts_identifiers_from_scanned_table_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "scanned-table.pdf"
+            pdf_path.write_bytes(b"fake scanned table pdf")
+
+            class FakeValues:
+                @staticmethod
+                def tolist():
+                    return [
+                        ["Reference", "Value"],
+                        ["L/C No.", "LC-0038"],
+                        ["PI No.", "PDL-26-0042"],
+                        ["Amendment No.", "05"],
+                    ]
+
+            class FakeDataFrame:
+                values = FakeValues()
+
+                def fillna(self, _value: str):
+                    return self
+
+            class FakeExtractedTable:
+                df = FakeDataFrame()
+
+            class FakePDF:
+                def __init__(self, src: str):
+                    self.src = src
+
+                @staticmethod
+                def extract_tables(**kwargs):
+                    _ = kwargs["ocr"]
+                    return {0: [FakeExtractedTable()]}
+
+            class FakeOCR:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            with patch("project.documents.providers._load_img2table_pdf_class", return_value=FakePDF):
+                with patch("project.documents.providers._load_img2table_tesseract_ocr_class", return_value=FakeOCR):
+                    analysis = Img2TableSavedDocumentAnalysisProvider().analyze(
+                        saved_document=SavedDocument(
+                            saved_document_id="doc-img2table",
+                            mail_id="mail-1",
+                            attachment_name="scanned-table.pdf",
+                            normalized_filename="scanned-table.pdf",
+                            destination_path=str(pdf_path),
+                            file_sha256="e" * 64,
+                            save_decision="saved_new",
+                        )
+                    )
+
+        self.assertEqual(analysis.analysis_basis, "img2table_table")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
+        self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
+        self.assertEqual(analysis.extracted_amendment_number, "5")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["page_number"], 1)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["extraction_method"], "img2table")
+
+    def test_layered_table_provider_falls_back_to_img2table_when_pdfplumber_is_empty(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="doc-table-fallback",
+            mail_id="mail-1",
+            attachment_name="scan.pdf",
+            normalized_filename="scan.pdf",
+            destination_path="C:/docs/scan.pdf",
+            file_sha256="f" * 64,
+            save_decision="saved_new",
+        )
+
+        class EmptyTableProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+
+        class Img2TableProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="img2table_table",
+                    extracted_amendment_number="5",
+                    extracted_amendment_provenance={
+                        "page_number": 2,
+                        "extraction_method": "img2table",
+                        "confidence": 1.0,
+                    },
+                )
+
+        analysis = LayeredTableSavedDocumentAnalysisProvider(
+            primary_provider=EmptyTableProvider(),
+            fallback_provider=Img2TableProvider(),
+        ).analyze(saved_document=saved_document)
+
+        self.assertEqual(analysis.analysis_basis, "img2table_table")
+        self.assertEqual(analysis.extracted_amendment_number, "5")
+        self.assertEqual(analysis.extracted_amendment_provenance["extraction_method"], "img2table")
+
     def test_pymupdf_provider_extracts_lc_sc_and_pi_from_saved_pdf_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "saved.pdf"
@@ -386,6 +493,9 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.clause_related_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.clause_confidence, 1.0)
         self.assertIn("LC-0038", analysis.clause_excerpt)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["page_number"], 1)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["extraction_method"], "plain_text")
+        self.assertEqual(analysis.extracted_pi_provenance["page_number"], 1)
 
     def test_ocr_provider_extracts_identifiers_from_rendered_page_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -450,6 +560,9 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_pi_number, "PDL-26-0042")
         self.assertEqual(analysis.extracted_pi_confidence, 0.97)
         self.assertAlmostEqual(analysis.clause_confidence, 0.9567, places=4)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["page_number"], 1)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["extraction_method"], "ocr")
+        self.assertEqual(analysis.extracted_pi_provenance["confidence"], 0.97)
 
     def test_layered_provider_falls_back_to_ocr_when_text_analysis_has_no_identifiers(self) -> None:
         saved_document = SavedDocument(
@@ -509,6 +622,11 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
                     analysis_basis="pymupdf_text",
                     extracted_lc_sc_number="LC-0038",
                     extracted_lc_sc_confidence=1.0,
+                    extracted_lc_sc_provenance={
+                        "page_number": 1,
+                        "extraction_method": "plain_text",
+                        "confidence": 1.0,
+                    },
                 )
 
         class TableProvider:
@@ -519,6 +637,11 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
                 return SavedDocumentAnalysis(
                     analysis_basis="pdfplumber_table",
                     extracted_amendment_number="5",
+                    extracted_amendment_provenance={
+                        "page_number": 2,
+                        "extraction_method": "table",
+                        "confidence": 1.0,
+                    },
                 )
 
         class OCRProvider:
@@ -534,6 +657,8 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.analysis_basis, "pymupdf_text+pdfplumber_table")
         self.assertEqual(analysis.extracted_lc_sc_number, "LC-0038")
         self.assertEqual(analysis.extracted_amendment_number, "5")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["extraction_method"], "plain_text")
+        self.assertEqual(analysis.extracted_amendment_provenance["extraction_method"], "table")
 
 
 if __name__ == "__main__":

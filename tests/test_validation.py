@@ -1031,6 +1031,7 @@ class ValidationTests(unittest.TestCase):
                             "normalized_filename": "supporting.pdf",
                             "extracted_pi_number": "PDL-26-0042",
                             "extracted_amendment_number": "05",
+                            "extracted_pi_page_number": 2,
                             "clause_related_lc_sc_number": "LC-0038",
                             "clause_excerpt": "PI PDL-26-0042 belongs to LC-0038",
                             "clause_confidence": 0.99,
@@ -1089,6 +1090,10 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(
                 validation_result.mail_outcomes[0].saved_documents[1]["extracted_amendment_number"],
                 "5",
+            )
+            self.assertEqual(
+                validation_result.mail_outcomes[0].saved_documents[1]["extracted_pi_provenance"]["page_number"],
+                2,
             )
 
     def test_validate_run_snapshot_hard_blocks_low_confidence_ocr_selected_pi(self) -> None:
@@ -1186,6 +1191,11 @@ class ValidationTests(unittest.TestCase):
                             extracted_pi_number="PDL-26-0042",
                             extracted_pi_confidence=0.94,
                             clause_confidence=0.94,
+                            extracted_pi_provenance={
+                                "page_number": 3,
+                                "extraction_method": "ocr",
+                                "confidence": 0.94,
+                            },
                         )
                     return SavedDocumentAnalysis(
                         analysis_basis="pymupdf_text",
@@ -1214,6 +1224,12 @@ class ValidationTests(unittest.TestCase):
                 "ocr_required_field_below_threshold",
                 [report.code for report in validation_result.discrepancy_reports],
             )
+            ocr_report = next(
+                report
+                for report in validation_result.discrepancy_reports
+                if report.code == "ocr_required_field_below_threshold"
+            )
+            self.assertEqual(ocr_report.details["field_provenance"]["page_number"], 3)
 
 
 if __name__ == "__main__":
