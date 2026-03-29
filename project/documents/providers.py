@@ -36,6 +36,43 @@ class SavedDocumentAnalysisProvider(Protocol):
         """Return deterministic analysis metadata for a saved document."""
 
 
+def extract_saved_document_raw_text(
+    *,
+    saved_document: SavedDocument,
+    mode: str = "layered",
+) -> str:
+    document_path = Path(saved_document.destination_path)
+    if not document_path.exists():
+        raise ValueError(f"Document path does not exist: {document_path}")
+
+    if mode == "text":
+        return _extract_pdf_text(document_path, _load_pymupdf_module())
+    if mode == "table":
+        return _extract_pdf_table_text(document_path, _load_pdfplumber_module())
+    if mode == "ocr":
+        text, _confidence, _tokens, _confidences = _extract_pdf_text_with_ocr(
+            document_path=document_path,
+            fitz_module=_load_pymupdf_module(),
+            pytesseract_module=_load_pytesseract_module(),
+            pil_image_module=_load_pil_image_module(),
+        )
+        return text
+    if mode == "layered":
+        text_output = _extract_pdf_text(document_path, _load_pymupdf_module())
+        table_output = _extract_pdf_table_text(document_path, _load_pdfplumber_module())
+        combined = "\n".join(part for part in (text_output.strip(), table_output.strip()) if part)
+        if combined.strip():
+            return combined
+        text, _confidence, _tokens, _confidences = _extract_pdf_text_with_ocr(
+            document_path=document_path,
+            fitz_module=_load_pymupdf_module(),
+            pytesseract_module=_load_pytesseract_module(),
+            pil_image_module=_load_pil_image_module(),
+        )
+        return text
+    raise ValueError(f"Unsupported raw-text extraction mode: {mode}")
+
+
 @dataclass(slots=True, frozen=True)
 class NullSavedDocumentAnalysisProvider:
     def analyze(self, *, saved_document: SavedDocument) -> SavedDocumentAnalysis:

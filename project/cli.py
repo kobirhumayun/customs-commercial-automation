@@ -7,6 +7,7 @@ from pathlib import Path
 
 from project.config import load_workflow_config
 from project.documents import (
+    extract_saved_document_raw_text,
     JsonManifestSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
@@ -65,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_validate_run(args)
     if args.command == "inspect-document-analysis":
         return _handle_inspect_document_analysis(args)
+    if args.command == "inspect-document-text":
+        return _handle_inspect_document_text(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
     if args.command == "recover-run":
@@ -119,6 +122,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--document-analysis-json",
         type=Path,
         help="Optional JSON manifest to inspect deterministic analysis output instead of live PDF extraction.",
+    )
+
+    inspect_document_text_parser = subparsers.add_parser(
+        "inspect-document-text",
+        help="Print raw text extracted from one saved PDF for extraction debugging.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--document-path",
+        type=Path,
+        required=True,
+        help="Path to the saved PDF to inspect.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--mode",
+        choices=["text", "table", "ocr", "layered"],
+        default="layered",
+        help="Extraction mode to run. Defaults to layered.",
     )
 
     inspect_workbook_parser = subparsers.add_parser(
@@ -786,6 +806,39 @@ def _handle_inspect_document_analysis(args: argparse.Namespace) -> int:
         "analysis": to_jsonable(analysis),
     }
     print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_document_text(args: argparse.Namespace) -> int:
+    try:
+        document_path = args.document_path
+        if not document_path.exists():
+            raise ValueError(f"Document path does not exist: {document_path}")
+        normalized_filename = document_path.name.strip()
+        if not normalized_filename:
+            raise ValueError(f"Document path must resolve to a filename: {document_path}")
+        saved_document = SavedDocument(
+            saved_document_id=build_saved_document_id(
+                "inspect-document",
+                normalized_filename,
+                str(document_path),
+            ),
+            mail_id="inspect-document",
+            attachment_name=normalized_filename,
+            normalized_filename=normalized_filename,
+            destination_path=str(document_path),
+            file_sha256="",
+            save_decision="saved_new",
+        )
+        raw_text = extract_saved_document_raw_text(
+            saved_document=saved_document,
+            mode=args.mode,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(raw_text, end="" if raw_text.endswith("\n") else "\n")
     return 0
 
 

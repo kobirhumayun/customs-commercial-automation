@@ -27,6 +27,28 @@ from project.workbook import WorkbookHeader
 
 
 class CLITests(unittest.TestCase):
+    def test_inspect_document_text_command_prints_raw_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            document_path = root / "saved.pdf"
+            document_path.write_bytes(b"%PDF-1.4\nfake\n")
+
+            buffer = io.StringIO()
+            with patch("project.cli.extract_saved_document_raw_text", return_value="raw extracted text"):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-document-text",
+                            "--document-path",
+                            str(document_path),
+                            "--mode",
+                            "text",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(buffer.getvalue(), "raw extracted text\n")
+
     def test_inspect_document_analysis_command_prints_layered_provider_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
