@@ -199,6 +199,142 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertIn("Layered page LC-0038", report["combined_text"])
         self.assertIn("Scanned PDL-26-0042", report["combined_text"])
 
+    def test_layered_raw_report_surfaces_img2table_category_before_ocr(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "scanned-table-layered.pdf"
+            pdf_path.write_bytes(b"fake hybrid pdf")
+
+            class FakePixmap:
+                @staticmethod
+                def tobytes(image_format: str) -> bytes:
+                    self.assertEqual(image_format, "png")
+                    return b"png-bytes"
+
+            class FakePage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return []
+                    if mode == "text":
+                        return ""
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+                @staticmethod
+                def get_pixmap():
+                    raise AssertionError("OCR should not run when img2table produced table evidence.")
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def __len__(self):
+                    return 1
+
+                def __getitem__(self, index: int):
+                    self.assertEqual(index, 0)
+                    return FakePage()
+
+                def close(self) -> None:
+                    return None
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakeDocument()
+
+            class FakePDFPage:
+                @staticmethod
+                def extract_tables():
+                    return []
+
+            class FakePDF:
+                pages = [FakePDFPage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            class FakeValues:
+                @staticmethod
+                def tolist():
+                    return [["Reference", "Value"], ["PI No.", "PDL-26-0042"]]
+
+            class FakeDataFrame:
+                values = FakeValues()
+
+                def fillna(self, _value: str):
+                    return self
+
+            class FakeExtractedTable:
+                df = FakeDataFrame()
+
+            class FakeImg2TablePDF:
+                def __init__(self, src: str):
+                    self.src = src
+
+                @staticmethod
+                def extract_tables(**kwargs):
+                    _ = kwargs["ocr"]
+                    return {0: [FakeExtractedTable()]}
+
+            class FakeImg2TableOCR:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    del stream
+                    return {"opened": True}
+
+            class FakeTesseract:
+                call_count = 0
+
+                class Output:
+                    DICT = "DICT"
+
+                @classmethod
+                def image_to_data(cls, image, output_type=None):
+                    del image, output_type
+                    cls.call_count += 1
+                    return {"text": ["fallback"], "conf": ["50"]}
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                    with patch("project.documents.providers._load_img2table_pdf_class", return_value=FakeImg2TablePDF):
+                        with patch("project.documents.providers._load_img2table_tesseract_ocr_class", return_value=FakeImg2TableOCR):
+                            with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                                with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                                    report = extract_saved_document_raw_report(
+                                        saved_document=SavedDocument(
+                                            saved_document_id="doc-raw-img2table",
+                                            mail_id="mail-1",
+                                            attachment_name="scanned-table-layered.pdf",
+                                            normalized_filename="scanned-table-layered.pdf",
+                                            destination_path=str(pdf_path),
+                                            file_sha256="g" * 64,
+                                            save_decision="saved_new",
+                                        ),
+                                        mode="layered",
+                                    )
+
+        self.assertEqual(report["page_count"], 1)
+        self.assertEqual(report["pages"][0]["selected_source"], "img2table")
+        self.assertFalse(report["pages"][0]["ocr_attempted"])
+        self.assertEqual(report["pages"][0]["img2table"]["combined_text"], "Reference | Value\nPI No. | PDL-26-0042")
+        self.assertEqual(report["categories"]["img2table"]["mode"], "img2table")
+        self.assertEqual(FakeTesseract.call_count, 0)
+        self.assertIn("PDL-26-0042", report["combined_text"])
+
     def test_raw_report_search_respects_page_window(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "search.pdf"
@@ -256,6 +392,58 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(report["search"]["page_to"], 2)
         self.assertEqual(len(report["search"]["matches"]), 1)
         self.assertEqual(report["search"]["matches"][0]["page_number"], 2)
+
+    def test_raw_img2table_report_supports_table_mode_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "img2table-mode.pdf"
+            pdf_path.write_bytes(b"fake scanned table pdf")
+
+            class FakeValues:
+                @staticmethod
+                def tolist():
+                    return [["L/C No.", "LC-0038"]]
+
+            class FakeDataFrame:
+                values = FakeValues()
+
+                def fillna(self, _value: str):
+                    return self
+
+            class FakeExtractedTable:
+                df = FakeDataFrame()
+
+            class FakePDF:
+                def __init__(self, src: str):
+                    self.src = src
+
+                @staticmethod
+                def extract_tables(**kwargs):
+                    _ = kwargs["ocr"]
+                    return {0: [FakeExtractedTable()]}
+
+            class FakeOCR:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            with patch("project.documents.providers._load_img2table_pdf_class", return_value=FakePDF):
+                with patch("project.documents.providers._load_img2table_tesseract_ocr_class", return_value=FakeOCR):
+                    report = extract_saved_document_raw_report(
+                        saved_document=SavedDocument(
+                            saved_document_id="doc-raw-img2table-mode",
+                            mail_id="mail-1",
+                            attachment_name="img2table-mode.pdf",
+                            normalized_filename="img2table-mode.pdf",
+                            destination_path=str(pdf_path),
+                            file_sha256="h" * 64,
+                            save_decision="saved_new",
+                        ),
+                        mode="img2table",
+                    )
+
+        self.assertEqual(report["mode"], "img2table")
+        self.assertEqual(report["page_count"], 1)
+        self.assertEqual(report["pages"][0]["page_number"], 1)
+        self.assertEqual(report["combined_text"], "L/C No. | LC-0038")
 
     def test_json_manifest_provider_matches_by_destination_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

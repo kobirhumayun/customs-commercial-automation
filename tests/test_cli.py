@@ -113,6 +113,42 @@ class CLITests(unittest.TestCase):
             self.assertEqual(extract_mock.call_args.kwargs["page_from"], 2)
             self.assertEqual(extract_mock.call_args.kwargs["page_to"], 2)
 
+    def test_inspect_document_text_command_accepts_img2table_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            document_path = root / "saved.pdf"
+            document_path.write_bytes(b"%PDF-1.4\nfake\n")
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.extract_saved_document_raw_report",
+                return_value={
+                    "mode": "img2table",
+                    "document_path": str(document_path),
+                    "page_count": 1,
+                    "combined_text": "L/C No. | LC-0038",
+                    "pages": [{"page_number": 1, "tables": []}],
+                },
+            ) as extract_mock:
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-document-text",
+                            "--document-path",
+                            str(document_path),
+                            "--mode",
+                            "img2table",
+                        ]
+                    )
+
+            payload = json.loads(buffer.getvalue())
+            report = json.loads(Path(payload["output_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["mode"], "img2table")
+            self.assertTrue(Path(payload["output_json"]).name.endswith(".pdf.extraction.img2table.json"))
+            self.assertEqual(report["mode"], "img2table")
+            self.assertEqual(extract_mock.call_args.kwargs["mode"], "img2table")
+
     def test_inspect_document_analysis_command_prints_layered_provider_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

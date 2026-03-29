@@ -136,7 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     inspect_document_text_parser.add_argument(
         "--mode",
-        choices=["text", "table", "ocr", "layered"],
+        choices=["text", "table", "img2table", "ocr", "layered"],
         default="layered",
         help="Extraction mode to run. Defaults to layered.",
     )

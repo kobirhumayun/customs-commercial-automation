@@ -56,6 +56,12 @@ def extract_saved_document_raw_report(
         report = _build_text_extraction_report(document_path, _load_pymupdf_module())
     elif mode == "table":
         report = _build_table_extraction_report(document_path, _load_pdfplumber_module())
+    elif mode == "img2table":
+        report = _build_img2table_extraction_report(
+            document_path=document_path,
+            pdf_class=_load_img2table_pdf_class(),
+            ocr_class=_load_img2table_tesseract_ocr_class(),
+        )
     elif mode == "ocr":
         report = _build_ocr_extraction_report(
             document_path=document_path,
@@ -64,10 +70,18 @@ def extract_saved_document_raw_report(
             pil_image_module=_load_pil_image_module(),
         )
     elif mode == "layered":
+        try:
+            img2table_pdf_class = _load_img2table_pdf_class()
+            img2table_ocr_class = _load_img2table_tesseract_ocr_class()
+        except ValueError:
+            img2table_pdf_class = None
+            img2table_ocr_class = None
         report = _build_layered_extraction_report(
             document_path=document_path,
             fitz_module=_load_pymupdf_module(),
             pdfplumber_module=_load_pdfplumber_module(),
+            img2table_pdf_class=img2table_pdf_class,
+            img2table_ocr_class=img2table_ocr_class,
             pytesseract_module=_load_pytesseract_module(),
             pil_image_module=_load_pil_image_module(),
         )
@@ -478,15 +492,33 @@ def _build_layered_extraction_report(
     document_path: Path,
     fitz_module: object,
     pdfplumber_module: object,
+    img2table_pdf_class: object | None,
+    img2table_ocr_class: object | None,
     pytesseract_module: object,
     pil_image_module: object,
 ) -> dict[str, object]:
     text_report = _build_text_extraction_report(document_path, fitz_module)
     table_report = _build_table_extraction_report(document_path, pdfplumber_module)
+    if img2table_pdf_class is not None and img2table_ocr_class is not None:
+        img2table_report = _build_img2table_extraction_report(
+            document_path=document_path,
+            pdf_class=img2table_pdf_class,
+            ocr_class=img2table_ocr_class,
+        )
+    else:
+        img2table_report = {
+            "mode": "img2table",
+            "document_path": str(document_path),
+            "page_count": 0,
+            "combined_text": "",
+            "pages": [],
+            "status": "unavailable",
+        }
 
     text_pages = {int(page["page_number"]): page for page in text_report["pages"] if isinstance(page, dict)}
     table_pages = {int(page["page_number"]): page for page in table_report["pages"] if isinstance(page, dict)}
-    page_numbers = sorted(set(text_pages) | set(table_pages))
+    img2table_pages = {int(page["page_number"]): page for page in img2table_report["pages"] if isinstance(page, dict)}
+    page_numbers = sorted(set(text_pages) | set(table_pages) | set(img2table_pages))
 
     ocr_pages: dict[int, dict[str, object]] = {}
     if page_numbers:
@@ -496,7 +528,8 @@ def _build_layered_extraction_report(
             for page_number in page_numbers:
                 text_page = text_pages.get(page_number, {})
                 table_page = table_pages.get(page_number, {})
-                if not _page_requires_ocr(text_page, table_page):
+                img2table_page = img2table_pages.get(page_number, {})
+                if not _page_requires_ocr(text_page, table_page, img2table_page):
                     continue
                 ocr_pages[page_number] = _build_ocr_page_report(
                     page_number=page_number,
@@ -513,20 +546,30 @@ def _build_layered_extraction_report(
     for page_number in page_numbers:
         text_page = text_pages.get(page_number, {})
         table_page = table_pages.get(page_number, {})
+        img2table_page = img2table_pages.get(page_number, {})
         ocr_page = ocr_pages.get(page_number, {})
         text_value = str(text_page.get("text", "") or "")
         table_tables = table_page.get("tables", []) if isinstance(table_page, dict) else []
         table_text = _combine_table_page_text(table_tables)
+        img2table_tables = img2table_page.get("tables", []) if isinstance(img2table_page, dict) else []
+        img2table_text = _combine_table_page_text(img2table_tables)
         if _page_has_sufficient_text(text_value):
             selected_source = "text"
             selected_text = text_value
         elif table_text.strip():
             selected_source = "table"
             selected_text = table_text
+        elif img2table_text.strip():
+            selected_source = "img2table"
+            selected_text = img2table_text
         else:
             selected_source = "ocr"
             selected_text = str(ocr_page.get("text", "") or "")
-        searchable_text = _join_non_empty_sections(selected_text, table_text if selected_source != "table" else "")
+        searchable_text = _join_non_empty_sections(
+            selected_text,
+            table_text if selected_source != "table" else "",
+            img2table_text if selected_source != "img2table" else "",
+        )
         layered_pages.append(
             {
                 "page_number": page_number,
@@ -539,6 +582,11 @@ def _build_layered_extraction_report(
                     "page_number": page_number,
                     "tables": table_tables,
                     "combined_text": table_text,
+                },
+                "img2table": {
+                    "page_number": page_number,
+                    "tables": img2table_tables,
+                    "combined_text": img2table_text,
                 },
                 "ocr": ocr_page,
             }
@@ -558,6 +606,7 @@ def _build_layered_extraction_report(
         "categories": {
             "text": text_report,
             "table": table_report,
+            "img2table": img2table_report,
             "ocr": {
                 "mode": "ocr",
                 "document_path": str(document_path),
@@ -1113,12 +1162,19 @@ def _page_has_sufficient_text(text: str) -> bool:
     return len(re.findall(r"[A-Za-z0-9]", collapsed)) >= 12
 
 
-def _page_requires_ocr(text_page: dict[str, object], table_page: dict[str, object]) -> bool:
+def _page_requires_ocr(
+    text_page: dict[str, object],
+    table_page: dict[str, object],
+    img2table_page: dict[str, object] | None = None,
+) -> bool:
     text_value = str(text_page.get("text", "") or "")
     if _page_has_sufficient_text(text_value):
         return False
     table_text = _combine_table_page_text(table_page.get("tables", []))
-    return not table_text.strip()
+    if table_text.strip():
+        return False
+    img2table_text = _combine_table_page_text((img2table_page or {}).get("tables", []))
+    return not img2table_text.strip()
 
 
 def _combine_table_page_text(tables: object) -> str:
@@ -1258,7 +1314,7 @@ def _normalize_page_window(*, page_count: int, page_from: int | None, page_to: i
 def _page_searchable_text(*, report_mode: str, page: dict[str, object]) -> str:
     if report_mode == "layered":
         return str(page.get("searchable_text", "") or "")
-    if report_mode == "table":
+    if report_mode in {"table", "img2table"}:
         return _combine_table_page_text(page.get("tables", []))
     return str(page.get("text", "") or "")
 
