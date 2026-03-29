@@ -18,11 +18,13 @@ class RunArtifactPaths:
     backup_root: Path
     run_metadata_path: Path
     mail_outcomes_path: Path
+    manual_document_verification_path: Path
     staged_write_plan_path: Path
     target_probes_path: Path
     print_plan_path: Path
     discrepancies_path: Path
     commit_marker_path: Path
+    document_audits_dir: Path
     print_markers_dir: Path
     mail_move_markers_dir: Path
     logs_dir: Path
@@ -44,11 +46,13 @@ def create_run_artifact_layout(
         backup_root=backup_run_root,
         run_metadata_path=run_root / "run_metadata.json",
         mail_outcomes_path=run_root / "mail_outcomes.jsonl",
+        manual_document_verification_path=run_root / "document_manual_verification.json",
         staged_write_plan_path=run_root / "staged_write_plan.json",
         target_probes_path=run_root / "target_probes.jsonl",
         print_plan_path=run_root / "print_plan.json",
         discrepancies_path=run_root / "discrepancies.jsonl",
         commit_marker_path=run_root / "write_commit_marker.json",
+        document_audits_dir=run_root / "document_audits",
         print_markers_dir=run_root / "print_markers",
         mail_move_markers_dir=run_root / "mail_move_markers",
         logs_dir=run_root / "logs",
@@ -58,6 +62,7 @@ def create_run_artifact_layout(
     for directory in (
         run_root,
         backup_run_root,
+        paths.document_audits_dir,
         paths.print_markers_dir,
         paths.mail_move_markers_dir,
         paths.logs_dir,
@@ -78,6 +83,7 @@ def initialize_run_artifacts(
     write_json(paths.staged_write_plan_path, staged_write_plan or [])
     write_json(paths.print_plan_path, print_plan or {"print_groups": [], "print_group_order": []})
     _write_jsonl(paths.mail_outcomes_path, mail_outcomes or [])
+    atomic_write_text(paths.manual_document_verification_path, "")
     atomic_write_text(paths.target_probes_path, "")
     atomic_write_text(paths.discrepancies_path, "")
     atomic_write_text(paths.commit_marker_path, "")

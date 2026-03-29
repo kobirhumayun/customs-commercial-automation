@@ -56,3 +56,7 @@ def write_commit_marker(paths: RunArtifactPaths, payload: Any | None) -> None:
 
 def write_print_plan(paths: RunArtifactPaths, payload: Any) -> None:
     write_json(paths.print_plan_path, payload)
+
+
+def write_manual_document_verification(paths: RunArtifactPaths, payload: Any) -> None:
+    write_json(paths.manual_document_verification_path, payload)

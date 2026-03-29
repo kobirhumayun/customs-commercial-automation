@@ -23,6 +23,7 @@ from project.reporting.persistence import (
     write_commit_marker,
     write_discrepancies,
     write_mail_outcomes,
+    write_manual_document_verification,
     write_print_plan,
     write_run_metadata,
     write_staged_write_plan,
@@ -40,6 +41,7 @@ from project.workbook import (
 )
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.mail_moves import execute_mail_moves
+from project.workflows.document_verification import build_document_manual_verification_bundle
 from project.workflows.print_execution import execute_print_batches
 from project.workflows.print_planning import (
     build_print_plan_payload,
@@ -70,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_document_text(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
+    if args.command == "prepare-document-verification":
+        return _handle_prepare_document_verification(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -185,6 +189,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Inspect the configured yearly workbook path via xlwings.",
     )
     inspect_workbook_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    prepare_document_verification_parser = subparsers.add_parser(
+        "prepare-document-verification",
+        help="Write manual PDF verification artifacts for saved documents in an existing run.",
+    )
+    prepare_document_verification_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    prepare_document_verification_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    prepare_document_verification_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose saved documents should be prepared for manual verification.",
+    )
+    prepare_document_verification_parser.add_argument(
+        "--mode",
+        choices=["text", "table", "img2table", "ocr", "layered"],
+        default="layered",
+        help="Extraction mode to use when generating per-document audit JSONs.",
+    )
+    prepare_document_verification_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -898,6 +935,50 @@ def _handle_inspect_workbook(args: argparse.Namespace) -> int:
             "row_count": len(snapshot.rows),
             "headers": to_jsonable(snapshot.headers),
         }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_prepare_document_verification(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        verification_result = build_document_manual_verification_bundle(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            artifact_paths=artifact_paths,
+            extraction_mode=args.mode,
+        )
+        write_manual_document_verification(artifact_paths, verification_result.payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": run_report.run_id,
+        "workflow_id": run_report.workflow_id.value,
+        "bundle_path": verification_result.bundle_path,
+        "audit_directory": verification_result.audit_directory,
+        "document_count": verification_result.document_count,
+        "audit_ready_count": verification_result.audit_ready_count,
+        "audit_error_count": verification_result.audit_error_count,
+        "manual_verification_required": True,
+    }
     print(pretty_json_dumps(payload), end="")
     return 0
 

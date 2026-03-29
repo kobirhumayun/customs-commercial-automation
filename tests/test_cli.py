@@ -23,6 +23,7 @@ from project.models import (
     WriteOperation,
     WritePhaseStatus,
 )
+from project.workflows.document_verification import DocumentManualVerificationResult
 from project.workbook import WorkbookHeader
 
 
@@ -223,6 +224,89 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["analysis"]["analysis_basis"], "json_manifest")
         self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
         self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
+
+    def test_prepare_document_verification_command_prints_bundle_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-29T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=[],
+                print_group_order=[],
+                write_phase_status=WritePhaseStatus.NOT_STARTED,
+                print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 0, "warning": 0, "hard_block": 0},
+            )
+            buffer = io.StringIO()
+            with patch("project.cli.load_print_planning_bundle", return_value=(run_report, [], [])):
+                with patch(
+                    "project.cli.build_document_manual_verification_bundle",
+                    return_value=DocumentManualVerificationResult(
+                        bundle_path=str(root / "runs" / "export_lc_sc" / "run-123" / "document_manual_verification.json"),
+                        audit_directory=str(root / "runs" / "export_lc_sc" / "run-123" / "document_audits"),
+                        document_count=2,
+                        audit_ready_count=2,
+                        audit_error_count=0,
+                        payload={"document_count": 2},
+                    ),
+                ):
+                    with patch("project.cli.write_manual_document_verification") as write_mock:
+                        with redirect_stdout(buffer):
+                            exit_code = main(
+                                [
+                                    "prepare-document-verification",
+                                    "export_lc_sc",
+                                    "--config",
+                                    str(config_path),
+                                    "--run-id",
+                                    "run-123",
+                                    "--mode",
+                                    "layered",
+                                ]
+                            )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["run_id"], "run-123")
+        self.assertEqual(payload["document_count"], 2)
+        self.assertEqual(payload["manual_verification_required"], True)
+        self.assertEqual(write_mock.call_count, 1)
 
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
