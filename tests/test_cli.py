@@ -64,6 +64,55 @@ class CLITests(unittest.TestCase):
             self.assertEqual(report["combined_text"], "raw extracted text")
             self.assertEqual(report["pages"][0]["page_number"], 1)
 
+    def test_inspect_document_text_command_passes_search_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            document_path = root / "saved.pdf"
+            document_path.write_bytes(b"%PDF-1.4\nfake\n")
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.extract_saved_document_raw_report",
+                return_value={
+                    "mode": "layered",
+                    "document_path": str(document_path),
+                    "page_count": 2,
+                    "combined_text": "target",
+                    "pages": [],
+                    "search": {
+                        "search_text": "target",
+                        "page_from": 2,
+                        "page_to": 2,
+                        "match_count": 1,
+                        "matches": [{"page_number": 2, "count": 1, "excerpts": ["target"]}],
+                    },
+                },
+            ) as extract_mock:
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-document-text",
+                            "--document-path",
+                            str(document_path),
+                            "--mode",
+                            "layered",
+                            "--search-text",
+                            "target",
+                            "--page-from",
+                            "2",
+                            "--page-to",
+                            "2",
+                        ]
+                    )
+
+            payload = json.loads(buffer.getvalue())
+            report = json.loads(Path(payload["output_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["search"]["match_count"], 1)
+            self.assertEqual(extract_mock.call_args.kwargs["search_text"], "target")
+            self.assertEqual(extract_mock.call_args.kwargs["page_from"], 2)
+            self.assertEqual(extract_mock.call_args.kwargs["page_to"], 2)
+
     def test_inspect_document_analysis_command_prints_layered_provider_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

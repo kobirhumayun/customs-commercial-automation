@@ -40,62 +40,44 @@ def extract_saved_document_raw_report(
     *,
     saved_document: SavedDocument,
     mode: str = "layered",
+    search_text: str | None = None,
+    page_from: int | None = None,
+    page_to: int | None = None,
 ) -> dict[str, object]:
     document_path = Path(saved_document.destination_path)
     if not document_path.exists():
         raise ValueError(f"Document path does not exist: {document_path}")
 
     if mode == "text":
-        return _build_text_extraction_report(document_path, _load_pymupdf_module())
-    if mode == "table":
-        return _build_table_extraction_report(document_path, _load_pdfplumber_module())
-    if mode == "ocr":
-        return _build_ocr_extraction_report(
+        report = _build_text_extraction_report(document_path, _load_pymupdf_module())
+    elif mode == "table":
+        report = _build_table_extraction_report(document_path, _load_pdfplumber_module())
+    elif mode == "ocr":
+        report = _build_ocr_extraction_report(
             document_path=document_path,
             fitz_module=_load_pymupdf_module(),
             pytesseract_module=_load_pytesseract_module(),
             pil_image_module=_load_pil_image_module(),
         )
-    if mode == "layered":
-        text_report = _build_text_extraction_report(document_path, _load_pymupdf_module())
-        table_report = _build_table_extraction_report(document_path, _load_pdfplumber_module())
-        layered_text = "\n".join(
-            part
-            for part in (
-                str(text_report.get("combined_text", "")).strip(),
-                str(table_report.get("combined_text", "")).strip(),
-            )
-            if part
-        )
-        categories: dict[str, object] = {
-            "text": text_report,
-            "table": table_report,
-        }
-        attempted_modes = ["text", "table"]
-        if layered_text.strip():
-            return {
-                "mode": "layered",
-                "document_path": str(document_path),
-                "attempted_modes": attempted_modes,
-                "combined_text": layered_text,
-                "categories": categories,
-            }
-        ocr_report = _build_ocr_extraction_report(
+    elif mode == "layered":
+        report = _build_layered_extraction_report(
             document_path=document_path,
             fitz_module=_load_pymupdf_module(),
+            pdfplumber_module=_load_pdfplumber_module(),
             pytesseract_module=_load_pytesseract_module(),
             pil_image_module=_load_pil_image_module(),
         )
-        categories["ocr"] = ocr_report
-        attempted_modes.append("ocr")
-        return {
-            "mode": "layered",
-            "document_path": str(document_path),
-            "attempted_modes": attempted_modes,
-            "combined_text": ocr_report.get("combined_text", ""),
-            "categories": categories,
-        }
-    raise ValueError(f"Unsupported raw-text extraction mode: {mode}")
+    else:
+        raise ValueError(f"Unsupported raw-text extraction mode: {mode}")
+
+    if search_text:
+        report["search"] = _search_extraction_report(
+            report=report,
+            search_text=search_text,
+            page_from=page_from,
+            page_to=page_to,
+        )
+    return report
 
 
 @dataclass(slots=True, frozen=True)
@@ -354,7 +336,7 @@ def _optional_amendment_number(value: object) -> str | None:
 def _extract_pdf_text(path: Path, fitz_module: object) -> str:
     document = fitz_module.open(str(path))
     try:
-        return "\n".join(_extract_page_text(page) for page in document)
+        return "\n".join(_extract_page_text(page)[0] for page in document)
     finally:
         close = getattr(document, "close", None)
         if callable(close):
@@ -366,13 +348,7 @@ def _build_text_extraction_report(path: Path, fitz_module: object) -> dict[str, 
     try:
         pages: list[dict[str, object]] = []
         for page_index, page in enumerate(document, start=1):
-            text = _extract_page_text(page)
-            pages.append(
-                {
-                    "page_number": page_index,
-                    "text": text,
-                }
-            )
+            pages.append(_build_text_page_report(page_number=page_index, page=page))
     finally:
         close = getattr(document, "close", None)
         if callable(close):
@@ -384,6 +360,106 @@ def _build_text_extraction_report(path: Path, fitz_module: object) -> dict[str, 
         "page_count": len(pages),
         "combined_text": "\n".join(str(page["text"]) for page in pages),
         "pages": pages,
+    }
+
+
+def _build_layered_extraction_report(
+    *,
+    document_path: Path,
+    fitz_module: object,
+    pdfplumber_module: object,
+    pytesseract_module: object,
+    pil_image_module: object,
+) -> dict[str, object]:
+    text_report = _build_text_extraction_report(document_path, fitz_module)
+    table_report = _build_table_extraction_report(document_path, pdfplumber_module)
+
+    text_pages = {int(page["page_number"]): page for page in text_report["pages"] if isinstance(page, dict)}
+    table_pages = {int(page["page_number"]): page for page in table_report["pages"] if isinstance(page, dict)}
+    page_numbers = sorted(set(text_pages) | set(table_pages))
+
+    ocr_pages: dict[int, dict[str, object]] = {}
+    if page_numbers:
+        document = fitz_module.open(str(document_path))
+        try:
+            document_pages = list(document)
+            for page_number in page_numbers:
+                text_page = text_pages.get(page_number, {})
+                table_page = table_pages.get(page_number, {})
+                if not _page_requires_ocr(text_page, table_page):
+                    continue
+                ocr_pages[page_number] = _build_ocr_page_report(
+                    page_number=page_number,
+                    page=document_pages[page_number - 1],
+                    pytesseract_module=pytesseract_module,
+                    pil_image_module=pil_image_module,
+                )
+        finally:
+            close = getattr(document, "close", None)
+            if callable(close):
+                close()
+
+    layered_pages: list[dict[str, object]] = []
+    for page_number in page_numbers:
+        text_page = text_pages.get(page_number, {})
+        table_page = table_pages.get(page_number, {})
+        ocr_page = ocr_pages.get(page_number, {})
+        text_value = str(text_page.get("text", "") or "")
+        table_tables = table_page.get("tables", []) if isinstance(table_page, dict) else []
+        table_text = _combine_table_page_text(table_tables)
+        if _page_has_sufficient_text(text_value):
+            selected_source = "text"
+            selected_text = text_value
+        elif table_text.strip():
+            selected_source = "table"
+            selected_text = table_text
+        else:
+            selected_source = "ocr"
+            selected_text = str(ocr_page.get("text", "") or "")
+        searchable_text = _join_non_empty_sections(selected_text, table_text if selected_source != "table" else "")
+        layered_pages.append(
+            {
+                "page_number": page_number,
+                "selected_source": selected_source,
+                "selected_text": selected_text,
+                "searchable_text": searchable_text,
+                "ocr_attempted": page_number in ocr_pages,
+                "text": text_page,
+                "table": {
+                    "page_number": page_number,
+                    "tables": table_tables,
+                    "combined_text": table_text,
+                },
+                "ocr": ocr_page,
+            }
+        )
+
+    combined_text = "\n".join(
+        str(page["searchable_text"]).strip()
+        for page in layered_pages
+        if str(page["searchable_text"]).strip()
+    )
+    return {
+        "mode": "layered",
+        "document_path": str(document_path),
+        "page_count": len(layered_pages),
+        "combined_text": combined_text,
+        "pages": layered_pages,
+        "categories": {
+            "text": text_report,
+            "table": table_report,
+            "ocr": {
+                "mode": "ocr",
+                "document_path": str(document_path),
+                "page_count": len(page_numbers),
+                "attempted_page_numbers": sorted(ocr_pages),
+                "combined_text": "\n".join(
+                    str(page.get("text", "")).strip() for page in ocr_pages.values() if str(page.get("text", "")).strip()
+                ),
+                "average_confidence": _average_confidence_for_pages(list(ocr_pages.values())),
+                "pages": [ocr_pages[page_number] for page_number in sorted(ocr_pages)],
+            },
+        },
     }
 
 
@@ -515,6 +591,37 @@ def _build_ocr_extraction_report(
     }
 
 
+def _build_text_page_report(*, page_number: int, page: object) -> dict[str, object]:
+    text, strategy = _extract_page_text(page)
+    return {
+        "page_number": page_number,
+        "text": text,
+        "line_count": len([line for line in text.splitlines() if line.strip()]),
+        "character_count": len(text),
+        "strategy": strategy,
+    }
+
+
+def _build_ocr_page_report(
+    *,
+    page_number: int,
+    page: object,
+    pytesseract_module: object,
+    pil_image_module: object,
+) -> dict[str, object]:
+    payload = _extract_ocr_page_payload(page, pytesseract_module, pil_image_module)
+    page_text = " ".join(payload["tokens"])
+    confidences = [float(value) for value in payload["confidences"]]
+    page_confidence = round(sum(confidences) / len(confidences), 4) if confidences else None
+    return {
+        "page_number": page_number,
+        "text": page_text,
+        "tokens": list(payload["tokens"]),
+        "confidences": confidences,
+        "average_confidence": page_confidence,
+    }
+
+
 def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_image_module: object) -> dict[str, list]:
     get_pixmap = getattr(page, "get_pixmap", None)
     if not callable(get_pixmap):
@@ -541,11 +648,262 @@ def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_imag
     return {"tokens": tokens, "confidences": confidences}
 
 
-def _extract_page_text(page: object) -> str:
+def _extract_page_text(page: object) -> tuple[str, str]:
+    structured_text = _extract_page_text_from_words(page)
+    if structured_text is not None:
+        return structured_text, "words_reconstructed"
     get_text = getattr(page, "get_text", None)
     if not callable(get_text):
+        return "", "no_text_method"
+    return str(get_text("text") or ""), "plain_text"
+
+
+def _extract_page_text_from_words(page: object) -> str | None:
+    get_text = getattr(page, "get_text", None)
+    if not callable(get_text):
+        return None
+    try:
+        raw_words = get_text("words")
+    except Exception:
+        return None
+    if not isinstance(raw_words, list) or not raw_words:
+        return None
+
+    visual_lines: list[dict[str, object]] = []
+    for raw_word in raw_words:
+        if not isinstance(raw_word, (list, tuple)) or len(raw_word) < 8:
+            continue
+        x0 = _safe_float(raw_word[0])
+        y0 = _safe_float(raw_word[1])
+        x1 = _safe_float(raw_word[2])
+        y1 = _safe_float(raw_word[3])
+        token = " ".join(str(raw_word[4] or "").split())
+        block_no = _safe_int(raw_word[5], default=0)
+        if x0 is None or x1 is None or y0 is None or y1 is None or not token:
+            continue
+        y_center = (y0 + y1) / 2.0
+        line = _find_matching_visual_line(visual_lines, block_no=block_no, y_center=y_center)
+        if line is None:
+            line = {
+                "block_no": block_no,
+                "y_center": y_center,
+                "words": [],
+            }
+            visual_lines.append(line)
+        else:
+            existing_center = _safe_float(line.get("y_center"))
+            if existing_center is not None:
+                line["y_center"] = round((existing_center + y_center) / 2.0, 4)
+        words = line.setdefault("words", [])
+        if isinstance(words, list):
+            words.append((x0, x1, token))
+
+    if not visual_lines:
+        return None
+
+    line_texts: list[str] = []
+    sorted_lines = sorted(
+        visual_lines,
+        key=lambda item: (
+            _safe_int(item.get("block_no"), default=0),
+            _safe_float(item.get("y_center")) or 0.0,
+        ),
+    )
+    for line in sorted_lines:
+        words = line.get("words", [])
+        if not isinstance(words, list):
+            continue
+        line_text = _join_words_with_gap_preservation(sorted(words, key=lambda item: item[0]))
+        if line_text.strip():
+            line_texts.append(line_text)
+    return "\n".join(line_texts)
+
+
+def _join_words_with_gap_preservation(words: list[tuple[float, float, str]]) -> str:
+    if not words:
         return ""
-    return str(get_text("text") or "")
+    parts = [words[0][2]]
+    previous_x1 = words[0][1]
+    for x0, x1, token in words[1:]:
+        gap = max(0.0, x0 - previous_x1)
+        separator = "    " if gap >= 24.0 else " "
+        parts.append(separator)
+        parts.append(token)
+        previous_x1 = x1
+    return "".join(parts).strip()
+
+
+def _find_matching_visual_line(
+    visual_lines: list[dict[str, object]],
+    *,
+    block_no: int,
+    y_center: float,
+) -> dict[str, object] | None:
+    best_line: dict[str, object] | None = None
+    best_distance: float | None = None
+    for line in visual_lines:
+        if _safe_int(line.get("block_no"), default=-1) != block_no:
+            continue
+        existing_center = _safe_float(line.get("y_center"))
+        if existing_center is None:
+            continue
+        distance = abs(existing_center - y_center)
+        if distance > 3.0:
+            continue
+        if best_distance is None or distance < best_distance:
+            best_line = line
+            best_distance = distance
+    return best_line
+
+
+def _page_has_sufficient_text(text: str) -> bool:
+    collapsed = " ".join(text.split())
+    if len(collapsed) >= 24:
+        return True
+    return len(re.findall(r"[A-Za-z0-9]", collapsed)) >= 12
+
+
+def _page_requires_ocr(text_page: dict[str, object], table_page: dict[str, object]) -> bool:
+    text_value = str(text_page.get("text", "") or "")
+    if _page_has_sufficient_text(text_value):
+        return False
+    table_text = _combine_table_page_text(table_page.get("tables", []))
+    return not table_text.strip()
+
+
+def _combine_table_page_text(tables: object) -> str:
+    if not isinstance(tables, list):
+        return ""
+    rows: list[str] = []
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        combined_text = str(table.get("combined_text", "") or "").strip()
+        if combined_text:
+            rows.append(combined_text)
+    return "\n".join(rows)
+
+
+def _average_confidence_for_pages(pages: list[dict[str, object]]) -> float | None:
+    confidences: list[float] = []
+    for page in pages:
+        value = page.get("average_confidence")
+        if isinstance(value, (float, int)):
+            confidences.append(float(value))
+    if not confidences:
+        return None
+    return round(sum(confidences) / len(confidences), 4)
+
+
+def _join_non_empty_sections(*sections: str) -> str:
+    return "\n".join(section.strip() for section in sections if section and section.strip())
+
+
+def _search_extraction_report(
+    *,
+    report: dict[str, object],
+    search_text: str,
+    page_from: int | None,
+    page_to: int | None,
+) -> dict[str, object]:
+    if not search_text.strip():
+        raise ValueError("Search text must not be blank.")
+
+    pages = report.get("pages", [])
+    if not isinstance(pages, list):
+        pages = []
+    page_count = len(pages)
+    start_page, end_page = _normalize_page_window(page_count=page_count, page_from=page_from, page_to=page_to)
+    needle = search_text.casefold()
+    matches: list[dict[str, object]] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        page_number = _safe_int(page.get("page_number"))
+        if page_number is None or page_number < start_page or page_number > end_page:
+            continue
+        searchable_text = _page_searchable_text(report_mode=str(report.get("mode", "")), page=page)
+        if not searchable_text:
+            continue
+        page_matches = _find_text_occurrences(searchable_text, needle)
+        if not page_matches:
+            continue
+        match_payload: dict[str, object] = {
+            "page_number": page_number,
+            "count": len(page_matches),
+            "excerpts": [_build_search_excerpt(searchable_text, index, len(search_text)) for index in page_matches],
+        }
+        selected_source = page.get("selected_source")
+        if isinstance(selected_source, str) and selected_source.strip():
+            match_payload["selected_source"] = selected_source
+        matches.append(match_payload)
+
+    return {
+        "search_text": search_text,
+        "page_from": start_page,
+        "page_to": end_page,
+        "match_count": sum(int(match["count"]) for match in matches),
+        "matches": matches,
+    }
+
+
+def _normalize_page_window(*, page_count: int, page_from: int | None, page_to: int | None) -> tuple[int, int]:
+    if page_count <= 0:
+        return 1, 0
+    start_page = page_from if page_from is not None else 1
+    end_page = page_to if page_to is not None else page_count
+    if start_page < 1:
+        raise ValueError("page_from must be at least 1.")
+    if end_page < 1:
+        raise ValueError("page_to must be at least 1.")
+    if start_page > end_page:
+        raise ValueError("page_from must be less than or equal to page_to.")
+    if start_page > page_count:
+        raise ValueError(f"page_from {start_page} exceeds page_count {page_count}.")
+    if end_page > page_count:
+        raise ValueError(f"page_to {end_page} exceeds page_count {page_count}.")
+    return start_page, end_page
+
+
+def _page_searchable_text(*, report_mode: str, page: dict[str, object]) -> str:
+    if report_mode == "layered":
+        return str(page.get("searchable_text", "") or "")
+    if report_mode == "table":
+        return _combine_table_page_text(page.get("tables", []))
+    return str(page.get("text", "") or "")
+
+
+def _find_text_occurrences(text: str, needle: str) -> list[int]:
+    haystack = text.casefold()
+    matches: list[int] = []
+    start = 0
+    while True:
+        index = haystack.find(needle, start)
+        if index < 0:
+            break
+        matches.append(index)
+        start = index + max(1, len(needle))
+    return matches
+
+
+def _build_search_excerpt(text: str, start_index: int, match_length: int) -> str:
+    excerpt_start = max(0, start_index - 80)
+    excerpt_end = min(len(text), start_index + match_length + 80)
+    return " ".join(text[excerpt_start:excerpt_end].split())
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value: object, *, default: int | None = None) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _first_lc_sc_match(text: str) -> tuple[str, int] | None:

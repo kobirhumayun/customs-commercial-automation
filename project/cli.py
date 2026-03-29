@@ -126,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     inspect_document_text_parser = subparsers.add_parser(
         "inspect-document-text",
-        help="Print raw text extracted from one saved PDF for extraction debugging.",
+        help="Write a page-level extraction audit JSON for one saved PDF.",
     )
     inspect_document_text_parser.add_argument(
         "--document-path",
@@ -144,6 +144,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-json",
         type=Path,
         help="Optional destination for the extraction audit JSON. Defaults to <document>.extraction.<mode>.json.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--search-text",
+        help="Optional text to search for inside the extracted per-page audit.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--page-from",
+        type=int,
+        help="Optional 1-based first page for bounded search.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--page-to",
+        type=int,
+        help="Optional 1-based last page for bounded search.",
     )
 
     inspect_workbook_parser = subparsers.add_parser(
@@ -838,6 +852,9 @@ def _handle_inspect_document_text(args: argparse.Namespace) -> int:
         extraction_report = extract_saved_document_raw_report(
             saved_document=saved_document,
             mode=args.mode,
+            search_text=args.search_text,
+            page_from=args.page_from,
+            page_to=args.page_to,
         )
         output_path = args.output_json or _default_extraction_output_path(document_path, args.mode)
         output_path.parent.mkdir(parents=True, exist_ok=True)

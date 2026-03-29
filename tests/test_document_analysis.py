@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.documents import (
+    extract_saved_document_raw_report,
     JsonManifestSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
     OCRSavedDocumentAnalysisProvider,
@@ -17,6 +18,243 @@ from project.models import SavedDocument
 
 
 class SavedDocumentAnalysisProviderTests(unittest.TestCase):
+    def test_raw_text_report_reconstructs_visual_line_despite_large_gap_split(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "visual-gap.pdf"
+            pdf_path.write_bytes(b"fake pdf bytes")
+
+            class FakePage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return [
+                            (10, 10, 50, 20, "Invoice", 0, 0, 0),
+                            (160, 10, 220, 20, "LC-0038", 0, 1, 0),
+                            (260, 10, 340, 20, "PDL-26-42", 0, 1, 1),
+                            (10, 40, 40, 50, "Next", 0, 2, 0),
+                        ]
+                    if mode == "text":
+                        return "fallback text"
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    return None
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakeDocument()
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                report = extract_saved_document_raw_report(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-raw-1",
+                        mail_id="mail-1",
+                        attachment_name="visual-gap.pdf",
+                        normalized_filename="visual-gap.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="a" * 64,
+                        save_decision="saved_new",
+                    ),
+                    mode="text",
+                )
+
+        self.assertEqual(report["page_count"], 1)
+        self.assertEqual(report["pages"][0]["strategy"], "words_reconstructed")
+        self.assertEqual(report["pages"][0]["line_count"], 2)
+        self.assertIn("Invoice    LC-0038    PDL-26-42", report["pages"][0]["text"])
+
+    def test_layered_raw_report_uses_ocr_only_for_low_yield_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "hybrid.pdf"
+            pdf_path.write_bytes(b"fake hybrid pdf")
+
+            class FakePixmap:
+                @staticmethod
+                def tobytes(image_format: str) -> bytes:
+                    self.assertEqual(image_format, "png")
+                    return b"png-bytes"
+
+            class FakeTextPage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return [
+                            (10, 10, 80, 20, "Layered", 0, 0, 0),
+                            (90, 10, 140, 20, "page", 0, 0, 1),
+                            (150, 10, 220, 20, "LC-0038", 0, 0, 2),
+                        ]
+                    if mode == "text":
+                        return "Layered page LC-0038"
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+                @staticmethod
+                def get_pixmap():
+                    raise AssertionError("OCR should not run for a page with sufficient layered text.")
+
+            class FakeScannedPage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return []
+                    if mode == "text":
+                        return ""
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+                @staticmethod
+                def get_pixmap():
+                    return FakePixmap()
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakeTextPage(), FakeScannedPage()])
+
+                def __len__(self):
+                    return 2
+
+                def __getitem__(self, index: int):
+                    return [FakeTextPage(), FakeScannedPage()][index]
+
+                def close(self) -> None:
+                    return None
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakeDocument()
+
+            class FakePDFPage:
+                @staticmethod
+                def extract_tables():
+                    return []
+
+            class FakePDF:
+                pages = [FakePDFPage(), FakePDFPage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    del stream
+                    return {"opened": True}
+
+            class FakeTesseract:
+                call_count = 0
+
+                class Output:
+                    DICT = "DICT"
+
+                @classmethod
+                def image_to_data(cls, image, output_type=None):
+                    del image, output_type
+                    cls.call_count += 1
+                    return {
+                        "text": ["Scanned", "PDL-26-0042"],
+                        "conf": ["92", "97"],
+                    }
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                    with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                        with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                            report = extract_saved_document_raw_report(
+                                saved_document=SavedDocument(
+                                    saved_document_id="doc-raw-2",
+                                    mail_id="mail-1",
+                                    attachment_name="hybrid.pdf",
+                                    normalized_filename="hybrid.pdf",
+                                    destination_path=str(pdf_path),
+                                    file_sha256="b" * 64,
+                                    save_decision="saved_new",
+                                ),
+                                mode="layered",
+                            )
+
+        self.assertEqual(report["page_count"], 2)
+        self.assertEqual(report["pages"][0]["selected_source"], "text")
+        self.assertFalse(report["pages"][0]["ocr_attempted"])
+        self.assertEqual(report["pages"][1]["selected_source"], "ocr")
+        self.assertTrue(report["pages"][1]["ocr_attempted"])
+        self.assertEqual(report["categories"]["ocr"]["attempted_page_numbers"], [2])
+        self.assertEqual(FakeTesseract.call_count, 1)
+        self.assertIn("Layered page LC-0038", report["combined_text"])
+        self.assertIn("Scanned PDL-26-0042", report["combined_text"])
+
+    def test_raw_report_search_respects_page_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "search.pdf"
+            pdf_path.write_bytes(b"fake pdf bytes")
+
+            class FakePage:
+                def __init__(self, words):
+                    self._words = words
+
+                def get_text(self, mode: str):
+                    if mode == "words":
+                        return self._words
+                    if mode == "text":
+                        return ""
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter(
+                        [
+                            FakePage([(10, 10, 50, 20, "alpha", 0, 0, 0)]),
+                            FakePage([(10, 10, 50, 20, "target", 0, 0, 0)]),
+                            FakePage([(10, 10, 50, 20, "target", 0, 0, 0)]),
+                        ]
+                    )
+
+                def close(self) -> None:
+                    return None
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakeDocument()
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                report = extract_saved_document_raw_report(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-raw-3",
+                        mail_id="mail-1",
+                        attachment_name="search.pdf",
+                        normalized_filename="search.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="c" * 64,
+                        save_decision="saved_new",
+                    ),
+                    mode="text",
+                    search_text="target",
+                    page_from=2,
+                    page_to=2,
+                )
+
+        self.assertEqual(report["search"]["match_count"], 1)
+        self.assertEqual(report["search"]["page_from"], 2)
+        self.assertEqual(report["search"]["page_to"], 2)
+        self.assertEqual(len(report["search"]["matches"]), 1)
+        self.assertEqual(report["search"]["matches"][0]["page_number"], 2)
+
     def test_json_manifest_provider_matches_by_destination_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "document-analysis.json"
