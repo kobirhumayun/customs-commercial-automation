@@ -36,40 +36,65 @@ class SavedDocumentAnalysisProvider(Protocol):
         """Return deterministic analysis metadata for a saved document."""
 
 
-def extract_saved_document_raw_text(
+def extract_saved_document_raw_report(
     *,
     saved_document: SavedDocument,
     mode: str = "layered",
-) -> str:
+) -> dict[str, object]:
     document_path = Path(saved_document.destination_path)
     if not document_path.exists():
         raise ValueError(f"Document path does not exist: {document_path}")
 
     if mode == "text":
-        return _extract_pdf_text(document_path, _load_pymupdf_module())
+        return _build_text_extraction_report(document_path, _load_pymupdf_module())
     if mode == "table":
-        return _extract_pdf_table_text(document_path, _load_pdfplumber_module())
+        return _build_table_extraction_report(document_path, _load_pdfplumber_module())
     if mode == "ocr":
-        text, _confidence, _tokens, _confidences = _extract_pdf_text_with_ocr(
+        return _build_ocr_extraction_report(
             document_path=document_path,
             fitz_module=_load_pymupdf_module(),
             pytesseract_module=_load_pytesseract_module(),
             pil_image_module=_load_pil_image_module(),
         )
-        return text
     if mode == "layered":
-        text_output = _extract_pdf_text(document_path, _load_pymupdf_module())
-        table_output = _extract_pdf_table_text(document_path, _load_pdfplumber_module())
-        combined = "\n".join(part for part in (text_output.strip(), table_output.strip()) if part)
-        if combined.strip():
-            return combined
-        text, _confidence, _tokens, _confidences = _extract_pdf_text_with_ocr(
+        text_report = _build_text_extraction_report(document_path, _load_pymupdf_module())
+        table_report = _build_table_extraction_report(document_path, _load_pdfplumber_module())
+        layered_text = "\n".join(
+            part
+            for part in (
+                str(text_report.get("combined_text", "")).strip(),
+                str(table_report.get("combined_text", "")).strip(),
+            )
+            if part
+        )
+        categories: dict[str, object] = {
+            "text": text_report,
+            "table": table_report,
+        }
+        attempted_modes = ["text", "table"]
+        if layered_text.strip():
+            return {
+                "mode": "layered",
+                "document_path": str(document_path),
+                "attempted_modes": attempted_modes,
+                "combined_text": layered_text,
+                "categories": categories,
+            }
+        ocr_report = _build_ocr_extraction_report(
             document_path=document_path,
             fitz_module=_load_pymupdf_module(),
             pytesseract_module=_load_pytesseract_module(),
             pil_image_module=_load_pil_image_module(),
         )
-        return text
+        categories["ocr"] = ocr_report
+        attempted_modes.append("ocr")
+        return {
+            "mode": "layered",
+            "document_path": str(document_path),
+            "attempted_modes": attempted_modes,
+            "combined_text": ocr_report.get("combined_text", ""),
+            "categories": categories,
+        }
     raise ValueError(f"Unsupported raw-text extraction mode: {mode}")
 
 
@@ -336,6 +361,32 @@ def _extract_pdf_text(path: Path, fitz_module: object) -> str:
             close()
 
 
+def _build_text_extraction_report(path: Path, fitz_module: object) -> dict[str, object]:
+    document = fitz_module.open(str(path))
+    try:
+        pages: list[dict[str, object]] = []
+        for page_index, page in enumerate(document, start=1):
+            text = _extract_page_text(page)
+            pages.append(
+                {
+                    "page_number": page_index,
+                    "text": text,
+                }
+            )
+    finally:
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+
+    return {
+        "mode": "text",
+        "document_path": str(path),
+        "page_count": len(pages),
+        "combined_text": "\n".join(str(page["text"]) for page in pages),
+        "pages": pages,
+    }
+
+
 def _extract_pdf_table_text(path: Path, pdfplumber_module: object) -> str:
     with pdfplumber_module.open(str(path)) as document:
         rows: list[str] = []
@@ -353,6 +404,47 @@ def _extract_pdf_table_text(path: Path, pdfplumber_module: object) -> str:
                     if cells:
                         rows.append(" | ".join(cells))
         return "\n".join(rows)
+
+
+def _build_table_extraction_report(path: Path, pdfplumber_module: object) -> dict[str, object]:
+    with pdfplumber_module.open(str(path)) as document:
+        pages: list[dict[str, object]] = []
+        combined_rows: list[str] = []
+        for page_index, page in enumerate(document.pages, start=1):
+            extract_tables = getattr(page, "extract_tables", None)
+            page_tables: list[dict[str, object]] = []
+            if callable(extract_tables):
+                for table_index, table in enumerate(extract_tables() or [], start=1):
+                    normalized_rows: list[list[str]] = []
+                    combined_table_rows: list[str] = []
+                    for raw_row in table or []:
+                        normalized_row = [" ".join(str(cell or "").split()) for cell in raw_row or []]
+                        normalized_rows.append(normalized_row)
+                        row_text = " | ".join(cell for cell in normalized_row if cell)
+                        if row_text:
+                            combined_table_rows.append(row_text)
+                            combined_rows.append(row_text)
+                    page_tables.append(
+                        {
+                            "table_index": table_index,
+                            "rows": normalized_rows,
+                            "combined_text": "\n".join(combined_table_rows),
+                        }
+                    )
+            pages.append(
+                {
+                    "page_number": page_index,
+                    "tables": page_tables,
+                }
+            )
+
+    return {
+        "mode": "table",
+        "document_path": str(path),
+        "page_count": len(pages),
+        "combined_text": "\n".join(combined_rows),
+        "pages": pages,
+    }
 
 
 def _extract_pdf_text_with_ocr(
@@ -376,6 +468,51 @@ def _extract_pdf_text_with_ocr(
     if not confidences:
         return text, None, tokens, confidences
     return text, round(sum(confidences) / len(confidences), 4), tokens, confidences
+
+
+def _build_ocr_extraction_report(
+    *,
+    document_path: Path,
+    fitz_module: object,
+    pytesseract_module: object,
+    pil_image_module: object,
+) -> dict[str, object]:
+    document = fitz_module.open(str(document_path))
+    try:
+        pages: list[dict[str, object]] = []
+        all_tokens: list[str] = []
+        all_confidences: list[float] = []
+        for page_index, page in enumerate(document, start=1):
+            payload = _extract_ocr_page_payload(page, pytesseract_module, pil_image_module)
+            page_text = " ".join(payload["tokens"])
+            confidences = [float(value) for value in payload["confidences"]]
+            page_confidence = round(sum(confidences) / len(confidences), 4) if confidences else None
+            pages.append(
+                {
+                    "page_number": page_index,
+                    "text": page_text,
+                    "tokens": list(payload["tokens"]),
+                    "confidences": confidences,
+                    "average_confidence": page_confidence,
+                }
+            )
+            all_tokens.extend(payload["tokens"])
+            all_confidences.extend(confidences)
+    finally:
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+
+    combined_text = " ".join(all_tokens)
+    combined_confidence = round(sum(all_confidences) / len(all_confidences), 4) if all_confidences else None
+    return {
+        "mode": "ocr",
+        "document_path": str(document_path),
+        "page_count": len(pages),
+        "combined_text": combined_text,
+        "average_confidence": combined_confidence,
+        "pages": pages,
+    }
 
 
 def _extract_ocr_page_payload(page: object, pytesseract_module: object, pil_image_module: object) -> dict[str, list]:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from project.config import load_workflow_config
 from project.documents import (
-    extract_saved_document_raw_text,
+    extract_saved_document_raw_report,
     JsonManifestSavedDocumentAnalysisProvider,
     LayeredSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
@@ -139,6 +139,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["text", "table", "ocr", "layered"],
         default="layered",
         help="Extraction mode to run. Defaults to layered.",
+    )
+    inspect_document_text_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination for the extraction audit JSON. Defaults to <document>.extraction.<mode>.json.",
     )
 
     inspect_workbook_parser = subparsers.add_parser(
@@ -830,15 +835,23 @@ def _handle_inspect_document_text(args: argparse.Namespace) -> int:
             file_sha256="",
             save_decision="saved_new",
         )
-        raw_text = extract_saved_document_raw_text(
+        extraction_report = extract_saved_document_raw_report(
             saved_document=saved_document,
             mode=args.mode,
         )
+        output_path = args.output_json or _default_extraction_output_path(document_path, args.mode)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(pretty_json_dumps(extraction_report), encoding="utf-8")
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print(raw_text, end="" if raw_text.endswith("\n") else "\n")
+    payload = {
+        "document_path": str(document_path),
+        "mode": args.mode,
+        "output_json": str(output_path),
+    }
+    print(pretty_json_dumps(payload), end="")
     return 0
 
 
@@ -950,6 +963,10 @@ def _resolve_run_artifact_paths(*, run_artifact_root: Path, backup_root: Path, w
         workflow_id=workflow_id,
         run_id=run_id,
     )
+
+
+def _default_extraction_output_path(document_path: Path, mode: str) -> Path:
+    return document_path.with_suffix(f"{document_path.suffix}.extraction.{mode}.json")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 from project.documents.providers import (
-    extract_saved_document_raw_text,
+    extract_saved_document_raw_report,
     LayeredSavedDocumentAnalysisProvider,
     OCRSavedDocumentAnalysisProvider,
     PDFPlumberSavedDocumentAnalysisProvider,
@@ -11,7 +11,7 @@ from project.documents.providers import (
 )
 
 __all__ = [
-    "extract_saved_document_raw_text",
+    "extract_saved_document_raw_report",
     "LayeredSavedDocumentAnalysisProvider",
     "OCRSavedDocumentAnalysisProvider",
     "PDFPlumberSavedDocumentAnalysisProvider",
