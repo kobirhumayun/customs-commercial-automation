@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 
 from project.models import WorkflowId
-from project.workflows.dashboard_html_export import build_workflow_dashboard_html
+from project.workflows.workflow_handoff_export import build_workflow_handoff_export
 
 
-class DashboardHtmlExportTests(unittest.TestCase):
-    def test_build_workflow_dashboard_html_renders_core_sections(self) -> None:
+class WorkflowHandoffExportTests(unittest.TestCase):
+    def test_build_workflow_handoff_export_bundles_summary_recovery_and_handoffs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             run_root = root / "runs"
@@ -51,58 +51,23 @@ class DashboardHtmlExportTests(unittest.TestCase):
             (backup_dir / "backup_hash.txt").write_text("abcd\n", encoding="utf-8")
             (report_root / "run_handoffs").mkdir(parents=True, exist_ok=True)
             (report_root / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
-                """
-                {
-                  "generated_at_utc": "2026-03-30T00:10:00Z",
-                  "handoff_counts": {
-                    "mail_count": 1,
-                    "discrepancy_count": 2,
-                    "manual_verification_pending_count": 1,
-                    "print_marker_count": 1,
-                    "mail_move_marker_count": 1
-                  }
-                }
-                """,
-                encoding="utf-8",
-            )
-            (report_root / "workflow_handoffs").mkdir(parents=True, exist_ok=True)
-            (report_root / "workflow_handoffs" / "export_lc_sc.handoff.json").write_text(
-                """
-                {
-                  "generated_at_utc": "2026-03-30T00:00:00Z",
-                  "summary_counts": {
-                    "recent_run_count": 1,
-                    "operator_queue_count": 1,
-                    "recovery_candidate_count": 1,
-                    "manual_verification_pending_count": 0,
-                    "recent_handoff_count": 1,
-                    "total_handoff_count": 1
-                  }
-                }
-                """,
+                "{}",
                 encoding="utf-8",
             )
 
-            html = build_workflow_dashboard_html(
+            payload = build_workflow_handoff_export(
                 run_artifact_root=run_root,
                 backup_root=backup_root,
                 report_root=report_root,
                 workflow_id=WorkflowId.EXPORT_LC_SC,
             )
 
-        self.assertIn("<!DOCTYPE html>", html)
-        self.assertIn("<h1>Workflow Dashboard: export_lc_sc</h1>", html)
-        self.assertIn("<h2>Snapshot</h2>", html)
-        self.assertIn("<h2>Operator Queue</h2>", html)
-        self.assertIn("<h2>Recovery Candidates</h2>", html)
-        self.assertIn("<h2>Generated Summaries</h2>", html)
-        self.assertIn("Workflow handoffs", html)
-        self.assertIn("Run handoffs", html)
-        self.assertIn("<h2>Workflow Handoffs</h2>", html)
-        self.assertIn("<h2>Recent Run Handoffs</h2>", html)
-        self.assertIn("<td>1</td><td>1</td><td>1</td>", html)
-        self.assertIn("<td>2</td><td>1</td><td>1</td>", html)
-        self.assertIn("<code>run-123</code>", html)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertIn("workflow_summary", payload["workflow_handoff"])
+        self.assertIn("recovery_packet", payload["workflow_handoff"])
+        self.assertIn("recent_handoffs", payload["workflow_handoff"])
+        self.assertEqual(payload["summary_counts"]["recent_handoff_count"], 1)
+        self.assertEqual(payload["summary_counts"]["total_handoff_count"], 1)
 
 
 if __name__ == "__main__":

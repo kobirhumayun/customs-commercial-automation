@@ -117,6 +117,7 @@ def build_workflow_dashboard_markdown(
             "## Generated Summaries",
             "",
             f"- Workflow summaries: {summary_catalog['summary_counts']['workflow_summary_count']}",
+            f"- Workflow handoffs: {summary_catalog['summary_counts']['workflow_handoff_count']}",
             f"- Run summaries: {summary_catalog['summary_counts']['run_summary_count']}",
             f"- Run handoffs: {summary_catalog['summary_counts']['run_handoff_count']}",
             f"- Recovery packets: {summary_catalog['summary_counts']['recovery_packet_count']}",
@@ -124,4 +125,41 @@ def build_workflow_dashboard_markdown(
             "",
         ]
     )
+    lines.extend(
+        [
+            "## Workflow Handoffs",
+            "",
+        ]
+    )
+    workflow_handoffs = summary_catalog["workflow_handoffs"][:5]
+    if workflow_handoffs:
+        for handoff in workflow_handoffs:
+            metadata = handoff.get("artifact_metadata", {}) or {}
+            lines.append(
+                f"- modified={handoff.get('modified_at_utc')} size_bytes={handoff.get('size_bytes')} "
+                f"queue={metadata.get('operator_queue_count')} recovery={metadata.get('recovery_candidate_count')} "
+                f"recent_handoffs={metadata.get('recent_handoff_count')}"
+            )
+    else:
+        lines.append("- No workflow handoff packets are currently indexed.")
+    lines.extend(
+        [
+            "",
+            "## Recent Run Handoffs",
+            "",
+        ]
+    )
+    recent_run_handoffs = summary_catalog["run_handoffs"][:5]
+    if recent_run_handoffs:
+        for handoff in recent_run_handoffs:
+            metadata = handoff.get("artifact_metadata", {}) or {}
+            lines.append(
+                f"- `{handoff.get('run_id')}` modified={handoff.get('modified_at_utc')} "
+                f"size_bytes={handoff.get('size_bytes')} discrepancies={metadata.get('discrepancy_count')} "
+                f"print_markers={metadata.get('print_marker_count')} "
+                f"mail_move_markers={metadata.get('mail_move_marker_count')}"
+            )
+    else:
+        lines.append("- No run handoff packets are currently indexed.")
+    lines.append("")
     return "\n".join(lines) + "\n"

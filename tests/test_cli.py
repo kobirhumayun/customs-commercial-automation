@@ -1332,6 +1332,111 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["run_count"], 1)
         self.assertEqual(payload["runs"][0]["run_id"], "run-uncertain")
 
+    def test_list_run_handoffs_command_prints_recent_packets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "reports" / "run_handoffs").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "list-run-handoffs",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--limit",
+                        "5",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["handoff_count"], 1)
+        self.assertEqual(payload["total_handoff_count"], 1)
+        self.assertEqual(payload["run_handoffs"][0]["run_id"], "run-123")
+
+    def test_list_workflow_handoffs_command_prints_packets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "reports" / "workflow_handoffs").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "workflow_handoffs" / "export_lc_sc.handoff.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "list-workflow-handoffs",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["handoff_count"], 1)
+        self.assertEqual(payload["workflow_handoffs"][0]["artifact_type"], "workflow_handoff")
+
     def test_report_operator_queue_command_prints_actionable_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1488,6 +1593,95 @@ class CLITests(unittest.TestCase):
         self.assertTrue(output_path.name.endswith("export_lc_sc.summary.json"))
         self.assertEqual(written["workflow_id"], "export_lc_sc")
         self.assertEqual(written["operator_queue"]["queue_count"], 1)
+
+    def test_export_workflow_handoff_command_writes_default_json_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_dir = root / "runs" / "export_lc_sc" / "run-123"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-123",
+                        "workflow_id": "export_lc_sc",
+                        "tool_version": "0.1.0",
+                        "rule_pack_id": "export_lc_sc.default",
+                        "rule_pack_version": "1.0.0",
+                        "started_at_utc": "2026-03-30T00:00:00Z",
+                        "completed_at_utc": None,
+                        "state_timezone": "Asia/Dhaka",
+                        "mail_iteration_order": [],
+                        "print_group_order": [],
+                        "write_phase_status": "uncertain_not_committed",
+                        "print_phase_status": "not_started",
+                        "mail_move_phase_status": "not_started",
+                        "hash_algorithm": "sha256",
+                        "run_start_backup_hash": "a" * 64,
+                        "current_workbook_hash": "b" * 64,
+                        "staged_write_plan_hash": "c" * 64,
+                        "summary": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "mail_outcomes.jsonl").write_text("", encoding="utf-8")
+            (run_dir / "staged_write_plan.json").write_text("[]\n", encoding="utf-8")
+            backup_dir = root / "backups" / "export_lc_sc" / "run-123"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            (backup_dir / "master_workbook_backup.xlsx").write_bytes(b"fake")
+            (backup_dir / "backup_hash.txt").write_text("abcd\n", encoding="utf-8")
+            (root / "reports" / "run_handoffs").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "export-workflow-handoff",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                    ]
+                )
+
+            payload = json.loads(buffer.getvalue())
+            output_path = Path(payload["output_json"])
+            written = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertTrue(output_path.name.endswith("export_lc_sc.handoff.json"))
+        self.assertEqual(written["workflow_id"], "export_lc_sc")
+        self.assertEqual(written["summary_counts"]["recent_handoff_count"], 1)
+        self.assertIn("workflow_summary", written["workflow_handoff"])
 
     def test_export_run_summary_command_writes_default_json_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

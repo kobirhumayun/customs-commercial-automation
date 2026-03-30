@@ -64,11 +64,15 @@ class RetentionReportingTests(unittest.TestCase):
             workflow_summary = report_root / "workflow_summaries" / "export_lc_sc.summary.json"
             workflow_summary.parent.mkdir(parents=True, exist_ok=True)
             workflow_summary.write_text("{}", encoding="utf-8")
+            workflow_handoff = report_root / "workflow_handoffs" / "export_lc_sc.handoff.json"
+            workflow_handoff.parent.mkdir(parents=True, exist_ok=True)
+            workflow_handoff.write_text("{}", encoding="utf-8")
             run_handoff = report_root / "run_handoffs" / "export_lc_sc.run-old.handoff.json"
             run_handoff.parent.mkdir(parents=True, exist_ok=True)
             run_handoff.write_text("{}", encoding="utf-8")
             old_report_timestamp = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
             os.utime(workflow_summary, (old_report_timestamp, old_report_timestamp))
+            os.utime(workflow_handoff, (old_report_timestamp, old_report_timestamp))
             os.utime(run_handoff, (old_report_timestamp, old_report_timestamp))
 
             payload = build_retention_report(
@@ -84,9 +88,10 @@ class RetentionReportingTests(unittest.TestCase):
         self.assertEqual(payload["stale_runs"][0]["run_id"], "run-old")
         self.assertEqual(payload["summary_counts"]["stale_backup_count"], 1)
         self.assertEqual(payload["stale_backups"][0]["run_id"], "run-old")
-        self.assertEqual(payload["summary_counts"]["stale_report_count"], 2)
+        self.assertEqual(payload["summary_counts"]["stale_report_count"], 3)
         self.assertEqual(payload["stale_reports"][0]["artifact_type"], "workflow_summary")
-        self.assertEqual(payload["stale_reports"][1]["artifact_type"], "run_handoff")
+        self.assertEqual(payload["stale_reports"][1]["artifact_type"], "workflow_handoff")
+        self.assertEqual(payload["stale_reports"][2]["artifact_type"], "run_handoff")
 
 
 if __name__ == "__main__":

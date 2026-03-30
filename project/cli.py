@@ -82,6 +82,8 @@ from project.workflows.print_planning import (
 )
 from project.workflows.run_artifact_reporting import summarize_run_artifacts
 from project.workflows.run_index import list_recovery_candidates, list_workflow_runs
+from project.workflows.run_handoff_index import list_run_handoffs
+from project.workflows.workflow_handoff_index import list_workflow_handoffs
 from project.workflows.operator_queue import build_operator_queue
 from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
@@ -95,6 +97,7 @@ from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
 from project.workflows.workbook_readiness import summarize_workbook_readiness
 from project.workflows.workflow_summary import build_workflow_summary
+from project.workflows.workflow_handoff_export import build_workflow_handoff_export
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
@@ -133,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_run_status(args)
     if args.command == "list-runs":
         return _handle_list_runs(args)
+    if args.command == "list-run-handoffs":
+        return _handle_list_run_handoffs(args)
+    if args.command == "list-workflow-handoffs":
+        return _handle_list_workflow_handoffs(args)
     if args.command == "report-run-artifacts":
         return _handle_report_run_artifacts(args)
     if args.command == "report-print-markers":
@@ -149,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_operator_queue(args)
     if args.command == "export-workflow-summary":
         return _handle_export_workflow_summary(args)
+    if args.command == "export-workflow-handoff":
+        return _handle_export_workflow_handoff(args)
     if args.command == "export-run-summary":
         return _handle_export_run_summary(args)
     if args.command == "export-run-handoff":
@@ -721,6 +730,56 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    list_run_handoffs_parser = subparsers.add_parser(
+        "list-run-handoffs",
+        help="List recent exported run handoff packets for one workflow.",
+    )
+    list_run_handoffs_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    list_run_handoffs_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    list_run_handoffs_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of recent handoff packets to return. Defaults to 10.",
+    )
+    list_run_handoffs_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    list_workflow_handoffs_parser = subparsers.add_parser(
+        "list-workflow-handoffs",
+        help="List exported workflow handoff packets for one workflow.",
+    )
+    list_workflow_handoffs_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    list_workflow_handoffs_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    list_workflow_handoffs_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     report_operator_queue_parser = subparsers.add_parser(
         "report-operator-queue",
         help="Show a compact workflow-level work queue for operator follow-up.",
@@ -781,6 +840,57 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum number of queued runs to include. Defaults to 10.",
     )
     export_workflow_summary_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_workflow_handoff_parser = subparsers.add_parser(
+        "export-workflow-handoff",
+        help="Write one workflow-level handoff JSON bundling the operator queue, recovery packet, and recent run handoffs.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination JSON path. Defaults to <report_root>/workflow_handoffs/<workflow_id>.handoff.json.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--recent-limit",
+        type=int,
+        default=10,
+        help="Maximum number of recent runs to include. Defaults to 10.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--queue-limit",
+        type=int,
+        default=10,
+        help="Maximum number of queued runs to include. Defaults to 10.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--recovery-limit",
+        type=int,
+        default=10,
+        help="Maximum number of recovery candidates to include. Defaults to 10.",
+    )
+    export_workflow_handoff_parser.add_argument(
+        "--handoff-limit",
+        type=int,
+        default=10,
+        help="Maximum number of recent run handoffs to include. Defaults to 10.",
+    )
+    export_workflow_handoff_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2620,6 +2730,47 @@ def _handle_list_recovery_candidates(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_list_run_handoffs(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = list_run_handoffs(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            limit=args.limit,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_list_workflow_handoffs(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = list_workflow_handoffs(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
 def _handle_report_operator_queue(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -2672,6 +2823,49 @@ def _handle_export_workflow_summary(args: argparse.Namespace) -> int:
                 "output_json": str(output_path),
                 "recent_run_count": payload["summary_counts"]["recent_run_count"],
                 "operator_queue_count": payload["summary_counts"]["operator_queue_count"],
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
+def _handle_export_workflow_handoff(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_workflow_handoff_export(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            recent_limit=args.recent_limit,
+            queue_limit=args.queue_limit,
+            recovery_limit=args.recovery_limit,
+            handoff_limit=args.handoff_limit,
+        )
+        output_path = args.output_json or _default_workflow_handoff_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "output_json": str(output_path),
+                "operator_queue_count": payload["summary_counts"]["operator_queue_count"],
+                "recovery_candidate_count": payload["summary_counts"]["recovery_candidate_count"],
+                "recent_handoff_count": payload["summary_counts"]["recent_handoff_count"],
             }
         ),
         end="",
@@ -3109,6 +3303,10 @@ def _default_extraction_output_path(document_path: Path, mode: str) -> Path:
 
 def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:
     return report_root / "workflow_summaries" / f"{workflow_id}.summary.json"
+
+
+def _default_workflow_handoff_output_path(*, report_root: Path, workflow_id: str) -> Path:
+    return report_root / "workflow_handoffs" / f"{workflow_id}.handoff.json"
 
 
 def _default_run_summary_output_path(*, report_root: Path, workflow_id: str, run_id: str) -> Path:

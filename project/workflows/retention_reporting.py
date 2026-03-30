@@ -207,6 +207,7 @@ def _collect_stale_reports(
     candidates: list[dict[str, Any]] = []
     report_files = [
         (report_root / "workflow_summaries" / f"{workflow_id.value}.summary.json", "workflow_summary"),
+        (report_root / "workflow_handoffs" / f"{workflow_id.value}.handoff.json", "workflow_handoff"),
         (report_root / "recovery_packets" / f"{workflow_id.value}.recovery.json", "recovery_packet"),
     ]
     run_summary_root = report_root / "run_summaries"

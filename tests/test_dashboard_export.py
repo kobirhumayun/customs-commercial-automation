@@ -51,7 +51,35 @@ class DashboardExportTests(unittest.TestCase):
             (backup_dir / "backup_hash.txt").write_text("abcd\n", encoding="utf-8")
             (report_root / "run_handoffs").mkdir(parents=True, exist_ok=True)
             (report_root / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
-                "{}",
+                """
+                {
+                  "generated_at_utc": "2026-03-30T00:10:00Z",
+                  "handoff_counts": {
+                    "mail_count": 1,
+                    "discrepancy_count": 2,
+                    "manual_verification_pending_count": 1,
+                    "print_marker_count": 1,
+                    "mail_move_marker_count": 1
+                  }
+                }
+                """,
+                encoding="utf-8",
+            )
+            (report_root / "workflow_handoffs").mkdir(parents=True, exist_ok=True)
+            (report_root / "workflow_handoffs" / "export_lc_sc.handoff.json").write_text(
+                """
+                {
+                  "generated_at_utc": "2026-03-30T00:00:00Z",
+                  "summary_counts": {
+                    "recent_run_count": 1,
+                    "operator_queue_count": 1,
+                    "recovery_candidate_count": 1,
+                    "manual_verification_pending_count": 0,
+                    "recent_handoff_count": 1,
+                    "total_handoff_count": 1
+                  }
+                }
+                """,
                 encoding="utf-8",
             )
 
@@ -67,7 +95,12 @@ class DashboardExportTests(unittest.TestCase):
         self.assertIn("## Operator Queue", markdown)
         self.assertIn("## Recovery Candidates", markdown)
         self.assertIn("## Generated Summaries", markdown)
+        self.assertIn("- Workflow handoffs: 1", markdown)
         self.assertIn("- Run handoffs: 1", markdown)
+        self.assertIn("## Workflow Handoffs", markdown)
+        self.assertIn("## Recent Run Handoffs", markdown)
+        self.assertIn("queue=1 recovery=1 recent_handoffs=1", markdown)
+        self.assertIn("discrepancies=2 print_markers=1 mail_move_markers=1", markdown)
         self.assertIn("`run-123`", markdown)
 
 

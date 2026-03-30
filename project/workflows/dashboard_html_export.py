@@ -90,11 +90,37 @@ def build_workflow_dashboard_html(
 
     generated_rows = [
         ("Workflow summaries", summary_catalog["summary_counts"]["workflow_summary_count"]),
+        ("Workflow handoffs", summary_catalog["summary_counts"]["workflow_handoff_count"]),
         ("Run summaries", summary_catalog["summary_counts"]["run_summary_count"]),
         ("Run handoffs", summary_catalog["summary_counts"]["run_handoff_count"]),
         ("Recovery packets", summary_catalog["summary_counts"]["recovery_packet_count"]),
         ("Retention summaries", summary_catalog["summary_counts"]["retention_summary_count"]),
     ]
+    workflow_handoff_rows: list[tuple[str, str]] = []
+    for handoff in summary_catalog["workflow_handoffs"][:5]:
+        metadata = handoff.get("artifact_metadata", {}) or {}
+        workflow_handoff_rows.append(
+            (
+                str(handoff.get("modified_at_utc")),
+                str(handoff.get("size_bytes")),
+                str(metadata.get("operator_queue_count")),
+                str(metadata.get("recovery_candidate_count")),
+                str(metadata.get("recent_handoff_count")),
+            )
+        )
+    handoff_rows: list[tuple[str, str, str]] = []
+    for handoff in summary_catalog["run_handoffs"][:5]:
+        metadata = handoff.get("artifact_metadata", {}) or {}
+        handoff_rows.append(
+            (
+                str(handoff.get("run_id")),
+                str(handoff.get("modified_at_utc")),
+                str(handoff.get("size_bytes")),
+                str(metadata.get("discrepancy_count")),
+                str(metadata.get("print_marker_count")),
+                str(metadata.get("mail_move_marker_count")),
+            )
+        )
 
     body = "\n".join(
         [
@@ -144,6 +170,26 @@ def build_workflow_dashboard_html(
                 code_columns={0},
             ),
             _render_key_value_section("Generated Summaries", generated_rows),
+            _render_table_section(
+                "Workflow Handoffs",
+                headers=["Modified", "Size (bytes)", "Queue", "Recovery", "Recent Handoffs"],
+                rows=workflow_handoff_rows,
+                empty_message="No workflow handoff packets are currently indexed.",
+            ),
+            _render_table_section(
+                "Recent Run Handoffs",
+                headers=[
+                    "Run ID",
+                    "Modified",
+                    "Size (bytes)",
+                    "Discrepancies",
+                    "Print Markers",
+                    "Mail Move Markers",
+                ],
+                rows=handoff_rows,
+                empty_message="No run handoff packets are currently indexed.",
+                code_columns={0},
+            ),
             "  </main>",
             "</body>",
             "</html>",
