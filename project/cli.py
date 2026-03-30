@@ -62,6 +62,7 @@ from project.workflows.recovery import assess_recovery
 from project.workflows.recovery_packet import build_workflow_recovery_packet
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_summary_export import build_run_summary_export
+from project.workflows.retention_reporting import build_retention_report
 from project.workflows.workflow_summary import build_workflow_summary
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
@@ -109,6 +110,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_export_run_summary(args)
     if args.command == "export-recovery-packet":
         return _handle_export_recovery_packet(args)
+    if args.command == "report-retention-candidates":
+        return _handle_report_retention_candidates(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -591,6 +594,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum number of recovery candidates to include. Defaults to 10.",
     )
     export_recovery_packet_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_retention_candidates_parser = subparsers.add_parser(
+        "report-retention-candidates",
+        help="Report stale workflow artifacts by age without deleting anything.",
+    )
+    report_retention_candidates_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_retention_candidates_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_retention_candidates_parser.add_argument(
+        "--older-than-days",
+        type=int,
+        default=30,
+        help="Minimum age in whole days before an artifact is reported as stale. Defaults to 30.",
+    )
+    report_retention_candidates_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1718,6 +1749,29 @@ def _handle_export_recovery_packet(args: argparse.Namespace) -> int:
         ),
         end="",
     )
+    return 0
+
+
+def _handle_report_retention_candidates(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_retention_report(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            older_than_days=args.older_than_days,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
     return 0
 
 

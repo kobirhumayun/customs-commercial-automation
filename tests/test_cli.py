@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -1253,6 +1255,75 @@ class CLITests(unittest.TestCase):
         self.assertTrue(output_path.name.endswith("export_lc_sc.recovery.json"))
         self.assertEqual(written["workflow_id"], "export_lc_sc")
         self.assertEqual(written["candidate_count"], 1)
+
+    def test_report_retention_candidates_command_prints_stale_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_dir = root / "runs" / "export_lc_sc" / "run-old"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-old",
+                        "started_at_utc": "2026-01-01T00:00:00Z",
+                        "write_phase_status": "committed",
+                        "print_phase_status": "completed",
+                        "mail_move_phase_status": "completed",
+                        "summary": {},
+                        "print_group_order": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            workflow_summary = root / "reports" / "workflow_summaries" / "export_lc_sc.summary.json"
+            workflow_summary.parent.mkdir(parents=True, exist_ok=True)
+            workflow_summary.write_text("{}", encoding="utf-8")
+            old_timestamp = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+            os.utime(workflow_summary, (old_timestamp, old_timestamp))
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "report-retention-candidates",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--older-than-days",
+                        "30",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["summary_counts"]["stale_run_count"], 1)
+        self.assertEqual(payload["stale_runs"][0]["run_id"], "run-old")
 
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
