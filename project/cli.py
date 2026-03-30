@@ -59,6 +59,7 @@ from project.workflows.run_index import list_recovery_candidates, list_workflow_
 from project.workflows.operator_queue import build_operator_queue
 from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
+from project.workflows.recovery_packet import build_workflow_recovery_packet
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.workflow_summary import build_workflow_summary
@@ -106,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_export_workflow_summary(args)
     if args.command == "export-run-summary":
         return _handle_export_run_summary(args)
+    if args.command == "export-recovery-packet":
+        return _handle_export_recovery_packet(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -555,6 +558,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional destination JSON path. Defaults to <report_root>/run_summaries/<workflow_id>.<run_id>.summary.json.",
     )
     export_run_summary_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_recovery_packet_parser = subparsers.add_parser(
+        "export-recovery-packet",
+        help="Write one workflow-level JSON packet for runs that currently need recovery attention.",
+    )
+    export_recovery_packet_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_recovery_packet_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_recovery_packet_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination JSON path. Defaults to <report_root>/recovery_packets/<workflow_id>.recovery.json.",
+    )
+    export_recovery_packet_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of recovery candidates to include. Defaults to 10.",
+    )
+    export_recovery_packet_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1647,6 +1683,44 @@ def _handle_export_run_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_export_recovery_packet(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_workflow_recovery_packet(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id,
+            limit=args.limit,
+        )
+        output_path = args.output_json or _default_recovery_packet_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "output_json": str(output_path),
+                "candidate_count": payload["candidate_count"],
+                "load_error_count": payload["load_error_count"],
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
 def _descriptor_from_args(workflow_id: str) -> WorkflowDescriptor:
     for descriptor in WORKFLOW_REGISTRY.values():
         if descriptor.workflow_id.value == workflow_id:
@@ -1737,6 +1811,10 @@ def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str
 
 def _default_run_summary_output_path(*, report_root: Path, workflow_id: str, run_id: str) -> Path:
     return report_root / "run_summaries" / f"{workflow_id}.{run_id}.summary.json"
+
+
+def _default_recovery_packet_output_path(*, report_root: Path, workflow_id: str) -> Path:
+    return report_root / "recovery_packets" / f"{workflow_id}.recovery.json"
 
 
 if __name__ == "__main__":
