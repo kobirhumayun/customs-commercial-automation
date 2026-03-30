@@ -1,3 +1,13 @@
-from project.printing.providers import PrintProvider, SimulatedPrintProvider
+from project.printing.providers import (
+    AcrobatPrintProvider,
+    PrintAdapterUnavailableError,
+    PrintProvider,
+    SimulatedPrintProvider,
+)
 
-__all__ = ["PrintProvider", "SimulatedPrintProvider"]
+__all__ = [
+    "AcrobatPrintProvider",
+    "PrintAdapterUnavailableError",
+    "PrintProvider",
+    "SimulatedPrintProvider",
+]

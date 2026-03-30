@@ -21,7 +21,7 @@ from project.erp import (
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
-from project.printing import SimulatedPrintProvider
+from project.printing import AcrobatPrintProvider, SimulatedPrintProvider
 from project.models import SavedDocument
 from project.reporting.persistence import (
     append_discrepancy,
@@ -1002,6 +1002,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use the simulated print provider instead of a live desktop print adapter.",
     )
     execute_print_parser.add_argument(
+        "--live-print",
+        action="store_true",
+        help="Use the configured Acrobat-based live desktop print adapter.",
+    )
+    execute_print_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1433,15 +1438,17 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
         descriptor = _descriptor_from_args(args.workflow_id)
         if not descriptor.supports_print:
             raise ValueError("Print execution is not supported for this workflow")
-        if not args.simulate:
-            raise ValueError(
-                "A live desktop print adapter is not implemented yet; rerun with --simulate to exercise the print phase safely."
-            )
+        if args.simulate and args.live_print:
+            raise ValueError("Choose either --simulate or --live-print, not both")
+        if not args.simulate and not args.live_print:
+            raise ValueError("Choose one print adapter mode: --simulate or --live-print")
         config = load_workflow_config(
             descriptor=descriptor,
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
+        if args.live_print and not config.print_enabled:
+            raise ValueError("Live print execution is disabled by configuration (print_enabled=false)")
         run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
             run_artifact_root=config.run_artifact_root,
             workflow_id=descriptor.workflow_id,
@@ -1463,7 +1470,21 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
             mail_outcomes=mail_outcomes,
             print_batches=print_batches,
             artifact_paths=artifact_paths,
-            provider=SimulatedPrintProvider(),
+            provider=(
+                SimulatedPrintProvider()
+                if args.simulate
+                else AcrobatPrintProvider(
+                    acrobat_executable_path=(
+                        Path(str(config.values.get("acrobat_executable_path")).strip())
+                        if str(config.values.get("acrobat_executable_path", "")).strip()
+                        else None
+                    ),
+                    printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
+                    printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
+                    printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
+                    timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 120)))),
+                )
+            ),
             run_report_persistor=lambda report: write_run_metadata(artifact_paths, to_jsonable(report)),
         )
         write_run_metadata(artifact_paths, to_jsonable(updated_run_report))

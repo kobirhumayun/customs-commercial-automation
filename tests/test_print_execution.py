@@ -16,6 +16,7 @@ from project.models import (
     WritePhaseStatus,
 )
 from project.storage import create_run_artifact_layout
+from project.printing import PrintAdapterUnavailableError
 from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 
 
@@ -157,6 +158,45 @@ class PrintExecutionTests(unittest.TestCase):
         self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.HARD_BLOCKED)
         self.assertEqual(discrepancies[0].code, "print_marker_mismatch")
 
+    def test_execute_print_batches_hard_blocks_when_adapter_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            document_path = root / "doc.pdf"
+            document_path.write_text("fake pdf", encoding="utf-8")
+            run_report = _build_run_report(print_phase_status=PrintPhaseStatus.PLANNED)
+            mail_outcomes = [_build_mail_outcome(document_path=str(document_path))]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(document_path)],
+                    document_path_hashes=["hash-1"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            executed_report, executed_outcomes, discrepancies = execute_print_batches(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                artifact_paths=artifact_paths,
+                provider=UnavailablePrintProvider(),
+            )
+
+        self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.HARD_BLOCKED)
+        self.assertEqual(discrepancies[0].code, "print_adapter_unavailable")
+        self.assertFalse(executed_outcomes[0].eligible_for_print)
+        self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
+
     def test_summarize_print_batch_manual_verification_aggregates_counts(self) -> None:
         summary = summarize_print_batch_manual_verification(
             [
@@ -204,6 +244,12 @@ class FakePrintProvider:
         for document_path in batch.document_paths:
             if not Path(document_path).exists():
                 raise FileNotFoundError(document_path)
+
+
+class UnavailablePrintProvider:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
+        del batch, blank_page_after_group
+        raise PrintAdapterUnavailableError("Acrobat is not configured")
 
 
 def _build_run_report(*, print_phase_status: PrintPhaseStatus) -> RunReport:

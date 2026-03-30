@@ -2408,6 +2408,120 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["mail_move_operation_count"], 0)
         self.assertEqual(payload["manual_verification_summary"]["verified_count"], 1)
 
+    def test_execute_print_command_supports_live_print_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                        f'acrobat_executable_path = "{(root / "Acrobat.exe").as_posix()}"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=["group-1"],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.PLANNED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="subject",
+                    sender_address="a@example.com",
+                    saved_documents=[],
+                    print_group_id="group-1",
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[],
+                    document_path_hashes=[],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, []),
+            ):
+                with patch("project.cli.load_print_batches", return_value=print_batches):
+                    with patch("project.cli.AcrobatPrintProvider", return_value=object()) as provider_mock:
+                        with patch(
+                            "project.cli.execute_print_batches",
+                            return_value=(
+                                replace(run_report, print_phase_status=PrintPhaseStatus.COMPLETED),
+                                mail_outcomes,
+                                [],
+                            ),
+                        ):
+                            with redirect_stdout(buffer):
+                                exit_code = main(
+                                    [
+                                        "execute-print",
+                                        "export_lc_sc",
+                                        "--config",
+                                        str(config_path),
+                                        "--run-id",
+                                        "run-123",
+                                        "--live-print",
+                                    ]
+                                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["print_phase_status"], "completed")
+        provider_mock.assert_called_once()
+
     def test_validate_config_uses_live_outlook_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

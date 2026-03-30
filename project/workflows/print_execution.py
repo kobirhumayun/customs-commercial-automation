@@ -13,7 +13,7 @@ from project.models import (
     PrintPhaseStatus,
     RunReport,
 )
-from project.printing import PrintProvider
+from project.printing import PrintAdapterUnavailableError, PrintProvider
 from project.storage import RunArtifactPaths
 from project.storage.artifacts import write_json
 from project.utils.time import utc_timestamp
@@ -59,6 +59,19 @@ def execute_print_batches(
                     batch,
                     blank_page_after_group=batch_index < (len(print_batches) - 1),
                 )
+            except PrintAdapterUnavailableError as exc:
+                hard_blocked_report = replace(printing_report, print_phase_status=PrintPhaseStatus.HARD_BLOCKED)
+                _persist_run_report(run_report_persistor, hard_blocked_report)
+                discrepancies.append(
+                    _build_print_discrepancy(
+                        run_report=run_report,
+                        code="print_adapter_unavailable",
+                        message="The configured live print adapter was unavailable.",
+                        details={"print_group_id": batch.print_group_id, "error": str(exc)},
+                        mail_id=batch.mail_id,
+                    )
+                )
+                return hard_blocked_report, _block_print_mail_moves(mail_outcomes), discrepancies
             except FileNotFoundError as exc:
                 uncertain_report = replace(printing_report, print_phase_status=PrintPhaseStatus.UNCERTAIN_INCOMPLETE)
                 _persist_run_report(run_report_persistor, uncertain_report)
