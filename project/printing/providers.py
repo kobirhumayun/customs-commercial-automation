@@ -3,15 +3,41 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from project.models import PrintBatch
+from project.utils.time import utc_timestamp
+
+
+@dataclass(slots=True, frozen=True)
+class PrintCommandReceipt:
+    adapter_name: str
+    document_path: str
+    command: list[str]
+    started_at_utc: str
+    completed_at_utc: str
+    elapsed_ms: int
+    returncode: int | None
+    stdout_excerpt: str | None
+    stderr_excerpt: str | None
+    acknowledgment_mode: str
+    blank_separator: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class PrintGroupReceipt:
+    adapter_name: str
+    acknowledgment_mode: str
+    executed_command_count: int
+    blank_separator_printed: bool
+    command_receipts: list[PrintCommandReceipt]
 
 
 class PrintProvider(Protocol):
-    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt | None:
         """Print one deterministic mail-group payload."""
 
 
@@ -21,11 +47,18 @@ class PrintAdapterUnavailableError(RuntimeError):
 
 @dataclass(slots=True, frozen=True)
 class SimulatedPrintProvider:
-    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
         del blank_page_after_group
         for document_path in batch.document_paths:
             if not Path(document_path).exists():
                 raise FileNotFoundError(document_path)
+        return PrintGroupReceipt(
+            adapter_name="simulated",
+            acknowledgment_mode="filesystem_exists",
+            executed_command_count=len(batch.document_paths),
+            blank_separator_printed=False,
+            command_receipts=[],
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -36,30 +69,45 @@ class AcrobatPrintProvider:
     printer_port: str | None = None
     timeout_seconds: int = 120
 
-    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
         executable_path = _resolve_acrobat_executable(self.acrobat_executable_path)
+        command_receipts: list[PrintCommandReceipt] = []
         for document_path in batch.document_paths:
             resolved_path = Path(document_path)
             if not resolved_path.exists():
                 raise FileNotFoundError(document_path)
-            _print_pdf_with_acrobat(
-                executable_path=executable_path,
-                document_path=resolved_path,
-                printer_name=self.printer_name,
-                printer_driver=self.printer_driver,
-                printer_port=self.printer_port,
-                timeout_seconds=self.timeout_seconds,
+            command_receipts.append(
+                _print_pdf_with_acrobat(
+                    executable_path=executable_path,
+                    document_path=resolved_path,
+                    printer_name=self.printer_name,
+                    printer_driver=self.printer_driver,
+                    printer_port=self.printer_port,
+                    timeout_seconds=self.timeout_seconds,
+                )
             )
+        blank_separator_printed = False
         if blank_page_after_group:
             blank_page_path = _ensure_blank_separator_pdf()
-            _print_pdf_with_acrobat(
-                executable_path=executable_path,
-                document_path=blank_page_path,
-                printer_name=self.printer_name,
-                printer_driver=self.printer_driver,
-                printer_port=self.printer_port,
-                timeout_seconds=self.timeout_seconds,
+            command_receipts.append(
+                _print_pdf_with_acrobat(
+                    executable_path=executable_path,
+                    document_path=blank_page_path,
+                    printer_name=self.printer_name,
+                    printer_driver=self.printer_driver,
+                    printer_port=self.printer_port,
+                    timeout_seconds=self.timeout_seconds,
+                    blank_separator=True,
+                )
             )
+            blank_separator_printed = True
+        return PrintGroupReceipt(
+            adapter_name="acrobat",
+            acknowledgment_mode="process_exit_zero",
+            executed_command_count=len(command_receipts),
+            blank_separator_printed=blank_separator_printed,
+            command_receipts=command_receipts,
+        )
 
 
 def inspect_acrobat_print_adapter(
@@ -76,6 +124,7 @@ def inspect_acrobat_print_adapter(
         return {
             "available": True,
             "adapter_name": "acrobat",
+            "acknowledgment_mode": "process_exit_zero",
             "resolved_executable_path": str(executable_path),
             "printer_name": printer_name,
             "printer_driver": printer_driver,
@@ -88,6 +137,7 @@ def inspect_acrobat_print_adapter(
         return {
             "available": False,
             "adapter_name": "acrobat",
+            "acknowledgment_mode": "process_exit_zero",
             "resolved_executable_path": None,
             "printer_name": printer_name,
             "printer_driver": printer_driver,
@@ -143,7 +193,8 @@ def _print_pdf_with_acrobat(
     printer_driver: str | None,
     printer_port: str | None,
     timeout_seconds: int,
-) -> None:
+    blank_separator: bool = False,
+) -> PrintCommandReceipt:
     command = [
         str(executable_path),
         "/n",
@@ -159,6 +210,8 @@ def _print_pdf_with_acrobat(
             command.append(printer_driver)
             if printer_port:
                 command.append(printer_port)
+    started_monotonic = time.monotonic()
+    started_at_utc = utc_timestamp()
     try:
         completed = subprocess.run(
             command,
@@ -172,11 +225,26 @@ def _print_pdf_with_acrobat(
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"Acrobat print command timed out for {document_path}") from exc
 
+    completed_at_utc = utc_timestamp()
+    elapsed_ms = int((time.monotonic() - started_monotonic) * 1000)
     if completed.returncode not in (0, None):
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
         detail = stderr or stdout or f"exit_code={completed.returncode}"
         raise RuntimeError(f"Acrobat print command failed for {document_path}: {detail}")
+    return PrintCommandReceipt(
+        adapter_name="acrobat",
+        document_path=str(document_path),
+        command=list(command),
+        started_at_utc=started_at_utc,
+        completed_at_utc=completed_at_utc,
+        elapsed_ms=max(0, elapsed_ms),
+        returncode=completed.returncode,
+        stdout_excerpt=_normalize_output_excerpt(completed.stdout),
+        stderr_excerpt=_normalize_output_excerpt(completed.stderr),
+        acknowledgment_mode="process_exit_zero",
+        blank_separator=blank_separator,
+    )
 
 
 def _ensure_blank_separator_pdf() -> Path:
@@ -204,3 +272,10 @@ def _minimal_blank_pdf_bytes() -> bytes:
         b"186\n"
         b"%%EOF\n"
     )
+
+
+def _normalize_output_excerpt(value: str | None, limit: int = 200) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    return text[:limit]

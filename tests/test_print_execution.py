@@ -17,6 +17,7 @@ from project.models import (
 )
 from project.storage import create_run_artifact_layout
 from project.printing import PrintAdapterUnavailableError
+from project.printing.providers import PrintCommandReceipt, PrintGroupReceipt
 from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 
 
@@ -76,6 +77,8 @@ class PrintExecutionTests(unittest.TestCase):
         self.assertIn("Manual PDF verification status at print time", executed_outcomes[0].decision_reasons[-1])
         self.assertTrue(marker_exists)
         self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
+        self.assertEqual(marker_payload["print_execution_receipt"]["adapter_name"], "simulated")
+        self.assertEqual(marker_payload["print_execution_receipt"]["executed_command_count"], 1)
         self.assertEqual(discrepancies, [])
 
     def test_execute_print_batches_marks_uncertain_when_document_is_missing(self) -> None:
@@ -240,10 +243,32 @@ class PrintExecutionTests(unittest.TestCase):
 
 
 class FakePrintProvider:
-    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
         for document_path in batch.document_paths:
             if not Path(document_path).exists():
                 raise FileNotFoundError(document_path)
+        return PrintGroupReceipt(
+            adapter_name="simulated",
+            acknowledgment_mode="filesystem_exists",
+            executed_command_count=len(batch.document_paths),
+            blank_separator_printed=blank_page_after_group,
+            command_receipts=[
+                PrintCommandReceipt(
+                    adapter_name="simulated",
+                    document_path=document_path,
+                    command=[],
+                    started_at_utc="2026-03-28T00:00:00Z",
+                    completed_at_utc="2026-03-28T00:00:00Z",
+                    elapsed_ms=0,
+                    returncode=0,
+                    stdout_excerpt=None,
+                    stderr_excerpt=None,
+                    acknowledgment_mode="filesystem_exists",
+                    blank_separator=False,
+                )
+                for document_path in batch.document_paths
+            ],
+        )
 
 
 class UnavailablePrintProvider:

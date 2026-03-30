@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 from project.cli import main
 from project.models import (
+    EmailAttachment,
+    EmailMessage,
     FinalDecision,
     MailMovePhaseStatus,
     MailOutcomeRecord,
@@ -2746,6 +2748,235 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["sections"]["workbook"]["error"], "Workbook unavailable")
         self.assertEqual(payload["sections"]["print"]["status"], "issue")
         self.assertEqual(payload["sections"]["print"]["error"], "Print unavailable")
+
+    def test_run_live_smoke_test_command_writes_bundle_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_session_result = type(
+                "FakeSessionResult",
+                (),
+                {"snapshot": object(), "preflight": {"status": "ready"}},
+            )()
+            fake_erp_provider = type(
+                "FakeERPProvider",
+                (),
+                {"lookup_rows": lambda self, *, file_numbers: []},
+            )()
+
+            buffer = io.StringIO()
+            with patch("project.cli._load_snapshot_if_supplied", return_value=[]):
+                with patch(
+                    "project.cli.summarize_mail_snapshot",
+                    return_value={
+                        "snapshot_count": 0,
+                        "attachment_count": 0,
+                        "entry_id_order": [],
+                        "mail_iteration_order": [],
+                    },
+                ):
+                    with patch("project.cli._load_erp_provider", return_value=fake_erp_provider):
+                        with patch(
+                            "project.cli.XLWingsWorkbookWriteSessionProvider"
+                        ) as workbook_provider_mock:
+                            workbook_provider_mock.return_value.open_preflight_session.return_value = (
+                                fake_session_result
+                            )
+                            with patch(
+                                "project.cli.summarize_workbook_readiness",
+                                return_value={
+                                    "workbook_available": True,
+                                    "sheet_name": "2026",
+                                    "header_mapping_status": "resolved",
+                                    "row_count": 0,
+                                    "session_preflight": {"status": "ready"},
+                                },
+                            ):
+                                with patch(
+                                    "project.cli.inspect_acrobat_print_adapter",
+                                    return_value={
+                                        "available": True,
+                                        "resolved_executable_path": "C:\\Acrobat.exe",
+                                        "printer_name": "Office Printer",
+                                        "blank_separator_exists": True,
+                                        "error": None,
+                                    },
+                                ):
+                                    with redirect_stdout(buffer):
+                                        exit_code = main(
+                                            [
+                                                "run-live-smoke-test",
+                                                "export_lc_sc",
+                                                "--config",
+                                                str(config_path),
+                                            ]
+                                        )
+            payload = json.loads(buffer.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["workflow_id"], "export_lc_sc")
+            self.assertEqual(payload["overall_status"], "ready")
+            summary_path = Path(payload["output_json"])
+            self.assertTrue(summary_path.exists())
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["overall_status"], "ready")
+            self.assertEqual(summary["attachment_audit"]["status"], "not_requested")
+
+    def test_run_live_smoke_test_command_saves_pdf_attachment_audits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            mail = EmailMessage(
+                mail_id="mail-1",
+                entry_id="entry-1",
+                received_time_utc="2026-03-30T00:00:00Z",
+                received_time_workflow_tz="2026-03-30T06:00:00+06:00",
+                subject_raw="subject",
+                sender_address="a@example.com",
+                snapshot_index=0,
+                attachments=[
+                    EmailAttachment(
+                        attachment_id="att-1",
+                        attachment_index=0,
+                        attachment_name="invoice.pdf",
+                        normalized_filename="invoice.pdf",
+                    )
+                ],
+            )
+            fake_session_result = type(
+                "FakeSessionResult",
+                (),
+                {"snapshot": object(), "preflight": {"status": "ready"}},
+            )()
+            fake_erp_provider = type(
+                "FakeERPProvider",
+                (),
+                {"lookup_rows": lambda self, *, file_numbers: []},
+            )()
+
+            class FakeAttachmentProvider:
+                def save_attachment(self, *, mail, attachment_index, destination_path):
+                    destination_path.write_bytes(b"%PDF-1.4\nfake\n")
+
+            buffer = io.StringIO()
+            with patch("project.cli._load_snapshot_if_supplied", return_value=[mail]):
+                with patch(
+                    "project.cli.summarize_mail_snapshot",
+                    return_value={
+                        "snapshot_count": 1,
+                        "attachment_count": 1,
+                        "entry_id_order": ["entry-1"],
+                        "mail_iteration_order": ["mail-1"],
+                    },
+                ):
+                    with patch("project.cli._load_erp_provider", return_value=fake_erp_provider):
+                        with patch(
+                            "project.cli.XLWingsWorkbookWriteSessionProvider"
+                        ) as workbook_provider_mock:
+                            workbook_provider_mock.return_value.open_preflight_session.return_value = (
+                                fake_session_result
+                            )
+                            with patch(
+                                "project.cli.summarize_workbook_readiness",
+                                return_value={
+                                    "workbook_available": True,
+                                    "sheet_name": "2026",
+                                    "header_mapping_status": "resolved",
+                                    "row_count": 0,
+                                    "session_preflight": {"status": "ready"},
+                                },
+                            ):
+                                with patch(
+                                    "project.cli.inspect_acrobat_print_adapter",
+                                    return_value={
+                                        "available": True,
+                                        "resolved_executable_path": "C:\\Acrobat.exe",
+                                        "printer_name": "Office Printer",
+                                        "blank_separator_exists": True,
+                                        "error": None,
+                                    },
+                                ):
+                                    with patch(
+                                        "project.cli.Win32ComAttachmentContentProvider",
+                                        return_value=FakeAttachmentProvider(),
+                                    ):
+                                        with patch(
+                                            "project.workflows.live_smoke_test.extract_saved_document_raw_report",
+                                            return_value={
+                                                "mode": "layered",
+                                                "page_count": 1,
+                                                "combined_text": "hello",
+                                                "pages": [{"page_number": 1, "text": "hello"}],
+                                            },
+                                        ):
+                                            with redirect_stdout(buffer):
+                                                exit_code = main(
+                                                    [
+                                                        "run-live-smoke-test",
+                                                        "export_lc_sc",
+                                                        "--config",
+                                                        str(config_path),
+                                                        "--save-pdf-attachments",
+                                                        "--max-pdf-attachments",
+                                                        "1",
+                                                    ]
+                                                )
+            payload = json.loads(buffer.getvalue())
+            self.assertEqual(exit_code, 0)
+            summary = json.loads(Path(payload["output_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(summary["attachment_audit"]["status"], "ready")
+            self.assertEqual(summary["summary_counts"]["saved_pdf_count"], 1)
+            audit_dir = Path(summary["attachment_audit"]["document_audit_directory"])
+            self.assertEqual(len(list(audit_dir.glob("*.layered.json"))), 1)
 
     def test_validate_config_uses_live_outlook_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

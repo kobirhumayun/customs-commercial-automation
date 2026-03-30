@@ -6,7 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.models import PrintBatch
-from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, PrintAdapterUnavailableError
+from project.printing import (
+    AcrobatPrintProvider,
+    inspect_acrobat_print_adapter,
+    PrintAdapterUnavailableError,
+)
 
 
 class PrintingProviderTests(unittest.TestCase):
@@ -39,7 +43,7 @@ class PrintingProviderTests(unittest.TestCase):
                     (),
                     {"returncode": 0, "stdout": "", "stderr": ""},
                 )()
-                provider.print_group(batch, blank_page_after_group=True)
+                receipt = provider.print_group(batch, blank_page_after_group=True)
 
         self.assertEqual(run_mock.call_count, 2)
         first_command = run_mock.call_args_list[0].args[0]
@@ -48,6 +52,13 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertIn(str(document_path), first_command)
         self.assertEqual(first_command[-1], "Office Printer")
         self.assertTrue(str(second_command[6]).endswith("cca-blank-separator-page.pdf"))
+        self.assertEqual(receipt.adapter_name, "acrobat")
+        self.assertEqual(receipt.acknowledgment_mode, "process_exit_zero")
+        self.assertEqual(receipt.executed_command_count, 2)
+        self.assertTrue(receipt.blank_separator_printed)
+        self.assertEqual(receipt.command_receipts[0].document_path, str(document_path))
+        self.assertFalse(receipt.command_receipts[0].blank_separator)
+        self.assertTrue(receipt.command_receipts[1].blank_separator)
 
     def test_acrobat_print_provider_raises_when_executable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -84,6 +95,7 @@ class PrintingProviderTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["available"], True)
+        self.assertEqual(payload["acknowledgment_mode"], "process_exit_zero")
         self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
         self.assertEqual(payload["printer_name"], "Office Printer")
         self.assertEqual(payload["timeout_seconds"], 45)

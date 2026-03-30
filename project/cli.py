@@ -55,6 +55,12 @@ from project.workflows.live_readiness import (
     build_snapshot_readiness_section,
     build_workbook_readiness_section,
 )
+from project.workflows.live_smoke_test import (
+    build_live_smoke_test_bundle_root,
+    build_live_smoke_test_id,
+    build_live_smoke_test_report,
+    save_smoke_test_pdf_audits,
+)
 from project.workflows.document_verification import (
     acknowledge_document_manual_verification,
     build_document_manual_verification_bundle,
@@ -157,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_print_adapter(args)
     if args.command == "report-live-readiness":
         return _handle_report_live_readiness(args)
+    if args.command == "run-live-smoke-test":
+        return _handle_run_live_smoke_test(args)
     if args.command == "execute-mail-moves":
         return _handle_execute_mail_moves(args)
 
@@ -1077,6 +1085,57 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    run_live_smoke_test_parser = subparsers.add_parser(
+        "run-live-smoke-test",
+        help="Run a non-mutating live environment smoke test and write one timestamped evidence bundle under report_root.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--erp-file-number",
+        dest="erp_file_numbers",
+        action="append",
+        default=[],
+        help="Optional file number to verify through the live ERP lookup path. May be repeated.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--save-pdf-attachments",
+        action="store_true",
+        help="Save a bounded set of live PDF attachments into the smoke-test bundle and generate extraction audit JSONs.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--max-pdf-attachments",
+        type=int,
+        default=3,
+        help="Maximum number of PDF attachments to save and audit when --save-pdf-attachments is used. Defaults to 3.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--audit-mode",
+        choices=["text", "table", "img2table", "ocr", "layered"],
+        default="layered",
+        help="Extraction mode for saved PDF audits. Defaults to layered.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional destination bundle directory. Defaults to <report_root>/live_smoke_tests/<workflow_id>/<smoke_test_id>.",
+    )
+    run_live_smoke_test_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     execute_mail_moves_parser = subparsers.add_parser(
         "execute-mail-moves",
         help="Execute deterministic post-print Outlook mail moves and persist completion markers.",
@@ -1601,6 +1660,96 @@ def _handle_inspect_print_adapter(args: argparse.Namespace) -> int:
     return 0
 
 
+def _collect_live_readiness_report(*, descriptor: WorkflowDescriptor, config, erp_file_numbers: list[str]):
+    snapshot = None
+    snapshot_section = None
+    if descriptor.requires_mail_folders:
+        try:
+            snapshot = _load_snapshot_if_supplied(
+                snapshot_json=None,
+                live_outlook_snapshot=True,
+                config=config,
+            )
+            snapshot_payload = summarize_mail_snapshot(snapshot)
+            snapshot_section = build_snapshot_readiness_section(snapshot_payload)
+        except Exception as exc:
+            snapshot = None
+            snapshot_section = build_issue_section("snapshot", str(exc))
+
+    try:
+        erp_provider = _load_erp_provider(
+            erp_json=None,
+            erp_export=None,
+            live_erp=True,
+            config=config,
+        )
+        if erp_file_numbers:
+            erp_payload = inspect_erp_rows(
+                provider=erp_provider,
+                requested_file_numbers=list(erp_file_numbers),
+            )
+            erp_section = build_erp_readiness_section(
+                requested_file_numbers=list(erp_file_numbers),
+                erp_payload=erp_payload,
+            )
+        else:
+            erp_provider.lookup_rows(file_numbers=[])
+            erp_section = build_erp_readiness_section(
+                requested_file_numbers=[],
+                erp_payload=None,
+            )
+    except Exception as exc:
+        erp_section = build_issue_section("erp", str(exc))
+
+    workbook_section = None
+    if descriptor.write_capable:
+        try:
+            workbook_path = _resolve_live_workbook_path(config)
+            session_result = XLWingsWorkbookWriteSessionProvider(workbook_path).open_preflight_session(
+                operator_context=None
+            )
+            workbook_payload = summarize_workbook_readiness(
+                workflow_id=descriptor.workflow_id,
+                workbook_snapshot=session_result.snapshot,
+                session_preflight=session_result.preflight,
+            )
+            workbook_section = build_workbook_readiness_section(workbook_payload)
+        except Exception as exc:
+            workbook_section = build_issue_section("workbook", str(exc))
+
+    print_section = None
+    if descriptor.supports_print:
+        try:
+            print_payload = inspect_acrobat_print_adapter(
+                configured_executable_path=(
+                    Path(str(config.values.get("acrobat_executable_path")).strip())
+                    if str(config.values.get("acrobat_executable_path", "")).strip()
+                    else None
+                ),
+                printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
+                printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
+                printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
+                timeout_seconds=max(
+                    1, int(str(config.values.get("print_command_timeout_seconds", 120)))
+                ),
+            )
+            print_section = build_print_readiness_section(
+                print_payload,
+                print_enabled=config.print_enabled,
+            )
+        except Exception as exc:
+            print_section = build_issue_section("print", str(exc))
+
+    payload = build_live_environment_readiness(
+        workflow_id=descriptor.workflow_id,
+        snapshot_section=snapshot_section,
+        erp_section=erp_section,
+        workbook_section=workbook_section,
+        print_section=print_section,
+    )
+    return payload, snapshot
+
+
 def _handle_report_live_readiness(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -1609,97 +1758,90 @@ def _handle_report_live_readiness(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
-
-        snapshot_section = None
-        if descriptor.requires_mail_folders:
-            try:
-                snapshot_payload = summarize_mail_snapshot(
-                    _load_snapshot_if_supplied(
-                        snapshot_json=None,
-                        live_outlook_snapshot=True,
-                        config=config,
-                    )
-                )
-                snapshot_section = build_snapshot_readiness_section(snapshot_payload)
-            except Exception as exc:
-                snapshot_section = build_issue_section("snapshot", str(exc))
-
-        try:
-            erp_provider = _load_erp_provider(
-                erp_json=None,
-                erp_export=None,
-                live_erp=True,
-                config=config,
-            )
-            if args.erp_file_numbers:
-                erp_payload = inspect_erp_rows(
-                    provider=erp_provider,
-                    requested_file_numbers=list(args.erp_file_numbers),
-                )
-                erp_section = build_erp_readiness_section(
-                    requested_file_numbers=list(args.erp_file_numbers),
-                    erp_payload=erp_payload,
-                )
-            else:
-                erp_provider.lookup_rows(file_numbers=[])
-                erp_section = build_erp_readiness_section(
-                    requested_file_numbers=[],
-                    erp_payload=None,
-                )
-        except Exception as exc:
-            erp_section = build_issue_section("erp", str(exc))
-
-        workbook_section = None
-        if descriptor.write_capable:
-            try:
-                workbook_path = _resolve_live_workbook_path(config)
-                session_result = XLWingsWorkbookWriteSessionProvider(
-                    workbook_path
-                ).open_preflight_session(operator_context=None)
-                workbook_payload = summarize_workbook_readiness(
-                    workflow_id=descriptor.workflow_id,
-                    workbook_snapshot=session_result.snapshot,
-                    session_preflight=session_result.preflight,
-                )
-                workbook_section = build_workbook_readiness_section(workbook_payload)
-            except Exception as exc:
-                workbook_section = build_issue_section("workbook", str(exc))
-
-        print_section = None
-        if descriptor.supports_print:
-            try:
-                print_payload = inspect_acrobat_print_adapter(
-                    configured_executable_path=(
-                        Path(str(config.values.get("acrobat_executable_path")).strip())
-                        if str(config.values.get("acrobat_executable_path", "")).strip()
-                        else None
-                    ),
-                    printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
-                    printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
-                    printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
-                    timeout_seconds=max(
-                        1, int(str(config.values.get("print_command_timeout_seconds", 120)))
-                    ),
-                )
-                print_section = build_print_readiness_section(
-                    print_payload,
-                    print_enabled=config.print_enabled,
-                )
-            except Exception as exc:
-                print_section = build_issue_section("print", str(exc))
-
-        payload = build_live_environment_readiness(
-            workflow_id=descriptor.workflow_id,
-            snapshot_section=snapshot_section,
-            erp_section=erp_section,
-            workbook_section=workbook_section,
-            print_section=print_section,
+        payload, _ = _collect_live_readiness_report(
+            descriptor=descriptor,
+            config=config,
+            erp_file_numbers=list(args.erp_file_numbers),
         )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_run_live_smoke_test(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        readiness_report, snapshot = _collect_live_readiness_report(
+            descriptor=descriptor,
+            config=config,
+            erp_file_numbers=list(args.erp_file_numbers),
+        )
+        smoke_test_id = build_live_smoke_test_id(descriptor.workflow_id)
+        bundle_root = args.output_dir or build_live_smoke_test_bundle_root(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            smoke_test_id=smoke_test_id,
+        )
+        bundle_root.mkdir(parents=True, exist_ok=True)
+        attachment_audit_section = None
+        if args.save_pdf_attachments:
+            if snapshot is None:
+                attachment_audit_section = {
+                    "status": "issue",
+                    "issue_count": 1,
+                    "saved_pdf_count": 0,
+                    "audited_pdf_count": 0,
+                    "issues": [
+                        {
+                            "error": "Live mail snapshot was unavailable, so PDF attachment smoke capture was skipped.",
+                        }
+                    ],
+                }
+            else:
+                attachment_audit_section = save_smoke_test_pdf_audits(
+                    snapshot=snapshot,
+                    bundle_root=bundle_root,
+                    provider=Win32ComAttachmentContentProvider(
+                        outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None,
+                    ),
+                    audit_mode=args.audit_mode,
+                    max_pdf_attachments=args.max_pdf_attachments,
+                )
+        report = build_live_smoke_test_report(
+            workflow_id=descriptor.workflow_id,
+            smoke_test_id=smoke_test_id,
+            bundle_root=bundle_root,
+            readiness_report=readiness_report,
+            attachment_audit_section=attachment_audit_section,
+        )
+        output_path = bundle_root / "smoke_test_summary.json"
+        write_json(output_path, report)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "smoke_test_id": smoke_test_id,
+                "bundle_root": str(bundle_root),
+                "output_json": str(output_path),
+                "overall_status": report["overall_status"],
+                "saved_pdf_count": report["summary_counts"]["saved_pdf_count"],
+                "audited_pdf_count": report["summary_counts"]["audited_pdf_count"],
+            }
+        ),
+        end="",
+    )
     return 0
 
 

@@ -16,6 +16,7 @@ from project.models import (
 from project.printing import PrintAdapterUnavailableError, PrintProvider
 from project.storage import RunArtifactPaths
 from project.storage.artifacts import write_json
+from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
 
 
@@ -55,7 +56,7 @@ def execute_print_batches(
                 )
                 return hard_blocked_report, _block_print_mail_moves(mail_outcomes), discrepancies
             try:
-                provider.print_group(
+                execution_receipt = provider.print_group(
                     batch,
                     blank_page_after_group=batch_index < (len(print_batches) - 1),
                 )
@@ -108,6 +109,7 @@ def execute_print_batches(
                     "mail_id": batch.mail_id,
                     "document_path_hashes": list(batch.document_path_hashes),
                     "manual_verification_summary": dict(batch.manual_verification_summary),
+                    "print_execution_receipt": to_jsonable(execution_receipt),
                     "printed_at_utc": utc_timestamp(),
                 },
             )
