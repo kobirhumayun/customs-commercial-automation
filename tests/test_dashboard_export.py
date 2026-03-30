@@ -49,6 +49,11 @@ class DashboardExportTests(unittest.TestCase):
             backup_dir.mkdir(parents=True, exist_ok=True)
             (backup_dir / "master_workbook_backup.xlsx").write_bytes(b"fake")
             (backup_dir / "backup_hash.txt").write_text("abcd\n", encoding="utf-8")
+            (report_root / "run_handoffs").mkdir(parents=True, exist_ok=True)
+            (report_root / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
 
             markdown = build_workflow_dashboard_markdown(
                 run_artifact_root=run_root,
@@ -62,6 +67,7 @@ class DashboardExportTests(unittest.TestCase):
         self.assertIn("## Operator Queue", markdown)
         self.assertIn("## Recovery Candidates", markdown)
         self.assertIn("## Generated Summaries", markdown)
+        self.assertIn("- Run handoffs: 1", markdown)
         self.assertIn("`run-123`", markdown)
 
 

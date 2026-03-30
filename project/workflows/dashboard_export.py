@@ -118,6 +118,7 @@ def build_workflow_dashboard_markdown(
             "",
             f"- Workflow summaries: {summary_catalog['summary_counts']['workflow_summary_count']}",
             f"- Run summaries: {summary_catalog['summary_counts']['run_summary_count']}",
+            f"- Run handoffs: {summary_catalog['summary_counts']['run_handoff_count']}",
             f"- Recovery packets: {summary_catalog['summary_counts']['recovery_packet_count']}",
             f"- Retention summaries: {summary_catalog['summary_counts']['retention_summary_count']}",
             "",

@@ -49,6 +49,11 @@ class DashboardHtmlExportTests(unittest.TestCase):
             backup_dir.mkdir(parents=True, exist_ok=True)
             (backup_dir / "master_workbook_backup.xlsx").write_bytes(b"fake")
             (backup_dir / "backup_hash.txt").write_text("abcd\n", encoding="utf-8")
+            (report_root / "run_handoffs").mkdir(parents=True, exist_ok=True)
+            (report_root / "run_handoffs" / "export_lc_sc.run-123.handoff.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
 
             html = build_workflow_dashboard_html(
                 run_artifact_root=run_root,
@@ -63,6 +68,7 @@ class DashboardHtmlExportTests(unittest.TestCase):
         self.assertIn("<h2>Operator Queue</h2>", html)
         self.assertIn("<h2>Recovery Candidates</h2>", html)
         self.assertIn("<h2>Generated Summaries</h2>", html)
+        self.assertIn("Run handoffs", html)
         self.assertIn("<code>run-123</code>", html)
 
 

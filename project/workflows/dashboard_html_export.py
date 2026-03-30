@@ -91,6 +91,7 @@ def build_workflow_dashboard_html(
     generated_rows = [
         ("Workflow summaries", summary_catalog["summary_counts"]["workflow_summary_count"]),
         ("Run summaries", summary_catalog["summary_counts"]["run_summary_count"]),
+        ("Run handoffs", summary_catalog["summary_counts"]["run_handoff_count"]),
         ("Recovery packets", summary_catalog["summary_counts"]["recovery_packet_count"]),
         ("Retention summaries", summary_catalog["summary_counts"]["retention_summary_count"]),
     ]
