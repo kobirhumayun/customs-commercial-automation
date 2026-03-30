@@ -56,6 +56,7 @@ from project.workflows.print_planning import (
 )
 from project.workflows.run_artifact_reporting import summarize_run_artifacts
 from project.workflows.run_index import list_recovery_candidates, list_workflow_runs
+from project.workflows.operator_queue import build_operator_queue
 from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
 from project.workflows.run_reporting import summarize_run_status
@@ -97,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_recovery_precheck(args)
     if args.command == "list-recovery-candidates":
         return _handle_list_recovery_candidates(args)
+    if args.command == "report-operator-queue":
+        return _handle_report_operator_queue(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -447,6 +450,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum number of recovery candidates to return. Defaults to 10.",
     )
     list_recovery_candidates_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_operator_queue_parser = subparsers.add_parser(
+        "report-operator-queue",
+        help="Show a compact workflow-level work queue for operator follow-up.",
+    )
+    report_operator_queue_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_operator_queue_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_operator_queue_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of queued runs to return. Defaults to 10.",
+    )
+    report_operator_queue_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1417,6 +1448,27 @@ def _handle_list_recovery_candidates(args: argparse.Namespace) -> int:
             overrides=_parse_overrides(args.overrides),
         )
         payload = list_recovery_candidates(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            limit=args.limit,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_operator_queue(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_operator_queue(
             run_artifact_root=config.run_artifact_root,
             workflow_id=descriptor.workflow_id,
             limit=args.limit,

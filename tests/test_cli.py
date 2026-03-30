@@ -927,6 +927,97 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["run_count"], 1)
         self.assertEqual(payload["runs"][0]["run_id"], "run-uncertain")
 
+    def test_report_operator_queue_command_prints_actionable_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            recovery_run_dir = root / "runs" / "export_lc_sc" / "run-recovery"
+            manual_run_dir = root / "runs" / "export_lc_sc" / "run-manual"
+            recovery_run_dir.mkdir(parents=True, exist_ok=True)
+            manual_run_dir.mkdir(parents=True, exist_ok=True)
+            (recovery_run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-recovery",
+                        "started_at_utc": "2026-03-30T00:00:00Z",
+                        "write_phase_status": "uncertain_not_committed",
+                        "print_phase_status": "not_started",
+                        "mail_move_phase_status": "not_started",
+                        "summary": {},
+                        "print_group_order": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (manual_run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-manual",
+                        "started_at_utc": "2026-03-31T00:00:00Z",
+                        "write_phase_status": "committed",
+                        "print_phase_status": "completed",
+                        "mail_move_phase_status": "completed",
+                        "summary": {},
+                        "print_group_order": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (manual_run_dir / "document_manual_verification.json").write_text(
+                json.dumps(
+                    {
+                        "manual_verification_complete": False,
+                        "pending_document_count": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "report-operator-queue",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--limit",
+                        "5",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["queue_count"], 2)
+        self.assertEqual(payload["runs"][0]["run_id"], "run-recovery")
+        self.assertEqual(payload["runs"][0]["queue_priority"], "recovery")
+        self.assertEqual(payload["runs"][1]["run_id"], "run-manual")
+        self.assertEqual(payload["runs"][1]["queue_priority"], "manual_verification")
+
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
