@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.erp import DelimitedERPExportRowProvider, JsonManifestERPRowProvider, PlaywrightERPRowProvider
+from project.workflows.erp_inspection import inspect_erp_rows
 
 
 class ERPProviderTests(unittest.TestCase):
@@ -108,6 +109,33 @@ class ERPProviderTests(unittest.TestCase):
         fetch_mock.assert_called_once()
         self.assertEqual(fetch_mock.call_args.kwargs["base_url"], "https://erp.local")
         self.assertEqual(fetch_mock.call_args.kwargs["report_relative_url"], "/reports/rptDateWiseLCRegister")
+
+    def test_inspect_erp_rows_normalizes_and_deduplicates_requested_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "erp.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/42",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "Ananta Garments Ltd.",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 4,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = inspect_erp_rows(
+                provider=JsonManifestERPRowProvider(manifest_path),
+                requested_file_numbers=["P/26/42", "P-26-0042"],
+            )
+
+        self.assertEqual(payload["canonical_file_numbers"], ["P/26/0042"])
+        self.assertEqual(payload["match_count"], 1)
+        self.assertEqual(payload["rows_by_file_number"]["P/26/0042"][0].source_row_index, 4)
 
 
 if __name__ == "__main__":

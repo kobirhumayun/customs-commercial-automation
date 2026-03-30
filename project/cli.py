@@ -54,6 +54,7 @@ from project.workflows.document_verification import (
 )
 from project.workflows.dashboard_export import build_workflow_dashboard_markdown
 from project.workflows.dashboard_html_export import build_workflow_dashboard_html
+from project.workflows.erp_inspection import inspect_erp_rows
 from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 from project.workflows.print_planning import (
     build_print_plan_payload,
@@ -93,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_document_analysis(args)
     if args.command == "inspect-document-text":
         return _handle_inspect_document_text(args)
+    if args.command == "inspect-erp":
+        return _handle_inspect_erp(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
     if args.command == "prepare-document-verification":
@@ -217,6 +220,50 @@ def _build_parser() -> argparse.ArgumentParser:
         "--page-to",
         type=int,
         help="Optional 1-based last page for bounded search.",
+    )
+
+    inspect_erp_parser = subparsers.add_parser(
+        "inspect-erp",
+        help="Inspect canonical ERP rows for one or more file numbers through the configured ERP provider seam.",
+    )
+    inspect_erp_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_erp_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_erp_parser.add_argument(
+        "--file-number",
+        dest="file_numbers",
+        action="append",
+        default=[],
+        help="Raw file number to inspect. May be repeated.",
+    )
+    inspect_erp_parser.add_argument(
+        "--erp-json",
+        type=Path,
+        help="Optional JSON manifest of canonical ERP rows for inspection.",
+    )
+    inspect_erp_parser.add_argument(
+        "--erp-export",
+        type=Path,
+        help="Optional CSV/TSV ERP register export for inspection.",
+    )
+    inspect_erp_parser.add_argument(
+        "--live-erp",
+        action="store_true",
+        help="Load ERP register rows from the configured ERP report page via Playwright.",
+    )
+    inspect_erp_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
     inspect_workbook_parser = subparsers.add_parser(
@@ -1505,6 +1552,42 @@ def _handle_inspect_document_text(args: argparse.Namespace) -> int:
         "mode": args.mode,
         "output_json": str(output_path),
     }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_erp(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        provider = _load_erp_provider(
+            erp_json=args.erp_json,
+            erp_export=args.erp_export,
+            live_erp=args.live_erp,
+            config=config,
+        )
+        payload = inspect_erp_rows(
+            provider=provider,
+            requested_file_numbers=list(args.file_numbers),
+        )
+        payload["workflow_id"] = descriptor.workflow_id.value
+        payload["erp_source"] = (
+            "json_manifest"
+            if args.erp_json is not None
+            else "delimited_export"
+            if args.erp_export is not None
+            else "playwright_live"
+            if args.live_erp
+            else "empty"
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(payload), end="")
     return 0
 

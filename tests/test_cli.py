@@ -228,6 +228,73 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
         self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
 
+    def test_inspect_erp_command_prints_canonical_rows_for_requested_file_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_json_path = root / "erp.json"
+            erp_json_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/42",
+                            "lc_sc_number": "LC-0038",
+                            "buyer_name": "Ananta Garments Ltd.",
+                            "lc_sc_date": "2026-01-10",
+                            "source_row_index": 4,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "inspect-erp",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--erp-json",
+                        str(erp_json_path),
+                        "--file-number",
+                        "P/26/42",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["erp_source"], "json_manifest")
+        self.assertEqual(payload["canonical_file_numbers"], ["P/26/0042"])
+        self.assertEqual(payload["match_count"], 1)
+        self.assertEqual(payload["rows_by_file_number"]["P/26/0042"][0]["source_row_index"], 4)
+
     def test_prepare_document_verification_command_prints_bundle_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
