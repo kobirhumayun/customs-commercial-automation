@@ -55,6 +55,7 @@ from project.workflows.print_planning import (
     plan_print_batches,
 )
 from project.workflows.recovery import assess_recovery
+from project.workflows.run_reporting import summarize_run_status
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
 from project.workflows.validation import validate_run_snapshot
@@ -83,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_acknowledge_document_verification(args)
     if args.command == "report-manual-verification":
         return _handle_report_manual_verification(args)
+    if args.command == "report-run-status":
+        return _handle_report_run_status(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -296,6 +299,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run id whose manual PDF-verification state should be summarized.",
     )
     report_manual_verification_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_run_status_parser = subparsers.add_parser(
+        "report-run-status",
+        help="Print one compact read-only snapshot of write, print, mail-move, and manual-verification state.",
+    )
+    report_run_status_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_run_status_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_run_status_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose current status should be summarized.",
+    )
+    report_run_status_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1122,6 +1152,39 @@ def _handle_report_manual_verification(args: argparse.Namespace) -> int:
         payload = summarize_manual_document_verification(
             run_report=run_report,
             mail_outcomes=mail_outcomes,
+            artifact_paths=artifact_paths,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_run_status(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = summarize_run_status(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
             artifact_paths=artifact_paths,
         )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
