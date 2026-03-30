@@ -87,6 +87,7 @@ from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
 from project.workflows.recovery_packet import build_workflow_recovery_packet
 from project.workflows.run_reporting import summarize_run_status
+from project.workflows.run_handoff_export import build_run_handoff_export
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
 from project.workflows.retention_reporting import build_retention_report
@@ -150,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_export_workflow_summary(args)
     if args.command == "export-run-summary":
         return _handle_export_run_summary(args)
+    if args.command == "export-run-handoff":
+        return _handle_export_run_handoff(args)
     if args.command == "export-recovery-packet":
         return _handle_export_recovery_packet(args)
     if args.command == "report-retention-candidates":
@@ -810,6 +813,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional destination JSON path. Defaults to <report_root>/run_summaries/<workflow_id>.<run_id>.summary.json.",
     )
     export_run_summary_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_run_handoff_parser = subparsers.add_parser(
+        "export-run-handoff",
+        help="Write one operator handoff JSON for a run, including run summary plus transport execution receipts.",
+    )
+    export_run_handoff_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_run_handoff_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_run_handoff_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose handoff packet should be exported.",
+    )
+    export_run_handoff_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination JSON path. Defaults to <report_root>/run_handoffs/<workflow_id>.<run_id>.handoff.json.",
+    )
+    export_run_handoff_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2695,6 +2730,57 @@ def _handle_export_run_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_export_run_handoff(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = build_run_handoff_export(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
+            artifact_paths=artifact_paths,
+        )
+        output_path = args.output_json or _default_run_handoff_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "run_id": args.run_id,
+                "output_json": str(output_path),
+                "print_marker_count": payload["handoff_counts"]["print_marker_count"],
+                "mail_move_marker_count": payload["handoff_counts"]["mail_move_marker_count"],
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
 def _handle_export_recovery_packet(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -3027,6 +3113,10 @@ def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str
 
 def _default_run_summary_output_path(*, report_root: Path, workflow_id: str, run_id: str) -> Path:
     return report_root / "run_summaries" / f"{workflow_id}.{run_id}.summary.json"
+
+
+def _default_run_handoff_output_path(*, report_root: Path, workflow_id: str, run_id: str) -> Path:
+    return report_root / "run_handoffs" / f"{workflow_id}.{run_id}.handoff.json"
 
 
 def _default_recovery_packet_output_path(*, report_root: Path, workflow_id: str) -> Path:
