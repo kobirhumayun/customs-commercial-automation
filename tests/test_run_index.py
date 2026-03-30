@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from project.models import WorkflowId
-from project.workflows.run_index import list_workflow_runs
+from project.workflows.run_index import list_recovery_candidates, list_workflow_runs
 
 
 class RunIndexTests(unittest.TestCase):
@@ -117,6 +117,54 @@ class RunIndexTests(unittest.TestCase):
 
         self.assertEqual(payload["run_count"], 2)
         self.assertEqual([item["run_id"] for item in payload["runs"]], ["run-3", "run-2"])
+
+    def test_list_recovery_candidates_returns_only_interrupted_or_uncertain_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_root = root / "export_lc_sc"
+            scenarios = {
+                "run-clean": {
+                    "write_phase_status": "committed",
+                    "print_phase_status": "completed",
+                    "mail_move_phase_status": "completed",
+                    "started_at_utc": "2026-03-28T00:00:00Z",
+                },
+                "run-uncertain-write": {
+                    "write_phase_status": "uncertain_not_committed",
+                    "print_phase_status": "not_started",
+                    "mail_move_phase_status": "not_started",
+                    "started_at_utc": "2026-03-29T00:00:00Z",
+                },
+                "run-printing": {
+                    "write_phase_status": "committed",
+                    "print_phase_status": "printing",
+                    "mail_move_phase_status": "not_started",
+                    "started_at_utc": "2026-03-30T00:00:00Z",
+                },
+            }
+            for run_id, payload in scenarios.items():
+                run_dir = workflow_root / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "run_metadata.json").write_text(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "summary": {},
+                            "print_group_order": [],
+                            **payload,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            indexed = list_recovery_candidates(
+                run_artifact_root=root,
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                limit=10,
+            )
+
+        self.assertEqual(indexed["run_count"], 2)
+        self.assertEqual([item["run_id"] for item in indexed["runs"]], ["run-printing", "run-uncertain-write"])
 
 
 if __name__ == "__main__":

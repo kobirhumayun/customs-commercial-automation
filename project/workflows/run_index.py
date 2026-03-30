@@ -38,6 +38,29 @@ def list_workflow_runs(
     }
 
 
+def list_recovery_candidates(
+    *,
+    run_artifact_root: Path,
+    workflow_id: WorkflowId,
+    limit: int = 10,
+) -> dict[str, Any]:
+    payload = list_workflow_runs(
+        run_artifact_root=run_artifact_root,
+        workflow_id=workflow_id,
+        limit=max(limit, 1_000_000),
+    )
+    candidates = [run for run in payload["runs"] if _is_recovery_candidate(run)]
+    candidates = candidates[:limit]
+    return {
+        "workflow_id": workflow_id.value,
+        "run_artifact_root": str(run_artifact_root),
+        "workflow_run_root": str(run_artifact_root / workflow_id.value),
+        "limit": limit,
+        "run_count": len(candidates),
+        "runs": candidates,
+    }
+
+
 def _load_run_index_entry(run_dir: Path) -> dict[str, Any]:
     metadata_path = run_dir / "run_metadata.json"
     manual_verification_path = run_dir / "document_manual_verification.json"
@@ -157,6 +180,30 @@ def _run_index_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
     started_at_utc = str(item.get("started_at_utc") or "")
     run_id = str(item.get("run_id") or "")
     return metadata_rank, started_at_utc, run_id
+
+
+def _is_recovery_candidate(item: dict[str, Any]) -> bool:
+    if item.get("metadata_status") != "ready":
+        return False
+    write_phase_status = str(item.get("write_phase_status") or "")
+    print_phase_status = str(item.get("print_phase_status") or "")
+    mail_move_phase_status = str(item.get("mail_move_phase_status") or "")
+    return (
+        write_phase_status in {
+            "prevalidating_targets",
+            "prevalidated",
+            "applying",
+            "uncertain_not_committed",
+        }
+        or print_phase_status in {
+            "printing",
+            "uncertain_incomplete",
+        }
+        or mail_move_phase_status in {
+            "moving",
+            "uncertain_incomplete",
+        }
+    )
 
 
 def _count_jsonl_records(path: Path) -> int:

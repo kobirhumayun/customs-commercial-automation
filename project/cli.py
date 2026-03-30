@@ -54,7 +54,9 @@ from project.workflows.print_planning import (
     load_print_planning_bundle,
     plan_print_batches,
 )
-from project.workflows.run_index import list_workflow_runs
+from project.workflows.run_artifact_reporting import summarize_run_artifacts
+from project.workflows.run_index import list_recovery_candidates, list_workflow_runs
+from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.write_execution import execute_live_write_batch
@@ -89,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_run_status(args)
     if args.command == "list-runs":
         return _handle_list_runs(args)
+    if args.command == "report-run-artifacts":
+        return _handle_report_run_artifacts(args)
+    if args.command == "report-recovery-precheck":
+        return _handle_report_recovery_precheck(args)
+    if args.command == "list-recovery-candidates":
+        return _handle_list_recovery_candidates(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -357,6 +365,88 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum number of runs to return. Defaults to 10.",
     )
     list_runs_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_run_artifacts_parser = subparsers.add_parser(
+        "report-run-artifacts",
+        help="Inventory the persisted files and directories for one run without changing artifacts.",
+    )
+    report_run_artifacts_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_run_artifacts_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_run_artifacts_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose persisted artifact layout should be summarized.",
+    )
+    report_run_artifacts_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_recovery_precheck_parser = subparsers.add_parser(
+        "report-recovery-precheck",
+        help="Combine run status and artifact presence into a read-only recovery readiness precheck.",
+    )
+    report_recovery_precheck_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_recovery_precheck_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_recovery_precheck_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose recovery prerequisites should be summarized.",
+    )
+    report_recovery_precheck_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    list_recovery_candidates_parser = subparsers.add_parser(
+        "list-recovery-candidates",
+        help="List recent runs whose persisted phase states suggest recovery attention is needed.",
+    )
+    list_recovery_candidates_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    list_recovery_candidates_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    list_recovery_candidates_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of recovery candidates to return. Defaults to 10.",
+    )
+    list_recovery_candidates_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1235,6 +1325,98 @@ def _handle_list_runs(args: argparse.Namespace) -> int:
             overrides=_parse_overrides(args.overrides),
         )
         payload = list_workflow_runs(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            limit=args.limit,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_run_artifacts(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = {
+            "run_id": args.run_id,
+            "workflow_id": descriptor.workflow_id.value,
+            "artifacts": summarize_run_artifacts(artifact_paths=artifact_paths),
+        }
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_recovery_precheck(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        run_status = summarize_run_status(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
+            artifact_paths=artifact_paths,
+        )
+        artifact_inventory = summarize_run_artifacts(artifact_paths=artifact_paths)
+        payload = {
+            "run_id": args.run_id,
+            "workflow_id": descriptor.workflow_id.value,
+            "precheck": build_recovery_precheck(
+                run_status=run_status,
+                artifact_inventory=artifact_inventory,
+            ),
+            "run_status": run_status,
+            "artifacts": artifact_inventory,
+        }
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_list_recovery_candidates(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = list_recovery_candidates(
             run_artifact_root=config.run_artifact_root,
             workflow_id=descriptor.workflow_id,
             limit=args.limit,
