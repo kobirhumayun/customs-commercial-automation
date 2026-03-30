@@ -62,6 +62,43 @@ class AcrobatPrintProvider:
             )
 
 
+def inspect_acrobat_print_adapter(
+    *,
+    configured_executable_path: Path | None = None,
+    printer_name: str | None = None,
+    printer_driver: str | None = None,
+    printer_port: str | None = None,
+    timeout_seconds: int = 120,
+) -> dict[str, object]:
+    try:
+        executable_path = _resolve_acrobat_executable(configured_executable_path)
+        blank_separator_path = _ensure_blank_separator_pdf()
+        return {
+            "available": True,
+            "adapter_name": "acrobat",
+            "resolved_executable_path": str(executable_path),
+            "printer_name": printer_name,
+            "printer_driver": printer_driver,
+            "printer_port": printer_port,
+            "timeout_seconds": max(1, timeout_seconds),
+            "blank_separator_path": str(blank_separator_path),
+            "blank_separator_exists": blank_separator_path.exists(),
+        }
+    except PrintAdapterUnavailableError as exc:
+        return {
+            "available": False,
+            "adapter_name": "acrobat",
+            "resolved_executable_path": None,
+            "printer_name": printer_name,
+            "printer_driver": printer_driver,
+            "printer_port": printer_port,
+            "timeout_seconds": max(1, timeout_seconds),
+            "blank_separator_path": None,
+            "blank_separator_exists": False,
+            "error": str(exc),
+        }
+
+
 def _resolve_acrobat_executable(configured_path: Path | None) -> Path:
     if configured_path is not None:
         resolved = Path(configured_path)

@@ -21,7 +21,7 @@ from project.erp import (
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
-from project.printing import AcrobatPrintProvider, SimulatedPrintProvider
+from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, SimulatedPrintProvider
 from project.models import SavedDocument
 from project.reporting.persistence import (
     append_discrepancy,
@@ -145,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_plan_print(args)
     if args.command == "execute-print":
         return _handle_execute_print(args)
+    if args.command == "inspect-print-adapter":
+        return _handle_inspect_print_adapter(args)
     if args.command == "execute-mail-moves":
         return _handle_execute_mail_moves(args)
 
@@ -1014,6 +1016,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    inspect_print_adapter_parser = subparsers.add_parser(
+        "inspect-print-adapter",
+        help="Inspect Acrobat print-adapter discovery and blank-separator readiness without printing.",
+    )
+    inspect_print_adapter_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_print_adapter_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_print_adapter_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     execute_mail_moves_parser = subparsers.add_parser(
         "execute-mail-moves",
         help="Execute deterministic post-print Outlook mail moves and persist completion markers.",
@@ -1503,6 +1527,37 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
         "manual_verification_summary": summarize_print_batch_manual_verification(print_batches),
         "discrepancy_count": len(discrepancies),
     }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_print_adapter(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        if not descriptor.supports_print:
+            raise ValueError("Print adapter inspection is not supported for this workflow")
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = inspect_acrobat_print_adapter(
+            configured_executable_path=(
+                Path(str(config.values.get("acrobat_executable_path")).strip())
+                if str(config.values.get("acrobat_executable_path", "")).strip()
+                else None
+            ),
+            printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
+            printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
+            printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
+            timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 120)))),
+        )
+        payload["workflow_id"] = descriptor.workflow_id.value
+        payload["print_enabled"] = config.print_enabled
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(payload), end="")
     return 0
 

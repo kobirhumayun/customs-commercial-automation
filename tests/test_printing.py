@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.models import PrintBatch
-from project.printing import AcrobatPrintProvider, PrintAdapterUnavailableError
+from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, PrintAdapterUnavailableError
 
 
 class PrintingProviderTests(unittest.TestCase):
@@ -70,6 +70,24 @@ class PrintingProviderTests(unittest.TestCase):
             )
             with self.assertRaises(PrintAdapterUnavailableError):
                 provider.print_group(batch, blank_page_after_group=False)
+
+    def test_inspect_acrobat_print_adapter_reports_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            acrobat_path = root / "Acrobat.exe"
+            acrobat_path.write_text("fake", encoding="utf-8")
+
+            payload = inspect_acrobat_print_adapter(
+                configured_executable_path=acrobat_path,
+                printer_name="Office Printer",
+                timeout_seconds=45,
+            )
+
+        self.assertEqual(payload["available"], True)
+        self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
+        self.assertEqual(payload["printer_name"], "Office Printer")
+        self.assertEqual(payload["timeout_seconds"], 45)
+        self.assertEqual(payload["blank_separator_exists"], True)
 
 
 if __name__ == "__main__":

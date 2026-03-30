@@ -2522,6 +2522,58 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["print_phase_status"], "completed")
         provider_mock.assert_called_once()
 
+    def test_inspect_print_adapter_command_reports_acrobat_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            acrobat_path = root / "Acrobat.exe"
+            acrobat_path.write_text("fake", encoding="utf-8")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                        f'acrobat_executable_path = "{acrobat_path.as_posix()}"',
+                        'print_printer_name = "Office Printer"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "inspect-print-adapter",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["available"], True)
+        self.assertEqual(payload["print_enabled"], True)
+        self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
+        self.assertEqual(payload["printer_name"], "Office Printer")
+
     def test_validate_config_uses_live_outlook_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
