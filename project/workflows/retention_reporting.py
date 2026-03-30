@@ -216,6 +216,13 @@ def _collect_stale_reports(
             for path in run_summary_root.glob(f"{workflow_id.value}.*.summary.json")
             if path.is_file()
         )
+    run_handoff_root = report_root / "run_handoffs"
+    if run_handoff_root.exists():
+        report_files.extend(
+            (path, "run_handoff")
+            for path in run_handoff_root.glob(f"{workflow_id.value}.*.handoff.json")
+            if path.is_file()
+        )
 
     for path, artifact_type in report_files:
         if not path.exists():

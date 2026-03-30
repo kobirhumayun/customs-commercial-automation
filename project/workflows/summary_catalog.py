@@ -23,6 +23,12 @@ def build_summary_catalog(
             (report_root / "run_summaries").glob(f"{workflow_id.value}.*.summary.json")
         ) if (report_root / "run_summaries").exists() else [],
     )
+    run_handoffs = _collect_paths(
+        artifact_type="run_handoff",
+        paths=sorted(
+            (report_root / "run_handoffs").glob(f"{workflow_id.value}.*.handoff.json")
+        ) if (report_root / "run_handoffs").exists() else [],
+    )
     recovery_packets = _collect_paths(
         artifact_type="recovery_packet",
         paths=[report_root / "recovery_packets" / f"{workflow_id.value}.recovery.json"],
@@ -39,15 +45,18 @@ def build_summary_catalog(
         "summary_counts": {
             "workflow_summary_count": len(workflow_summaries),
             "run_summary_count": len(run_summaries),
+            "run_handoff_count": len(run_handoffs),
             "recovery_packet_count": len(recovery_packets),
             "retention_summary_count": len(retention_reports),
             "total_summary_count": len(workflow_summaries)
             + len(run_summaries)
+            + len(run_handoffs)
             + len(recovery_packets)
             + len(retention_reports),
         },
         "workflow_summaries": workflow_summaries,
         "run_summaries": run_summaries,
+        "run_handoffs": run_handoffs,
         "recovery_packets": recovery_packets,
         "retention_summaries": retention_reports,
     }
@@ -78,7 +87,7 @@ def _modified_at_utc(path: Path) -> str:
 
 
 def _extract_run_id(path: Path, artifact_type: str) -> str | None:
-    if artifact_type != "run_summary":
+    if artifact_type not in {"run_summary", "run_handoff"}:
         return None
     parts = path.name.split(".")
     if len(parts) < 4:
