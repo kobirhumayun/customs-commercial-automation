@@ -63,6 +63,7 @@ from project.workflows.recovery_packet import build_workflow_recovery_packet
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.retention_reporting import build_retention_report
+from project.workflows.retention_summary import build_retention_summary
 from project.workflows.workflow_summary import build_workflow_summary
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
@@ -112,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_export_recovery_packet(args)
     if args.command == "report-retention-candidates":
         return _handle_report_retention_candidates(args)
+    if args.command == "export-retention-summary":
+        return _handle_export_retention_summary(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -622,6 +625,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Minimum age in whole days before an artifact is reported as stale. Defaults to 30.",
     )
     report_retention_candidates_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_retention_summary_parser = subparsers.add_parser(
+        "export-retention-summary",
+        help="Write one workflow-level JSON snapshot of retention candidates without deleting anything.",
+    )
+    export_retention_summary_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_retention_summary_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_retention_summary_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination JSON path. Defaults to <report_root>/retention_reports/<workflow_id>.retention.json.",
+    )
+    export_retention_summary_parser.add_argument(
+        "--older-than-days",
+        type=int,
+        default=30,
+        help="Minimum age in whole days before an artifact is reported as stale. Defaults to 30.",
+    )
+    export_retention_summary_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1775,6 +1811,46 @@ def _handle_report_retention_candidates(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_export_retention_summary(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_retention_summary(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            older_than_days=args.older_than_days,
+        )
+        output_path = args.output_json or _default_retention_summary_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "output_json": str(output_path),
+                "stale_run_count": payload["summary_counts"]["stale_run_count"],
+                "stale_backup_count": payload["summary_counts"]["stale_backup_count"],
+                "stale_report_count": payload["summary_counts"]["stale_report_count"],
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
 def _descriptor_from_args(workflow_id: str) -> WorkflowDescriptor:
     for descriptor in WORKFLOW_REGISTRY.values():
         if descriptor.workflow_id.value == workflow_id:
@@ -1869,6 +1945,10 @@ def _default_run_summary_output_path(*, report_root: Path, workflow_id: str, run
 
 def _default_recovery_packet_output_path(*, report_root: Path, workflow_id: str) -> Path:
     return report_root / "recovery_packets" / f"{workflow_id}.recovery.json"
+
+
+def _default_retention_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:
+    return report_root / "retention_reports" / f"{workflow_id}.retention.json"
 
 
 if __name__ == "__main__":

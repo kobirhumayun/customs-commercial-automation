@@ -1325,6 +1325,74 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["summary_counts"]["stale_run_count"], 1)
         self.assertEqual(payload["stale_runs"][0]["run_id"], "run-old")
 
+    def test_export_retention_summary_command_writes_default_json_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_dir = root / "runs" / "export_lc_sc" / "run-old"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-old",
+                        "started_at_utc": "2026-01-01T00:00:00Z",
+                        "write_phase_status": "committed",
+                        "print_phase_status": "completed",
+                        "mail_move_phase_status": "completed",
+                        "summary": {},
+                        "print_group_order": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "export-retention-summary",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--older-than-days",
+                        "30",
+                    ]
+                )
+
+            payload = json.loads(buffer.getvalue())
+            output_path = Path(payload["output_json"])
+            written = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertTrue(output_path.name.endswith("export_lc_sc.retention.json"))
+        self.assertEqual(written["workflow_id"], "export_lc_sc")
+        self.assertIn("retention_report", written)
+
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
