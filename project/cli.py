@@ -47,6 +47,8 @@ from project.workbook import (
 )
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
+from project.workflows.mail_move_marker_reporting import summarize_mail_move_markers
+from project.workflows.transport_execution_reporting import build_transport_execution_report
 from project.workflows.live_readiness import (
     build_erp_readiness_section,
     build_issue_section,
@@ -134,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_run_artifacts(args)
     if args.command == "report-print-markers":
         return _handle_report_print_markers(args)
+    if args.command == "report-mail-move-markers":
+        return _handle_report_mail_move_markers(args)
+    if args.command == "report-transport-execution":
+        return _handle_report_transport_execution(args)
     if args.command == "report-recovery-precheck":
         return _handle_report_recovery_precheck(args)
     if args.command == "list-recovery-candidates":
@@ -596,6 +602,60 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run id whose print-marker receipts should be summarized.",
     )
     report_print_markers_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_mail_move_markers_parser = subparsers.add_parser(
+        "report-mail-move-markers",
+        help="Inspect persisted mail-move marker receipts for one run without changing any artifacts.",
+    )
+    report_mail_move_markers_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_mail_move_markers_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_mail_move_markers_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose mail-move marker receipts should be summarized.",
+    )
+    report_mail_move_markers_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_transport_execution_parser = subparsers.add_parser(
+        "report-transport-execution",
+        help="Inspect persisted print and mail-move execution receipts together for one run.",
+    )
+    report_transport_execution_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_transport_execution_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_transport_execution_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose transport-phase execution receipts should be summarized.",
+    )
+    report_transport_execution_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2385,6 +2445,71 @@ def _handle_report_print_markers(args: argparse.Namespace) -> int:
             "run_id": args.run_id,
             "print_markers": summarize_print_markers(
                 print_markers_dir=artifact_paths.print_markers_dir,
+            ),
+        }
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_mail_move_markers(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = {
+            "workflow_id": descriptor.workflow_id.value,
+            "run_id": args.run_id,
+            "mail_move_markers": summarize_mail_move_markers(
+                mail_move_markers_dir=artifact_paths.mail_move_markers_dir,
+            ),
+        }
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_transport_execution(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        print_markers = summarize_print_markers(
+            print_markers_dir=artifact_paths.print_markers_dir,
+        )
+        mail_move_markers = summarize_mail_move_markers(
+            mail_move_markers_dir=artifact_paths.mail_move_markers_dir,
+        )
+        payload = {
+            "workflow_id": descriptor.workflow_id.value,
+            "run_id": args.run_id,
+            "transport_execution": build_transport_execution_report(
+                print_marker_summary=print_markers,
+                mail_move_marker_summary=mail_move_markers,
             ),
         }
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:

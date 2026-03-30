@@ -59,6 +59,15 @@ class MailMoveExecutionTests(unittest.TestCase):
         self.assertIn("Manual PDF verification status at mail-move time", executed_outcomes[0].decision_reasons[-2])
         self.assertTrue(marker_exists)
         self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
+        self.assertEqual(marker_payload["move_execution_receipt"]["adapter_name"], "simulated")
+        self.assertEqual(
+            marker_payload["move_execution_receipt"]["acknowledgment_mode"],
+            "folder_mapping_update",
+        )
+        self.assertEqual(
+            marker_payload["move_execution_receipt"]["acknowledged_destination_folder"],
+            "dst-folder",
+        )
         self.assertEqual(discrepancies, [])
 
     def test_execute_mail_moves_hard_blocks_when_print_gate_is_unsatisfied(self) -> None:

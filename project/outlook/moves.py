@@ -4,6 +4,20 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from project.models import MailMoveOperation
+from project.utils.time import utc_timestamp
+
+
+@dataclass(slots=True, frozen=True)
+class MailMoveReceipt:
+    adapter_name: str
+    entry_id: str
+    source_folder: str
+    destination_folder: str
+    acknowledged_source_folder: str | None
+    acknowledged_destination_folder: str | None
+    started_at_utc: str
+    completed_at_utc: str
+    acknowledgment_mode: str
 
 
 class MailMoveSourceLocationError(RuntimeError):
@@ -19,7 +33,7 @@ class MailMoveAdapterUnavailableError(RuntimeError):
 
 
 class MailMoveProvider(Protocol):
-    def move_mail(self, operation: MailMoveOperation) -> None:
+    def move_mail(self, operation: MailMoveOperation) -> MailMoveReceipt | None:
         """Move one mail according to the deterministic move operation."""
 
 
@@ -27,13 +41,26 @@ class MailMoveProvider(Protocol):
 class SimulatedMailMoveProvider:
     current_folder_by_entry_id: dict[str, str] = field(default_factory=dict)
 
-    def move_mail(self, operation: MailMoveOperation) -> None:
+    def move_mail(self, operation: MailMoveOperation) -> MailMoveReceipt:
+        started_at_utc = utc_timestamp()
         current_folder = self.current_folder_by_entry_id.get(operation.entry_id)
         if current_folder is not None and current_folder != operation.source_folder:
             raise MailMoveSourceLocationError(
                 f"Mail {operation.entry_id} expected in {operation.source_folder}, found {current_folder}."
             )
         self.current_folder_by_entry_id[operation.entry_id] = operation.destination_folder
+        completed_at_utc = utc_timestamp()
+        return MailMoveReceipt(
+            adapter_name="simulated",
+            entry_id=operation.entry_id,
+            source_folder=operation.source_folder,
+            destination_folder=operation.destination_folder,
+            acknowledged_source_folder=current_folder or operation.source_folder,
+            acknowledged_destination_folder=operation.destination_folder,
+            started_at_utc=started_at_utc,
+            completed_at_utc=completed_at_utc,
+            acknowledgment_mode="folder_mapping_update",
+        )
 
 
 @dataclass(slots=True)
@@ -42,7 +69,8 @@ class Win32ComMailMoveProvider:
     _namespace: object | None = field(default=None, init=False, repr=False)
     _destination_folder_cache: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
-    def move_mail(self, operation: MailMoveOperation) -> None:
+    def move_mail(self, operation: MailMoveOperation) -> MailMoveReceipt:
+        started_at_utc = utc_timestamp()
         namespace = self._get_namespace()
         mail_item = self._resolve_mail_item(namespace, operation.entry_id)
         current_folder_entry_id = _extract_parent_folder_entry_id(mail_item)
@@ -64,6 +92,17 @@ class Win32ComMailMoveProvider:
             raise MailMoveDestinationVerificationError(
                 "Mail move completed but destination folder verification did not match the planned destination."
             )
+        return MailMoveReceipt(
+            adapter_name="win32com_outlook",
+            entry_id=operation.entry_id,
+            source_folder=operation.source_folder,
+            destination_folder=operation.destination_folder,
+            acknowledged_source_folder=current_folder_entry_id,
+            acknowledged_destination_folder=resolved_parent_entry_id,
+            started_at_utc=started_at_utc,
+            completed_at_utc=utc_timestamp(),
+            acknowledgment_mode="parent_folder_entry_id_verification",
+        )
 
     def _get_namespace(self):
         if self._namespace is not None:

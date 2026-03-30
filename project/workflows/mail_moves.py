@@ -20,6 +20,7 @@ from project.outlook import MailMoveProvider, MailMoveSourceLocationError
 from project.storage import RunArtifactPaths
 from project.storage.artifacts import write_json
 from project.utils.ids import build_mail_move_operation_id
+from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
 
 
@@ -146,7 +147,7 @@ def execute_mail_moves(
                 )
                 return hard_blocked_report, _block_mail_moves(updated_mail_outcomes), move_operations, discrepancies
             try:
-                provider.move_mail(operation)
+                move_receipt = provider.move_mail(operation)
             except MailMoveSourceLocationError as exc:
                 hard_blocked_report = replace(moving_report, mail_move_phase_status=MailMovePhaseStatus.HARD_BLOCKED)
                 _persist_run_report(run_report_persistor, hard_blocked_report)
@@ -196,6 +197,7 @@ def execute_mail_moves(
                     "manual_verification_summary": dict(
                         _manual_verification_summary_for_mail(updated_mail_outcomes, operation.mail_id)
                     ),
+                    "move_execution_receipt": to_jsonable(move_receipt),
                     "moved_at_utc": utc_timestamp(),
                 },
             )
