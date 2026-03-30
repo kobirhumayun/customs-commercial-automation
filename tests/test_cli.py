@@ -1393,6 +1393,62 @@ class CLITests(unittest.TestCase):
         self.assertEqual(written["workflow_id"], "export_lc_sc")
         self.assertIn("retention_report", written)
 
+    def test_export_summary_catalog_command_writes_default_json_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "reports" / "workflow_summaries").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "run_summaries").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "recovery_packets").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "retention_reports").mkdir(parents=True, exist_ok=True)
+            (root / "reports" / "workflow_summaries" / "export_lc_sc.summary.json").write_text("{}", encoding="utf-8")
+            (root / "reports" / "run_summaries" / "export_lc_sc.run-123.summary.json").write_text("{}", encoding="utf-8")
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "export-summary-catalog",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                    ]
+                )
+
+            payload = json.loads(buffer.getvalue())
+            output_path = Path(payload["output_json"])
+            written = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertTrue(output_path.name.endswith("export_lc_sc.catalog.json"))
+        self.assertEqual(written["workflow_id"], "export_lc_sc")
+        self.assertEqual(written["summary_counts"]["run_summary_count"], 1)
+
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

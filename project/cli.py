@@ -64,6 +64,7 @@ from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
+from project.workflows.summary_catalog import build_summary_catalog
 from project.workflows.workflow_summary import build_workflow_summary
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
@@ -115,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_retention_candidates(args)
     if args.command == "export-retention-summary":
         return _handle_export_retention_summary(args)
+    if args.command == "export-summary-catalog":
+        return _handle_export_summary_catalog(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -658,6 +661,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Minimum age in whole days before an artifact is reported as stale. Defaults to 30.",
     )
     export_retention_summary_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_summary_catalog_parser = subparsers.add_parser(
+        "export-summary-catalog",
+        help="Write one workflow-level index of generated summary snapshots already present under report_root.",
+    )
+    export_summary_catalog_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_summary_catalog_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_summary_catalog_parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional destination JSON path. Defaults to <report_root>/summary_catalogs/<workflow_id>.catalog.json.",
+    )
+    export_summary_catalog_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1851,6 +1881,42 @@ def _handle_export_retention_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_export_summary_catalog(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = build_summary_catalog(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+        )
+        output_path = args.output_json or _default_summary_catalog_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "output_json": str(output_path),
+                "total_summary_count": payload["summary_counts"]["total_summary_count"],
+                "run_summary_count": payload["summary_counts"]["run_summary_count"],
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
 def _descriptor_from_args(workflow_id: str) -> WorkflowDescriptor:
     for descriptor in WORKFLOW_REGISTRY.values():
         if descriptor.workflow_id.value == workflow_id:
@@ -1949,6 +2015,10 @@ def _default_recovery_packet_output_path(*, report_root: Path, workflow_id: str)
 
 def _default_retention_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:
     return report_root / "retention_reports" / f"{workflow_id}.retention.json"
+
+
+def _default_summary_catalog_output_path(*, report_root: Path, workflow_id: str) -> Path:
+    return report_root / "summary_catalogs" / f"{workflow_id}.catalog.json"
 
 
 if __name__ == "__main__":
