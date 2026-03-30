@@ -54,6 +54,7 @@ from project.workflows.print_planning import (
     load_print_planning_bundle,
     plan_print_batches,
 )
+from project.workflows.run_index import list_workflow_runs
 from project.workflows.recovery import assess_recovery
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.write_execution import execute_live_write_batch
@@ -86,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_manual_verification(args)
     if args.command == "report-run-status":
         return _handle_report_run_status(args)
+    if args.command == "list-runs":
+        return _handle_list_runs(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -326,6 +329,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run id whose current status should be summarized.",
     )
     report_run_status_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    list_runs_parser = subparsers.add_parser(
+        "list-runs",
+        help="List recent persisted runs for one workflow from the run artifact root.",
+    )
+    list_runs_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    list_runs_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    list_runs_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of runs to return. Defaults to 10.",
+    )
+    list_runs_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1186,6 +1217,27 @@ def _handle_report_run_status(args: argparse.Namespace) -> int:
             mail_outcomes=mail_outcomes,
             staged_write_plan=staged_write_plan,
             artifact_paths=artifact_paths,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_list_runs(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        payload = list_workflow_runs(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            limit=args.limit,
         )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

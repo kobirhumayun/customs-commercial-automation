@@ -636,6 +636,77 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["phases"]["print"]["planned_group_count"], 1)
         self.assertEqual(payload["manual_verification"]["bundle"]["verified_document_count"], 1)
 
+    def test_list_runs_command_prints_recent_run_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_dir = root / "runs" / "export_lc_sc" / "run-123"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-123",
+                        "started_at_utc": "2026-03-30T00:00:00Z",
+                        "completed_at_utc": None,
+                        "write_phase_status": "committed",
+                        "print_phase_status": "planned",
+                        "mail_move_phase_status": "not_started",
+                        "summary": {"pass": 1, "warning": 0, "hard_block": 0},
+                        "print_group_order": ["group-1"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "document_manual_verification.json").write_text(
+                json.dumps({"pending_document_count": 0, "manual_verification_complete": True}),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "list-runs",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--limit",
+                        "5",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["run_count"], 1)
+        self.assertEqual(payload["runs"][0]["run_id"], "run-123")
+        self.assertEqual(payload["runs"][0]["write_phase_status"], "committed")
+        self.assertEqual(payload["runs"][0]["manual_verification_complete"], True)
+
     def test_inspect_workbook_command_uses_live_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
