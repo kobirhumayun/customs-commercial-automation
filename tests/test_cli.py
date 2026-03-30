@@ -2574,6 +2574,179 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
         self.assertEqual(payload["printer_name"], "Office Printer")
 
+    def test_report_live_readiness_command_reports_combined_ready_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_session_result = type(
+                "FakeSessionResult",
+                (),
+                {"snapshot": object(), "preflight": {"status": "ready"}},
+            )()
+
+            buffer = io.StringIO()
+            with patch("project.cli._load_snapshot_if_supplied", return_value=object()):
+                with patch(
+                    "project.cli.summarize_mail_snapshot",
+                    return_value={
+                        "snapshot_count": 2,
+                        "attachment_count": 3,
+                        "entry_id_order": ["entry-1", "entry-2"],
+                        "mail_iteration_order": ["mail-1", "mail-2"],
+                    },
+                ):
+                    with patch("project.cli._load_erp_provider", return_value=object()):
+                        with patch(
+                            "project.cli.inspect_erp_rows",
+                            return_value={
+                                "requested_file_numbers": ["P/26/0042"],
+                                "canonical_file_numbers": ["P/26/0042"],
+                                "match_count": 1,
+                            },
+                        ):
+                            with patch(
+                                "project.cli.XLWingsWorkbookWriteSessionProvider"
+                            ) as workbook_provider_mock:
+                                workbook_provider_mock.return_value.open_preflight_session.return_value = (
+                                    fake_session_result
+                                )
+                                with patch(
+                                    "project.cli.summarize_workbook_readiness",
+                                    return_value={
+                                        "workbook_available": True,
+                                        "sheet_name": "2026",
+                                        "header_mapping_status": "resolved",
+                                        "row_count": 10,
+                                        "session_preflight": {"status": "ready"},
+                                    },
+                                ):
+                                    with patch(
+                                        "project.cli.inspect_acrobat_print_adapter",
+                                        return_value={
+                                            "available": True,
+                                            "resolved_executable_path": "C:\\Acrobat.exe",
+                                            "printer_name": "Office Printer",
+                                            "blank_separator_exists": True,
+                                            "error": None,
+                                        },
+                                    ):
+                                        with redirect_stdout(buffer):
+                                            exit_code = main(
+                                                [
+                                                    "report-live-readiness",
+                                                    "export_lc_sc",
+                                                    "--config",
+                                                    str(config_path),
+                                                    "--erp-file-number",
+                                                    "P/26/0042",
+                                                ]
+                                            )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["overall_status"], "ready")
+        self.assertEqual(payload["ready_section_count"], 4)
+        self.assertEqual(payload["sections"]["snapshot"]["status"], "ready")
+        self.assertEqual(payload["sections"]["erp"]["status"], "ready")
+        self.assertEqual(payload["sections"]["workbook"]["status"], "ready")
+        self.assertEqual(payload["sections"]["print"]["status"], "ready")
+        self.assertEqual(payload["sections"]["erp"]["match_count"], 1)
+
+    def test_report_live_readiness_command_keeps_section_errors_in_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli._load_snapshot_if_supplied",
+                side_effect=RuntimeError("Outlook unavailable"),
+            ):
+                with patch(
+                    "project.cli._load_erp_provider",
+                    side_effect=RuntimeError("ERP unavailable"),
+                ):
+                    with patch("project.cli.XLWingsWorkbookWriteSessionProvider") as workbook_provider_mock:
+                        workbook_provider_mock.return_value.open_preflight_session.side_effect = RuntimeError(
+                            "Workbook unavailable"
+                        )
+                        with patch(
+                            "project.cli.inspect_acrobat_print_adapter",
+                            side_effect=RuntimeError("Print unavailable"),
+                        ):
+                            with redirect_stdout(buffer):
+                                exit_code = main(
+                                    [
+                                        "report-live-readiness",
+                                        "export_lc_sc",
+                                        "--config",
+                                        str(config_path),
+                                    ]
+                                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["overall_status"], "attention_required")
+        self.assertEqual(payload["issue_section_count"], 4)
+        self.assertEqual(payload["sections"]["snapshot"]["status"], "issue")
+        self.assertEqual(payload["sections"]["snapshot"]["error"], "Outlook unavailable")
+        self.assertEqual(payload["sections"]["erp"]["status"], "issue")
+        self.assertEqual(payload["sections"]["erp"]["error"], "ERP unavailable")
+        self.assertEqual(payload["sections"]["workbook"]["status"], "issue")
+        self.assertEqual(payload["sections"]["workbook"]["error"], "Workbook unavailable")
+        self.assertEqual(payload["sections"]["print"]["status"], "issue")
+        self.assertEqual(payload["sections"]["print"]["error"], "Print unavailable")
+
     def test_validate_config_uses_live_outlook_snapshot_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

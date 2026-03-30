@@ -47,6 +47,14 @@ from project.workbook import (
 )
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
+from project.workflows.live_readiness import (
+    build_erp_readiness_section,
+    build_issue_section,
+    build_live_environment_readiness,
+    build_print_readiness_section,
+    build_snapshot_readiness_section,
+    build_workbook_readiness_section,
+)
 from project.workflows.document_verification import (
     acknowledge_document_manual_verification,
     build_document_manual_verification_bundle,
@@ -147,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_execute_print(args)
     if args.command == "inspect-print-adapter":
         return _handle_inspect_print_adapter(args)
+    if args.command == "report-live-readiness":
+        return _handle_report_live_readiness(args)
     if args.command == "execute-mail-moves":
         return _handle_execute_mail_moves(args)
 
@@ -1038,6 +1048,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    report_live_readiness_parser = subparsers.add_parser(
+        "report-live-readiness",
+        help="Run one operator-safe live environment readiness report across Outlook, ERP, workbook, and print seams.",
+    )
+    report_live_readiness_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_live_readiness_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_live_readiness_parser.add_argument(
+        "--erp-file-number",
+        dest="erp_file_numbers",
+        action="append",
+        default=[],
+        help="Optional file number to verify through the live ERP lookup path. May be repeated.",
+    )
+    report_live_readiness_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     execute_mail_moves_parser = subparsers.add_parser(
         "execute-mail-moves",
         help="Execute deterministic post-print Outlook mail moves and persist completion markers.",
@@ -1554,6 +1593,108 @@ def _handle_inspect_print_adapter(args: argparse.Namespace) -> int:
         )
         payload["workflow_id"] = descriptor.workflow_id.value
         payload["print_enabled"] = config.print_enabled
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_live_readiness(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+
+        snapshot_section = None
+        if descriptor.requires_mail_folders:
+            try:
+                snapshot_payload = summarize_mail_snapshot(
+                    _load_snapshot_if_supplied(
+                        snapshot_json=None,
+                        live_outlook_snapshot=True,
+                        config=config,
+                    )
+                )
+                snapshot_section = build_snapshot_readiness_section(snapshot_payload)
+            except Exception as exc:
+                snapshot_section = build_issue_section("snapshot", str(exc))
+
+        try:
+            erp_provider = _load_erp_provider(
+                erp_json=None,
+                erp_export=None,
+                live_erp=True,
+                config=config,
+            )
+            if args.erp_file_numbers:
+                erp_payload = inspect_erp_rows(
+                    provider=erp_provider,
+                    requested_file_numbers=list(args.erp_file_numbers),
+                )
+                erp_section = build_erp_readiness_section(
+                    requested_file_numbers=list(args.erp_file_numbers),
+                    erp_payload=erp_payload,
+                )
+            else:
+                erp_provider.lookup_rows(file_numbers=[])
+                erp_section = build_erp_readiness_section(
+                    requested_file_numbers=[],
+                    erp_payload=None,
+                )
+        except Exception as exc:
+            erp_section = build_issue_section("erp", str(exc))
+
+        workbook_section = None
+        if descriptor.write_capable:
+            try:
+                workbook_path = _resolve_live_workbook_path(config)
+                session_result = XLWingsWorkbookWriteSessionProvider(
+                    workbook_path
+                ).open_preflight_session(operator_context=None)
+                workbook_payload = summarize_workbook_readiness(
+                    workflow_id=descriptor.workflow_id,
+                    workbook_snapshot=session_result.snapshot,
+                    session_preflight=session_result.preflight,
+                )
+                workbook_section = build_workbook_readiness_section(workbook_payload)
+            except Exception as exc:
+                workbook_section = build_issue_section("workbook", str(exc))
+
+        print_section = None
+        if descriptor.supports_print:
+            try:
+                print_payload = inspect_acrobat_print_adapter(
+                    configured_executable_path=(
+                        Path(str(config.values.get("acrobat_executable_path")).strip())
+                        if str(config.values.get("acrobat_executable_path", "")).strip()
+                        else None
+                    ),
+                    printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
+                    printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
+                    printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
+                    timeout_seconds=max(
+                        1, int(str(config.values.get("print_command_timeout_seconds", 120)))
+                    ),
+                )
+                print_section = build_print_readiness_section(
+                    print_payload,
+                    print_enabled=config.print_enabled,
+                )
+            except Exception as exc:
+                print_section = build_issue_section("print", str(exc))
+
+        payload = build_live_environment_readiness(
+            workflow_id=descriptor.workflow_id,
+            snapshot_section=snapshot_section,
+            erp_section=erp_section,
+            workbook_section=workbook_section,
+            print_section=print_section,
+        )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
