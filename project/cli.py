@@ -43,6 +43,7 @@ from project.workbook import (
     EmptyWorkbookSnapshotProvider,
     JsonManifestWorkbookSnapshotProvider,
     XLWingsWorkbookSnapshotProvider,
+    XLWingsWorkbookWriteSessionProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
@@ -70,9 +71,11 @@ from project.workflows.recovery import assess_recovery
 from project.workflows.recovery_packet import build_workflow_recovery_packet
 from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_summary_export import build_run_summary_export
+from project.workflows.snapshot_inspection import summarize_mail_snapshot
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
+from project.workflows.workbook_readiness import summarize_workbook_readiness
 from project.workflows.workflow_summary import build_workflow_summary
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
@@ -94,10 +97,14 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_document_analysis(args)
     if args.command == "inspect-document-text":
         return _handle_inspect_document_text(args)
+    if args.command == "inspect-mail-snapshot":
+        return _handle_inspect_mail_snapshot(args)
     if args.command == "inspect-erp":
         return _handle_inspect_erp(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
+    if args.command == "inspect-workbook-readiness":
+        return _handle_inspect_workbook_readiness(args)
     if args.command == "prepare-document-verification":
         return _handle_prepare_document_verification(args)
     if args.command == "acknowledge-document-verification":
@@ -222,6 +229,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional 1-based last page for bounded search.",
     )
 
+    inspect_mail_snapshot_parser = subparsers.add_parser(
+        "inspect-mail-snapshot",
+        help="Inspect the deterministic mail snapshot and attachment inventory without creating run artifacts.",
+    )
+    inspect_mail_snapshot_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_mail_snapshot_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_mail_snapshot_parser.add_argument(
+        "--snapshot-json",
+        type=Path,
+        help="Optional JSON manifest of source emails to inspect.",
+    )
+    inspect_mail_snapshot_parser.add_argument(
+        "--live-outlook-snapshot",
+        action="store_true",
+        help="Load the source-mail snapshot from the configured Outlook working folder via pywin32.",
+    )
+    inspect_mail_snapshot_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     inspect_erp_parser = subparsers.add_parser(
         "inspect-erp",
         help="Inspect canonical ERP rows for one or more file numbers through the configured ERP provider seam.",
@@ -291,6 +330,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Inspect the configured yearly workbook path via xlwings.",
     )
     inspect_workbook_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    inspect_workbook_readiness_parser = subparsers.add_parser(
+        "inspect-workbook-readiness",
+        help="Inspect workbook snapshot, header mapping, and optional staged-write prevalidation without mutating Excel.",
+    )
+    inspect_workbook_readiness_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_workbook_readiness_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_workbook_readiness_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest.",
+    )
+    inspect_workbook_readiness_parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Inspect the configured yearly workbook path via the live no-write preflight session.",
+    )
+    inspect_workbook_readiness_parser.add_argument(
+        "--run-id",
+        help="Optional existing run id whose staged write plan should be prevalidated against the workbook snapshot.",
+    )
+    inspect_workbook_readiness_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1556,6 +1631,36 @@ def _handle_inspect_document_text(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_inspect_mail_snapshot(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        snapshot = _load_snapshot_if_supplied(
+            snapshot_json=args.snapshot_json,
+            live_outlook_snapshot=args.live_outlook_snapshot,
+            config=config,
+        )
+        payload = summarize_mail_snapshot(snapshot)
+        payload["workflow_id"] = descriptor.workflow_id.value
+        payload["snapshot_source"] = (
+            "json_manifest"
+            if args.snapshot_json is not None
+            else "live_outlook"
+            if args.live_outlook_snapshot
+            else "empty"
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
 def _handle_inspect_erp(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -1618,6 +1723,62 @@ def _handle_inspect_workbook(args: argparse.Namespace) -> int:
             "row_count": len(snapshot.rows),
             "headers": to_jsonable(snapshot.headers),
         }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_workbook_readiness(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        session_preflight = None
+        if args.workbook_json is not None and args.live_workbook:
+            raise ValueError("Choose either --workbook-json or --live-workbook, not both")
+        if args.live_workbook:
+            workbook_path = _resolve_live_workbook_path(config)
+            session_result = XLWingsWorkbookWriteSessionProvider(workbook_path).open_preflight_session(
+                operator_context=None
+            )
+            workbook_snapshot = session_result.snapshot
+            session_preflight = session_result.preflight
+        else:
+            workbook_snapshot = _load_workbook_snapshot(
+                workbook_json=args.workbook_json,
+                live_workbook=False,
+                config=config,
+            )
+
+        staged_write_plan = None
+        if args.run_id:
+            _run_report, _mail_outcomes, staged_write_plan = load_print_planning_bundle(
+                run_artifact_root=config.run_artifact_root,
+                workflow_id=descriptor.workflow_id,
+                run_id=args.run_id,
+            )
+
+        payload = summarize_workbook_readiness(
+            workflow_id=descriptor.workflow_id,
+            workbook_snapshot=workbook_snapshot,
+            session_preflight=session_preflight,
+            staged_write_plan=staged_write_plan,
+            run_id=args.run_id,
+        )
+        payload["workbook_source"] = (
+            "live_preflight"
+            if args.live_workbook
+            else "json_manifest"
+            if args.workbook_json is not None
+            else "empty"
+        )
+        payload["run_id"] = args.run_id
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(payload), end="")
     return 0
 

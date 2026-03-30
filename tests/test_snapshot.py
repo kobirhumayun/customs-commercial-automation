@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
+from project.workflows.snapshot_inspection import summarize_mail_snapshot
 
 
 class SnapshotTests(unittest.TestCase):
@@ -192,6 +193,40 @@ class SnapshotTests(unittest.TestCase):
             ["cover-letter.pdf", "lc-scan.pdf"],
         )
         self.assertEqual(snapshot[0].attachments[0].size_bytes, 11)
+
+    def test_summarize_mail_snapshot_reports_order_and_attachment_counts(self) -> None:
+        source_messages = [
+            {
+                "entry_id": "B",
+                "received_time": "2026-03-28T03:00:00Z",
+                "subject_raw": "Second",
+                "sender_address": "b@example.com",
+                "attachments": [{"attachment_name": "second.pdf"}],
+            },
+            {
+                "entry_id": "A",
+                "received_time": "2026-03-28T02:59:59Z",
+                "subject_raw": "First",
+                "sender_address": "a@example.com",
+                "attachments": [
+                    {"attachment_name": "first-1.pdf"},
+                    {"attachment_name": "first-2.pdf"},
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "snapshot.json"
+            manifest_path.write_text(json.dumps(source_messages), encoding="utf-8")
+            manifest = load_snapshot_manifest(manifest_path)
+
+        snapshot = build_email_snapshot(manifest, state_timezone="Asia/Dhaka")
+        payload = summarize_mail_snapshot(snapshot)
+
+        self.assertEqual(payload["snapshot_count"], 2)
+        self.assertEqual(payload["entry_id_order"], ["A", "B"])
+        self.assertEqual(payload["attachment_count"], 3)
+        self.assertEqual(payload["mails"][0]["attachments"][0]["attachment_name"], "first-1.pdf")
 
 
 if __name__ == "__main__":

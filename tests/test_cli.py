@@ -228,6 +228,79 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
         self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
 
+    def test_inspect_mail_snapshot_command_prints_ordered_snapshot_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_json_path = root / "snapshot.json"
+            snapshot_json_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "B",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "Second",
+                            "sender_address": "b@example.com",
+                            "attachments": [{"attachment_name": "b.pdf"}],
+                        },
+                        {
+                            "entry_id": "A",
+                            "received_time": "2026-03-28T02:59:59Z",
+                            "subject_raw": "First",
+                            "sender_address": "a@example.com",
+                            "attachments": [{"attachment_name": "a.pdf"}],
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "inspect-mail-snapshot",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--snapshot-json",
+                        str(snapshot_json_path),
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["snapshot_source"], "json_manifest")
+        self.assertEqual(payload["snapshot_count"], 2)
+        self.assertEqual(payload["entry_id_order"], ["A", "B"])
+        self.assertEqual(payload["attachment_count"], 2)
+        self.assertEqual(payload["mails"][0]["attachments"][0]["attachment_name"], "a.pdf")
+
     def test_inspect_erp_command_prints_canonical_rows_for_requested_file_numbers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1735,6 +1808,198 @@ class CLITests(unittest.TestCase):
         payload = json.loads(buffer.getvalue())
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["sheet_name"], "Sheet1")
+        self.assertEqual(payload["header_count"], 1)
+
+    def test_inspect_workbook_readiness_command_reports_mapping_and_prevalidation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_snapshot = type(
+                "FakeSnapshot",
+                (),
+                {
+                    "sheet_name": "Sheet1",
+                    "headers": [
+                        WorkbookHeader(column_index=1, text="File No."),
+                        WorkbookHeader(column_index=2, text="L/C No."),
+                        WorkbookHeader(column_index=3, text="Buyer Name"),
+                        WorkbookHeader(column_index=4, text="L/C Issuing Bank"),
+                        WorkbookHeader(column_index=5, text="LC Issue Date"),
+                        WorkbookHeader(column_index=6, text="Amount"),
+                        WorkbookHeader(column_index=7, text="Shipment Date"),
+                        WorkbookHeader(column_index=8, text="Expiry Date"),
+                        WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                        WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                        WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                        WorkbookHeader(column_index=12, text="Lien Bank"),
+                        WorkbookHeader(column_index=13, text="Master L/C No."),
+                        WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                        WorkbookHeader(column_index=22, text="Amount"),
+                    ],
+                    "rows": [],
+                },
+            )()
+            staged_write_plan = [
+                WriteOperation(
+                    write_operation_id="op-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    operation_index_within_mail=0,
+                    sheet_name="Sheet1",
+                    row_index=3,
+                    column_key="file_no",
+                    expected_pre_write_value=None,
+                    expected_post_write_value="P/26/0042",
+                    row_eligibility_checks=["append_target_row_is_new", "target_cell_blank_by_construction"],
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch("project.cli._load_workbook_snapshot", return_value=fake_snapshot):
+                with patch(
+                    "project.cli.load_print_planning_bundle",
+                    return_value=(
+                        RunReport(
+                            run_id="run-123",
+                            workflow_id=WorkflowId.EXPORT_LC_SC,
+                            tool_version="0.1.0",
+                            rule_pack_id="export_lc_sc.default",
+                            rule_pack_version="1.0.0",
+                            started_at_utc="2026-03-30T00:00:00Z",
+                            completed_at_utc=None,
+                            state_timezone="Asia/Dhaka",
+                            mail_iteration_order=["mail-1"],
+                            print_group_order=[],
+                            write_phase_status=WritePhaseStatus.NOT_STARTED,
+                            print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                            mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                            hash_algorithm="sha256",
+                            run_start_backup_hash="a" * 64,
+                            current_workbook_hash="b" * 64,
+                            staged_write_plan_hash="c" * 64,
+                            summary={},
+                        ),
+                        [],
+                        staged_write_plan,
+                    ),
+                ):
+                    with redirect_stdout(buffer):
+                        exit_code = main(
+                            [
+                                "inspect-workbook-readiness",
+                                "export_lc_sc",
+                                "--config",
+                                str(config_path),
+                                "--workbook-json",
+                                str(root / "workbook.json"),
+                                "--run-id",
+                                "run-123",
+                            ]
+                        )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workbook_source"], "json_manifest")
+        self.assertEqual(payload["header_mapping_status"], "resolved")
+        self.assertEqual(payload["staged_write_operation_count"], 1)
+        self.assertEqual(payload["target_prevalidation"]["status"], "passed")
+
+    def test_inspect_workbook_readiness_command_uses_live_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_snapshot = type(
+                "FakeSnapshot",
+                (),
+                {
+                    "sheet_name": "Sheet1",
+                    "headers": [WorkbookHeader(column_index=1, text="File No.")],
+                    "rows": [],
+                },
+            )()
+            fake_result = type(
+                "FakeSessionResult",
+                (),
+                {
+                    "snapshot": fake_snapshot,
+                    "preflight": {"status": "ready", "adapter_name": "xlwings"},
+                },
+            )()
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.XLWingsWorkbookWriteSessionProvider",
+                return_value=type(
+                    "FakeProvider",
+                    (),
+                    {"open_preflight_session": lambda self, operator_context=None: fake_result},
+                )(),
+            ):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-workbook-readiness",
+                            "export_lc_sc",
+                            "--config",
+                            str(config_path),
+                            "--live-workbook",
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workbook_source"], "live_preflight")
+        self.assertEqual(payload["session_preflight"]["status"], "ready")
         self.assertEqual(payload["header_count"], 1)
 
     def test_recover_run_command_prints_recovery_outcome(self) -> None:
