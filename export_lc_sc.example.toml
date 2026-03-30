@@ -1,0 +1,35 @@
+# Ready-to-fill local config template for the export LC/SC workflow.
+# Copy this file outside git-tracked paths or rename it locally before use.
+# Do not commit real credentials, real profile secrets, or protected EntryIDs.
+
+state_timezone = "Asia/Dhaka"
+
+# Writable directories required by startup validation.
+report_root = "C:/customs-automation/reports"
+run_artifact_root = "C:/customs-automation/state/runs"
+backup_root = "C:/customs-automation/state/backups"
+master_workbook_root = "C:/customs-automation/workbooks"
+
+# Outlook / ERP / browser settings.
+outlook_profile = "Operations"
+erp_base_url = "https://erp.example.local"
+playwright_browser_channel = "msedge"
+
+# Write-capable workflow settings.
+master_workbook_path_template = "C:/customs-automation/workbooks/{year}.xlsx"
+excel_lock_timeout_seconds = 120
+print_enabled = true
+
+# Required Outlook folder EntryIDs for the export workflow.
+source_working_folder_entry_id = "REPLACE_WITH_EXPORT_WORKING_FOLDER_ENTRY_ID"
+destination_success_entry_id = "REPLACE_WITH_EXPORT_SUCCESS_FOLDER_ENTRY_ID"
+
+# Optional live-adapter settings.
+# playwright_storage_state_path = "C:/customs-automation/secrets/erp-storage-state.json"
+# playwright_headless = false
+# erp_download_timeout_seconds = 120
+# acrobat_executable_path = "C:/Program Files/Adobe/Acrobat DC/Acrobat/Acrobat.exe"
+# print_printer_name = "Your Printer Name"
+# print_printer_driver = "Microsoft Print To PDF"
+# print_printer_port = "PORTPROMPT:"
+# print_command_timeout_seconds = 60
