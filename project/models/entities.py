@@ -171,6 +171,7 @@ class PrintBatch:
     document_paths: list[str]
     document_path_hashes: list[str]
     completion_marker_id: str
+    manual_verification_summary: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
@@ -245,6 +246,7 @@ class MailOutcomeRecord:
     file_numbers_extracted: list[str] = field(default_factory=list)
     saved_documents: list[dict[str, Any]] = field(default_factory=list)
     staged_write_operations: list[dict[str, Any]] = field(default_factory=list)
+    manual_document_verification_summary: dict[str, Any] | None = None
     import_keyword_revision: str | None = None
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None

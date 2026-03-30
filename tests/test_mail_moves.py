@@ -16,7 +16,7 @@ from project.models import (
 )
 from project.outlook import SimulatedMailMoveProvider
 from project.storage import create_run_artifact_layout
-from project.workflows.mail_moves import execute_mail_moves
+from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
 
 
 class MailMoveExecutionTests(unittest.TestCase):
@@ -46,12 +46,19 @@ class MailMoveExecutionTests(unittest.TestCase):
 
             marker_path = artifact_paths.mail_move_markers_dir / f"{move_operations[0].mail_move_operation_id}.json"
             marker_exists = marker_path.exists()
+            marker_payload = (
+                __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+                if marker_exists
+                else {}
+            )
 
         self.assertEqual(phase_updates, ["moving", "completed"])
         self.assertEqual(executed_report.mail_move_phase_status, MailMovePhaseStatus.COMPLETED)
         self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.MOVED)
         self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
+        self.assertIn("Manual PDF verification status at mail-move time", executed_outcomes[0].decision_reasons[-2])
         self.assertTrue(marker_exists)
+        self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
         self.assertEqual(discrepancies, [])
 
     def test_execute_mail_moves_hard_blocks_when_print_gate_is_unsatisfied(self) -> None:
@@ -104,6 +111,37 @@ class MailMoveExecutionTests(unittest.TestCase):
         self.assertEqual(discrepancies[0].code, "mail_source_location_mismatch")
         self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
 
+    def test_summarize_mail_move_manual_verification_aggregates_moved_outcomes(self) -> None:
+        summary = summarize_mail_move_manual_verification(
+            [
+                _build_mail_outcome(
+                    processing_status=MailProcessingStatus.MOVED,
+                    manual_document_verification_summary={
+                        "document_count": 1,
+                        "verified_count": 1,
+                        "pending_count": 0,
+                        "untracked_count": 0,
+                    },
+                ),
+                _build_mail_outcome(
+                    processing_status=MailProcessingStatus.MOVED,
+                    mail_id="mail-2",
+                    source_entry_id="entry-2",
+                    manual_document_verification_summary={
+                        "document_count": 2,
+                        "verified_count": 1,
+                        "pending_count": 1,
+                        "untracked_count": 0,
+                    },
+                ),
+            ]
+        )
+
+        self.assertEqual(summary["document_count"], 3)
+        self.assertEqual(summary["verified_count"], 2)
+        self.assertEqual(summary["pending_count"], 1)
+        self.assertEqual(summary["untracked_count"], 0)
+
 
 def _build_run_report(
     *,
@@ -135,22 +173,35 @@ def _build_run_report(
     )
 
 
-def _build_mail_outcome() -> MailOutcomeRecord:
+def _build_mail_outcome(
+    *,
+    processing_status: MailProcessingStatus = MailProcessingStatus.PRINTED,
+    mail_id: str = "mail-1",
+    source_entry_id: str = "entry-1",
+    manual_document_verification_summary: dict | None = None,
+) -> MailOutcomeRecord:
     return MailOutcomeRecord(
         run_id="run-1",
-        mail_id="mail-1",
+        mail_id=mail_id,
         workflow_id=WorkflowId.EXPORT_LC_SC,
         snapshot_index=0,
-        processing_status=MailProcessingStatus.PRINTED,
+        processing_status=processing_status,
         final_decision=FinalDecision.PASS,
         decision_reasons=[],
         eligible_for_write=False,
         eligible_for_print=False,
         eligible_for_mail_move=True,
-        source_entry_id="entry-1",
+        source_entry_id=source_entry_id,
         subject_raw="subject",
         sender_address="a@example.com",
         print_group_id="group-1",
+        manual_document_verification_summary=manual_document_verification_summary
+        or {
+            "document_count": 1,
+            "verified_count": 1,
+            "pending_count": 0,
+            "untracked_count": 0,
+        },
     )
 
 

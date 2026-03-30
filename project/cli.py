@@ -40,9 +40,14 @@ from project.workbook import (
     XLWingsWorkbookSnapshotProvider,
 )
 from project.workflows.bootstrap import initialize_workflow_run
-from project.workflows.mail_moves import execute_mail_moves
-from project.workflows.document_verification import build_document_manual_verification_bundle
-from project.workflows.print_execution import execute_print_batches
+from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
+from project.workflows.document_verification import (
+    acknowledge_document_manual_verification,
+    build_document_manual_verification_bundle,
+    load_document_manual_verification_bundle,
+    summarize_manual_document_verification,
+)
+from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 from project.workflows.print_planning import (
     build_print_plan_payload,
     load_print_batches,
@@ -74,6 +79,10 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_workbook(args)
     if args.command == "prepare-document-verification":
         return _handle_prepare_document_verification(args)
+    if args.command == "acknowledge-document-verification":
+        return _handle_acknowledge_document_verification(args)
+    if args.command == "report-manual-verification":
+        return _handle_report_manual_verification(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -222,6 +231,71 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Extraction mode to use when generating per-document audit JSONs.",
     )
     prepare_document_verification_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    acknowledge_document_verification_parser = subparsers.add_parser(
+        "acknowledge-document-verification",
+        help="Record operator acknowledgment for one or more manually verified PDF documents.",
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose manual verification bundle should be updated.",
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "--saved-document-id",
+        dest="saved_document_ids",
+        action="append",
+        default=[],
+        help="Optional saved document id to acknowledge. May be repeated. If omitted, all pending documents are acknowledged.",
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "--notes",
+        help="Optional operator note to attach to the acknowledged documents.",
+    )
+    acknowledge_document_verification_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_manual_verification_parser = subparsers.add_parser(
+        "report-manual-verification",
+        help="Summarize the manual PDF-verification state for an existing run without changing artifacts.",
+    )
+    report_manual_verification_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_manual_verification_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_manual_verification_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose manual PDF-verification state should be summarized.",
+    )
+    report_manual_verification_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -651,6 +725,12 @@ def _handle_plan_print(args: argparse.Namespace) -> int:
             workflow_id=descriptor.workflow_id,
             run_id=args.run_id,
         )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
         recovery_outcome = None
         if run_report.write_phase_status.value != "committed":
             workbook_snapshot = _load_workbook_snapshot(
@@ -680,12 +760,10 @@ def _handle_plan_print(args: argparse.Namespace) -> int:
             mail_outcomes=mail_outcomes,
             staged_write_plan=staged_write_plan,
             recovery_outcome=recovery_outcome,
-        )
-        artifact_paths = _resolve_run_artifact_paths(
-            run_artifact_root=config.run_artifact_root,
-            backup_root=config.backup_root,
-            workflow_id=descriptor.workflow_id.value,
-            run_id=args.run_id,
+            manual_verification_bundle=load_document_manual_verification_bundle(
+                artifact_paths=artifact_paths,
+                allow_missing=True,
+            ),
         )
         write_run_metadata(artifact_paths, to_jsonable(planning_result.run_report))
         write_mail_outcomes(artifact_paths, to_jsonable(planning_result.mail_outcomes))
@@ -759,6 +837,7 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
         "workflow_id": updated_run_report.workflow_id.value,
         "print_phase_status": updated_run_report.print_phase_status.value,
         "executed_group_count": len(print_batches),
+        "manual_verification_summary": summarize_print_batch_manual_verification(print_batches),
         "discrepancy_count": len(discrepancies),
     }
     print(pretty_json_dumps(payload), end="")
@@ -819,6 +898,7 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         "workflow_id": updated_run_report.workflow_id.value,
         "mail_move_phase_status": updated_run_report.mail_move_phase_status.value,
         "mail_move_operation_count": len(move_operations),
+        "manual_verification_summary": summarize_mail_move_manual_verification(updated_mail_outcomes),
         "discrepancy_count": len(discrepancies),
     }
     print(pretty_json_dumps(payload), end="")
@@ -979,6 +1059,75 @@ def _handle_prepare_document_verification(args: argparse.Namespace) -> int:
         "audit_error_count": verification_result.audit_error_count,
         "manual_verification_required": True,
     }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_acknowledge_document_verification(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        acknowledgement = acknowledge_document_manual_verification(
+            artifact_paths=artifact_paths,
+            saved_document_ids=list(args.saved_document_ids),
+            operator_notes=args.notes,
+        )
+        write_manual_document_verification(artifact_paths, acknowledgement.payload)
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": args.run_id,
+        "workflow_id": descriptor.workflow_id.value,
+        "bundle_path": acknowledgement.bundle_path,
+        "acknowledged_document_count": acknowledgement.acknowledged_document_count,
+        "verified_document_count": acknowledgement.verified_document_count,
+        "pending_document_count": acknowledgement.pending_document_count,
+        "manual_verification_complete": acknowledgement.manual_verification_complete,
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_manual_verification(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = summarize_manual_document_verification(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            artifact_paths=artifact_paths,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(payload), end="")
     return 0
 

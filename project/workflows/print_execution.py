@@ -94,6 +94,7 @@ def execute_print_batches(
                     "run_id": batch.run_id,
                     "mail_id": batch.mail_id,
                     "document_path_hashes": list(batch.document_path_hashes),
+                    "manual_verification_summary": dict(batch.manual_verification_summary),
                     "printed_at_utc": utc_timestamp(),
                 },
             )
@@ -133,10 +134,11 @@ def _mark_printed_mail_outcomes(
     mail_outcomes: list[MailOutcomeRecord],
     print_batches: list[PrintBatch],
 ) -> list[MailOutcomeRecord]:
-    printed_mail_ids = {batch.mail_id for batch in print_batches}
+    printed_batch_by_mail_id = {batch.mail_id: batch for batch in print_batches}
     updated: list[MailOutcomeRecord] = []
     for outcome in mail_outcomes:
-        if outcome.mail_id not in printed_mail_ids:
+        batch = printed_batch_by_mail_id.get(outcome.mail_id)
+        if batch is None:
             updated.append(outcome)
             continue
         updated.append(
@@ -144,7 +146,9 @@ def _mark_printed_mail_outcomes(
                 outcome,
                 processing_status=MailProcessingStatus.PRINTED,
                 eligible_for_print=False,
-                decision_reasons=list(outcome.decision_reasons) + ["Planned print group completed successfully."],
+                decision_reasons=list(outcome.decision_reasons)
+                + ["Planned print group completed successfully."]
+                + _manual_verification_execution_reasons(batch),
             )
         )
     return updated
@@ -191,3 +195,33 @@ def _persist_run_report(
 ) -> None:
     if persistor is not None:
         persistor(run_report)
+
+
+def summarize_print_batch_manual_verification(print_batches: list[PrintBatch]) -> dict[str, int]:
+    verified_count = 0
+    pending_count = 0
+    untracked_count = 0
+    document_count = 0
+    for batch in print_batches:
+        summary = batch.manual_verification_summary
+        document_count += int(summary.get("document_count", 0))
+        verified_count += int(summary.get("verified_count", 0))
+        pending_count += int(summary.get("pending_count", 0))
+        untracked_count += int(summary.get("untracked_count", 0))
+    return {
+        "document_count": document_count,
+        "verified_count": verified_count,
+        "pending_count": pending_count,
+        "untracked_count": untracked_count,
+    }
+
+
+def _manual_verification_execution_reasons(batch: PrintBatch) -> list[str]:
+    summary = batch.manual_verification_summary
+    if not summary:
+        return []
+    return [
+        "Manual PDF verification status at print time: "
+        f"{summary.get('verified_count', 0)}/{summary.get('document_count', 0)} verified, "
+        f"{summary.get('pending_count', 0)} pending, {summary.get('untracked_count', 0)} untracked."
+    ]

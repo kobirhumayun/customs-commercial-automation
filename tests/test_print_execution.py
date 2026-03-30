@@ -16,7 +16,7 @@ from project.models import (
     WritePhaseStatus,
 )
 from project.storage import create_run_artifact_layout
-from project.workflows.print_execution import execute_print_batches
+from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 
 
 class PrintExecutionTests(unittest.TestCase):
@@ -42,6 +42,12 @@ class PrintExecutionTests(unittest.TestCase):
                     document_paths=[str(document_path)],
                     document_path_hashes=["hash-1"],
                     completion_marker_id="completion-1",
+                    manual_verification_summary={
+                        "document_count": 1,
+                        "verified_count": 1,
+                        "pending_count": 0,
+                        "untracked_count": 0,
+                    },
                 )
             ]
             phase_updates: list[str] = []
@@ -57,11 +63,18 @@ class PrintExecutionTests(unittest.TestCase):
 
             marker_path = artifact_paths.print_markers_dir / "group-1.json"
             marker_exists = marker_path.exists()
+            marker_payload = (
+                __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+                if marker_exists
+                else {}
+            )
 
         self.assertEqual(phase_updates, ["printing", "completed"])
         self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.COMPLETED)
         self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.PRINTED)
+        self.assertIn("Manual PDF verification status at print time", executed_outcomes[0].decision_reasons[-1])
         self.assertTrue(marker_exists)
+        self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
         self.assertEqual(discrepancies, [])
 
     def test_execute_print_batches_marks_uncertain_when_document_is_missing(self) -> None:
@@ -85,6 +98,7 @@ class PrintExecutionTests(unittest.TestCase):
                     document_paths=[str(missing_path)],
                     document_path_hashes=["hash-1"],
                     completion_marker_id="completion-1",
+                    manual_verification_summary={},
                 )
             ]
 
@@ -128,6 +142,7 @@ class PrintExecutionTests(unittest.TestCase):
                     document_paths=[str(document_path)],
                     document_path_hashes=["hash-1"],
                     completion_marker_id="completion-1",
+                    manual_verification_summary={},
                 )
             ]
 
@@ -141,6 +156,47 @@ class PrintExecutionTests(unittest.TestCase):
 
         self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.HARD_BLOCKED)
         self.assertEqual(discrepancies[0].code, "print_marker_mismatch")
+
+    def test_summarize_print_batch_manual_verification_aggregates_counts(self) -> None:
+        summary = summarize_print_batch_manual_verification(
+            [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/a.pdf"],
+                    document_path_hashes=["hash-a"],
+                    completion_marker_id="completion-a",
+                    manual_verification_summary={
+                        "document_count": 1,
+                        "verified_count": 1,
+                        "pending_count": 0,
+                        "untracked_count": 0,
+                    },
+                ),
+                PrintBatch(
+                    print_group_id="group-2",
+                    run_id="run-1",
+                    mail_id="mail-2",
+                    print_group_index=1,
+                    document_paths=["C:/docs/b.pdf", "C:/docs/c.pdf"],
+                    document_path_hashes=["hash-b", "hash-c"],
+                    completion_marker_id="completion-b",
+                    manual_verification_summary={
+                        "document_count": 2,
+                        "verified_count": 1,
+                        "pending_count": 1,
+                        "untracked_count": 0,
+                    },
+                ),
+            ]
+        )
+
+        self.assertEqual(summary["document_count"], 3)
+        self.assertEqual(summary["verified_count"], 2)
+        self.assertEqual(summary["pending_count"], 1)
+        self.assertEqual(summary["untracked_count"], 0)
 
 
 class FakePrintProvider:

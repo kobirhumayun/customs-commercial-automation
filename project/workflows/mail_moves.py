@@ -193,6 +193,9 @@ def execute_mail_moves(
                     "source_folder": operation.source_folder,
                     "destination_folder": operation.destination_folder,
                     "move_status": "moved",
+                    "manual_verification_summary": dict(
+                        _manual_verification_summary_for_mail(updated_mail_outcomes, operation.mail_id)
+                    ),
                     "moved_at_utc": utc_timestamp(),
                 },
             )
@@ -282,7 +285,10 @@ def _mark_moved_mail_outcomes(
                 eligible_for_mail_move=False,
                 mail_move_operation_id=operation.mail_move_operation_id,
                 decision_reasons=_append_reason(
-                    outcome.decision_reasons,
+                    _append_manual_verification_reason(
+                        outcome.decision_reasons,
+                        outcome.manual_document_verification_summary,
+                    ),
                     "Planned mail move completed successfully.",
                 ),
             )
@@ -310,6 +316,55 @@ def _append_reason(reasons: list[str], reason: str) -> list[str]:
     if reason in reasons:
         return list(reasons)
     return list(reasons) + [reason]
+
+
+def summarize_mail_move_manual_verification(mail_outcomes: list[MailOutcomeRecord]) -> dict[str, int]:
+    moved_outcomes = [
+        outcome
+        for outcome in mail_outcomes
+        if outcome.processing_status == MailProcessingStatus.MOVED
+        and isinstance(outcome.manual_document_verification_summary, dict)
+    ]
+    document_count = 0
+    verified_count = 0
+    pending_count = 0
+    untracked_count = 0
+    for outcome in moved_outcomes:
+        summary = outcome.manual_document_verification_summary or {}
+        document_count += int(summary.get("document_count", 0))
+        verified_count += int(summary.get("verified_count", 0))
+        pending_count += int(summary.get("pending_count", 0))
+        untracked_count += int(summary.get("untracked_count", 0))
+    return {
+        "document_count": document_count,
+        "verified_count": verified_count,
+        "pending_count": pending_count,
+        "untracked_count": untracked_count,
+    }
+
+
+def _manual_verification_summary_for_mail(
+    mail_outcomes: list[MailOutcomeRecord],
+    mail_id: str,
+) -> dict[str, object]:
+    outcome = next((item for item in mail_outcomes if item.mail_id == mail_id), None)
+    if outcome is None or not isinstance(outcome.manual_document_verification_summary, dict):
+        return {}
+    return dict(outcome.manual_document_verification_summary)
+
+
+def _append_manual_verification_reason(
+    reasons: list[str],
+    summary: dict[str, object] | None,
+) -> list[str]:
+    if not isinstance(summary, dict) or not summary:
+        return list(reasons)
+    reason = (
+        "Manual PDF verification status at mail-move time: "
+        f"{summary.get('verified_count', 0)}/{summary.get('document_count', 0)} verified, "
+        f"{summary.get('pending_count', 0)} pending, {summary.get('untracked_count', 0)} untracked."
+    )
+    return _append_reason(reasons, reason)
 
 
 def _build_discrepancy(

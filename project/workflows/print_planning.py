@@ -33,6 +33,7 @@ def plan_print_batches(
     mail_outcomes: list[MailOutcomeRecord],
     staged_write_plan: list[WriteOperation],
     recovery_outcome: str | None = None,
+    manual_verification_bundle: dict[str, Any] | None = None,
 ) -> PrintPlanningResult:
     if not _print_planning_gate_satisfied(run_report, recovery_outcome):
         raise ValueError(
@@ -63,12 +64,18 @@ def plan_print_batches(
     print_batches: list[PrintBatch] = []
     print_group_order: list[str] = []
     print_group_by_mail_id: dict[str, str] = {}
+    verification_index = _build_manual_verification_index(manual_verification_bundle)
     for print_group_index, (_earliest_row, _mail_order, outcome) in enumerate(candidates):
+        printable_documents = _newly_saved_documents(outcome)
         document_path_hashes = [
             sha256_hex_text(str(saved_document["destination_path"]))
-            for saved_document in _newly_saved_documents(outcome)
+            for saved_document in printable_documents
         ]
         print_group_id = build_print_group_id(run_report.run_id, outcome.mail_id, print_group_index)
+        verification_summary = _build_manual_verification_summary(
+            printable_documents=printable_documents,
+            verification_index=verification_index,
+        )
         print_batches.append(
             PrintBatch(
                 print_group_id=print_group_id,
@@ -77,7 +84,7 @@ def plan_print_batches(
                 print_group_index=print_group_index,
                 document_paths=[
                     str(saved_document["destination_path"])
-                    for saved_document in _newly_saved_documents(outcome)
+                    for saved_document in printable_documents
                 ],
                 document_path_hashes=document_path_hashes,
                 completion_marker_id=build_print_completion_marker_id(
@@ -86,6 +93,7 @@ def plan_print_batches(
                     print_group_index,
                     document_path_hashes,
                 ),
+                manual_verification_summary=verification_summary,
             )
         )
         print_group_order.append(print_group_id)
@@ -100,12 +108,28 @@ def plan_print_batches(
         replace(
             outcome,
             print_group_id=print_group_by_mail_id.get(outcome.mail_id),
+            manual_document_verification_summary=(
+                next(
+                    (
+                        batch.manual_verification_summary
+                        for batch in print_batches
+                        if batch.mail_id == outcome.mail_id
+                    ),
+                    outcome.manual_document_verification_summary,
+                )
+                if outcome.mail_id in print_group_by_mail_id
+                else outcome.manual_document_verification_summary
+            ),
             eligible_for_print=(
                 outcome.mail_id in print_group_by_mail_id and outcome.final_decision != FinalDecision.HARD_BLOCK
             ),
             decision_reasons=(
                 list(outcome.decision_reasons)
                 + [f"Planned print group {print_group_by_mail_id[outcome.mail_id]}."]
+                + _manual_verification_reason_for_mail(
+                    print_group_by_mail_id.get(outcome.mail_id),
+                    print_batches,
+                )
                 if outcome.mail_id in print_group_by_mail_id
                 else list(outcome.decision_reasons)
             ),
@@ -130,6 +154,7 @@ def build_print_plan_payload(print_batches: list[PrintBatch]) -> dict[str, Any]:
                 "document_paths": list(batch.document_paths),
                 "document_path_hashes": list(batch.document_path_hashes),
                 "completion_marker_id": batch.completion_marker_id,
+                "manual_verification_summary": dict(batch.manual_verification_summary),
                 "blank_page_after_group": True,
             }
             for batch in print_batches
@@ -183,6 +208,86 @@ def _newly_saved_documents(outcome: MailOutcomeRecord) -> list[dict[str, Any]]:
             "print_eligible" not in document
             or bool(document.get("print_eligible"))
         )
+    ]
+
+
+def _build_manual_verification_index(bundle: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not isinstance(bundle, dict):
+        return {}
+    documents = bundle.get("documents", [])
+    if not isinstance(documents, list):
+        return {}
+    index: dict[str, dict[str, Any]] = {}
+    for entry in documents:
+        if not isinstance(entry, dict):
+            continue
+        saved_document = entry.get("saved_document", {})
+        if not isinstance(saved_document, dict):
+            continue
+        saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+        if not saved_document_id:
+            continue
+        index[saved_document_id] = entry
+    return index
+
+
+def _build_manual_verification_summary(
+    *,
+    printable_documents: list[dict[str, Any]],
+    verification_index: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    documents: list[dict[str, Any]] = []
+    verified_count = 0
+    pending_count = 0
+    untracked_count = 0
+    for saved_document in printable_documents:
+        saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+        verification_entry = verification_index.get(saved_document_id)
+        if verification_entry is None:
+            status = "not_tracked"
+            untracked_count += 1
+        else:
+            status = str(verification_entry.get("manual_verification_status", "pending")).strip() or "pending"
+            if status == "verified":
+                verified_count += 1
+            else:
+                pending_count += 1
+        documents.append(
+            {
+                "saved_document_id": saved_document_id,
+                "normalized_filename": str(saved_document.get("normalized_filename", "")),
+                "manual_verification_status": status,
+                "verified_by": verification_entry.get("verified_by") if verification_entry is not None else None,
+                "verified_at_utc": verification_entry.get("verified_at_utc") if verification_entry is not None else None,
+                "audit_report_path": verification_entry.get("audit_report_path") if verification_entry is not None else None,
+            }
+        )
+    return {
+        "bundle_present": bool(verification_index),
+        "document_count": len(documents),
+        "verified_count": verified_count,
+        "pending_count": pending_count,
+        "untracked_count": untracked_count,
+        "documents": documents,
+    }
+
+
+def _manual_verification_reason_for_mail(
+    print_group_id: str | None,
+    print_batches: list[PrintBatch],
+) -> list[str]:
+    if print_group_id is None:
+        return []
+    batch = next((item for item in print_batches if item.print_group_id == print_group_id), None)
+    if batch is None:
+        return []
+    summary = batch.manual_verification_summary
+    if not summary:
+        return []
+    return [
+        "Manual PDF verification summary for planned print documents: "
+        f"{summary.get('verified_count', 0)}/{summary.get('document_count', 0)} verified, "
+        f"{summary.get('pending_count', 0)} pending, {summary.get('untracked_count', 0)} untracked."
     ]
 
 
@@ -257,6 +362,11 @@ def _parse_mail_outcome(payload: dict[str, Any]) -> MailOutcomeRecord:
         file_numbers_extracted=[str(value) for value in payload.get("file_numbers_extracted", [])],
         saved_documents=list(payload.get("saved_documents", [])),
         staged_write_operations=list(payload.get("staged_write_operations", [])),
+        manual_document_verification_summary=(
+            dict(payload["manual_document_verification_summary"])
+            if isinstance(payload.get("manual_document_verification_summary"), dict)
+            else None
+        ),
         import_keyword_revision=payload.get("import_keyword_revision"),
         print_group_id=payload.get("print_group_id"),
         mail_move_operation_id=payload.get("mail_move_operation_id"),
@@ -303,4 +413,5 @@ def _parse_print_batch(payload: dict[str, Any]) -> PrintBatch:
         document_paths=[str(value) for value in payload.get("document_paths", [])],
         document_path_hashes=[str(value) for value in payload.get("document_path_hashes", [])],
         completion_marker_id=str(payload["completion_marker_id"]),
+        manual_verification_summary=dict(payload.get("manual_verification_summary", {})),
     )
