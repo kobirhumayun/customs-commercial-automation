@@ -2194,6 +2194,61 @@ class CLITests(unittest.TestCase):
             stderr_buffer.getvalue(),
         )
 
+    def test_validate_run_rejects_multiple_erp_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_json_path = root / "erp.json"
+            erp_json_path.write_text("[]", encoding="utf-8")
+            erp_export_path = root / "erp.csv"
+            erp_export_path.write_text("rptDateWiseLCRegister\nFile No.,L/C No.,Buyer Name,LC DT.\n", encoding="utf-8")
+
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                exit_code = main(
+                    [
+                        "validate-run",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--erp-json",
+                        str(erp_json_path),
+                        "--erp-export",
+                        str(erp_export_path),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn(
+            "Choose one ERP source: --erp-json, --erp-export, or --live-erp",
+            stderr_buffer.getvalue(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,7 +12,12 @@ from project.documents import (
     LayeredSavedDocumentAnalysisProvider,
     NullSavedDocumentAnalysisProvider,
 )
-from project.erp import EmptyERPRowProvider, JsonManifestERPRowProvider
+from project.erp import (
+    DelimitedERPExportRowProvider,
+    EmptyERPRowProvider,
+    JsonManifestERPRowProvider,
+    PlaywrightERPRowProvider,
+)
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
 from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
@@ -932,6 +937,16 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON manifest of canonical ERP rows for workflow validation.",
     )
     parser.add_argument(
+        "--erp-export",
+        type=Path,
+        help="Optional CSV/TSV ERP register export to use instead of a JSON manifest.",
+    )
+    parser.add_argument(
+        "--live-erp",
+        action="store_true",
+        help="Load ERP register rows from the configured ERP report page via Playwright.",
+    )
+    parser.add_argument(
         "--document-root",
         type=Path,
         help="Optional root directory for live attachment saving before validation.",
@@ -1060,7 +1075,12 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             descriptor=descriptor,
             run_report=initialized.run_report,
             rule_pack=rule_pack,
-            erp_row_provider=_load_erp_provider(args.erp_json),
+            erp_row_provider=_load_erp_provider(
+                erp_json=args.erp_json,
+                erp_export=args.erp_export,
+                live_erp=args.live_erp,
+                config=config,
+            ),
             workbook_snapshot=_load_workbook_snapshot(
                 workbook_json=args.workbook_json,
                 live_workbook=args.live_workbook,
@@ -2145,10 +2165,35 @@ def _load_snapshot_if_supplied(
     return provider.load_snapshot(state_timezone=config.state_timezone)
 
 
-def _load_erp_provider(erp_json: Path | None):
-    if erp_json is None:
-        return EmptyERPRowProvider()
-    return JsonManifestERPRowProvider(erp_json)
+def _load_erp_provider(
+    *,
+    erp_json: Path | None,
+    erp_export: Path | None,
+    live_erp: bool,
+    config,
+):
+    selected_count = int(erp_json is not None) + int(erp_export is not None) + int(live_erp)
+    if selected_count > 1:
+        raise ValueError("Choose one ERP source: --erp-json, --erp-export, or --live-erp")
+    if erp_json is not None:
+        return JsonManifestERPRowProvider(erp_json)
+    if erp_export is not None:
+        return DelimitedERPExportRowProvider(erp_export)
+    if live_erp:
+        storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+        return PlaywrightERPRowProvider(
+            base_url=str(config.values.get("erp_base_url", "")).strip(),
+            report_relative_url=str(
+                config.values.get("erp_lc_register_relative_url", "/rptDateWiseLCRegister")
+            ).strip()
+            or "/rptDateWiseLCRegister",
+            browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
+            storage_state_path=Path(storage_state_value) if storage_state_value else None,
+            table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",
+            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
+            headless=bool(config.values.get("playwright_headless", True)),
+        )
+    return EmptyERPRowProvider()
 
 
 def _load_workbook_snapshot(

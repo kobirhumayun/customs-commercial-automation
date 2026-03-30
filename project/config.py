@@ -17,9 +17,10 @@ PATH_KEYS = {
     "run_artifact_root",
     "backup_root",
     "master_workbook_root",
+    "playwright_storage_state_path",
 }
-BOOLEAN_KEYS = {"print_enabled"}
-INTEGER_KEYS = {"excel_lock_timeout_seconds"}
+BOOLEAN_KEYS = {"print_enabled", "playwright_headless"}
+INTEGER_KEYS = {"excel_lock_timeout_seconds", "erp_download_timeout_seconds"}
 
 
 @dataclass(slots=True, frozen=True)
