@@ -71,6 +71,7 @@ from project.workflows.dashboard_export import build_workflow_dashboard_markdown
 from project.workflows.dashboard_html_export import build_workflow_dashboard_html
 from project.workflows.erp_inspection import inspect_erp_rows
 from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
+from project.workflows.print_marker_reporting import summarize_print_markers
 from project.workflows.print_planning import (
     build_print_plan_payload,
     load_print_batches,
@@ -131,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_list_runs(args)
     if args.command == "report-run-artifacts":
         return _handle_report_run_artifacts(args)
+    if args.command == "report-print-markers":
+        return _handle_report_print_markers(args)
     if args.command == "report-recovery-precheck":
         return _handle_report_recovery_precheck(args)
     if args.command == "list-recovery-candidates":
@@ -566,6 +569,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run id whose persisted artifact layout should be summarized.",
     )
     report_run_artifacts_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    report_print_markers_parser = subparsers.add_parser(
+        "report-print-markers",
+        help="Inspect persisted print-marker receipts for one run without changing any artifacts.",
+    )
+    report_print_markers_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    report_print_markers_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    report_print_markers_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose print-marker receipts should be summarized.",
+    )
+    report_print_markers_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2327,6 +2357,35 @@ def _handle_report_run_artifacts(args: argparse.Namespace) -> int:
             "run_id": args.run_id,
             "workflow_id": descriptor.workflow_id.value,
             "artifacts": summarize_run_artifacts(artifact_paths=artifact_paths),
+        }
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_report_print_markers(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = {
+            "workflow_id": descriptor.workflow_id.value,
+            "run_id": args.run_id,
+            "print_markers": summarize_print_markers(
+                print_markers_dir=artifact_paths.print_markers_dir,
+            ),
         }
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

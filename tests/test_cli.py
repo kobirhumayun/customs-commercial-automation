@@ -909,6 +909,83 @@ class CLITests(unittest.TestCase):
         self.assertTrue(payload["artifacts"]["core_files"]["commit_marker"]["nonempty"])
         self.assertEqual(payload["artifacts"]["directories"]["print_markers"]["file_count"], 1)
 
+    def test_report_print_markers_command_prints_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "Operations"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-123",
+            )
+            (artifact_paths.print_markers_dir / "group-1.json").write_text(
+                """
+                {
+                  "print_group_id": "group-1",
+                  "mail_id": "mail-1",
+                  "completion_marker_id": "completion-1",
+                  "printed_at_utc": "2026-03-30T00:00:00Z",
+                  "manual_verification_summary": {"verified_count": 1},
+                  "print_execution_receipt": {
+                    "adapter_name": "acrobat",
+                    "acknowledgment_mode": "process_exit_zero",
+                    "executed_command_count": 2,
+                    "blank_separator_printed": true
+                  }
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "report-print-markers",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--run-id",
+                        "run-123",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["run_id"], "run-123")
+        self.assertEqual(payload["print_markers"]["marker_count"], 1)
+        self.assertEqual(payload["print_markers"]["markers"][0]["adapter_name"], "acrobat")
+        self.assertEqual(
+            payload["print_markers"]["markers"][0]["acknowledgment_mode"],
+            "process_exit_zero",
+        )
+
     def test_report_recovery_precheck_command_prints_readiness_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
