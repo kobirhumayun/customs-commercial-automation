@@ -47,6 +47,7 @@ from project.workflows.document_verification import (
     load_document_manual_verification_bundle,
     summarize_manual_document_verification,
 )
+from project.workflows.dashboard_export import build_workflow_dashboard_markdown
 from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
 from project.workflows.print_planning import (
     build_print_plan_payload,
@@ -118,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_export_retention_summary(args)
     if args.command == "export-summary-catalog":
         return _handle_export_summary_catalog(args)
+    if args.command == "export-dashboard-markdown":
+        return _handle_export_dashboard_markdown(args)
     if args.command == "recover-run":
         return _handle_recover_run(args)
     if args.command == "plan-print":
@@ -688,6 +691,57 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional destination JSON path. Defaults to <report_root>/summary_catalogs/<workflow_id>.catalog.json.",
     )
     export_summary_catalog_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    export_dashboard_markdown_parser = subparsers.add_parser(
+        "export-dashboard-markdown",
+        help="Write a human-readable Markdown dashboard from the existing workflow summary sources.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--output-markdown",
+        type=Path,
+        help="Optional destination Markdown path. Defaults to <report_root>/dashboards/<workflow_id>.dashboard.md.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--recent-limit",
+        type=int,
+        default=10,
+        help="Maximum number of recent runs to include. Defaults to 10.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--queue-limit",
+        type=int,
+        default=10,
+        help="Maximum number of queued runs to include. Defaults to 10.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--recovery-limit",
+        type=int,
+        default=10,
+        help="Maximum number of recovery candidates to include. Defaults to 10.",
+    )
+    export_dashboard_markdown_parser.add_argument(
+        "--retention-days",
+        type=int,
+        default=30,
+        help="Retention threshold in days for the dashboard section. Defaults to 30.",
+    )
+    export_dashboard_markdown_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -1917,6 +1971,46 @@ def _handle_export_summary_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_export_dashboard_markdown(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        markdown = build_workflow_dashboard_markdown(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id,
+            recent_limit=args.recent_limit,
+            queue_limit=args.queue_limit,
+            recovery_limit=args.recovery_limit,
+            retention_days=args.retention_days,
+        )
+        output_path = args.output_markdown or _default_dashboard_markdown_output_path(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown, encoding="utf-8")
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(
+        pretty_json_dumps(
+            {
+                "workflow_id": descriptor.workflow_id.value,
+                "output_markdown": str(output_path),
+            }
+        ),
+        end="",
+    )
+    return 0
+
+
 def _descriptor_from_args(workflow_id: str) -> WorkflowDescriptor:
     for descriptor in WORKFLOW_REGISTRY.values():
         if descriptor.workflow_id.value == workflow_id:
@@ -2019,6 +2113,10 @@ def _default_retention_summary_output_path(*, report_root: Path, workflow_id: st
 
 def _default_summary_catalog_output_path(*, report_root: Path, workflow_id: str) -> Path:
     return report_root / "summary_catalogs" / f"{workflow_id}.catalog.json"
+
+
+def _default_dashboard_markdown_output_path(*, report_root: Path, workflow_id: str) -> Path:
+    return report_root / "dashboards" / f"{workflow_id}.dashboard.md"
 
 
 if __name__ == "__main__":
