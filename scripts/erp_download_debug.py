@@ -16,6 +16,10 @@ def previous_calendar_year_range(today: date | None = None) -> tuple[date, date]
     return date(year, 1, 1), date(year, 12, 31)
 
 
+def format_erp_date(value: date) -> str:
+    return value.strftime("%d-%b-%Y")
+
+
 def parse_args() -> argparse.Namespace:
     default_start, default_end = previous_calendar_year_range()
 
@@ -48,6 +52,16 @@ def parse_args() -> argparse.Namespace:
         help="Report end date in YYYY-MM-DD format. Defaults to December 31 of the previous calendar year.",
     )
     parser.add_argument(
+        "--from-input-selector",
+        default='input[placeholder="From Date"]',
+        help="Selector for the start-date text input.",
+    )
+    parser.add_argument(
+        "--to-input-selector",
+        default='input[placeholder="To Date"]',
+        help="Selector for the end-date text input.",
+    )
+    parser.add_argument(
         "--download-path",
         type=Path,
         default=Path("erp-download.csv"),
@@ -70,6 +84,18 @@ def pick_date(page, select_button_index: int, target: date) -> None:
     page.get_by_text(day_text, exact=True).last.click()
 
 
+def fill_date_input(page, *, selector: str, target: date) -> bool:
+    formatted = format_erp_date(target)
+    locator = page.locator(selector)
+    if locator.count() < 1:
+        return False
+    locator.first.wait_for(state="visible", timeout=10_000)
+    locator.first.click()
+    locator.first.fill(formatted)
+    locator.first.press("Tab")
+    return True
+
+
 def run(
     playwright: Playwright,
     *,
@@ -78,6 +104,8 @@ def run(
     headless: bool,
     start_date: date,
     end_date: date,
+    from_input_selector: str,
+    to_input_selector: str,
     download_path: Path,
 ) -> None:
     browser = playwright.chromium.launch(channel=channel, headless=headless)
@@ -88,8 +116,13 @@ def run(
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_load_state("networkidle")
 
-        pick_date(page, select_button_index=2, target=start_date)
-        pick_date(page, select_button_index=3, target=end_date)
+        # Prefer direct date-field input using the confirmed ERP format dd-MMM-yyyy.
+        # Fall back to the date-picker flow if those inputs are not available.
+        from_filled = fill_date_input(page, selector=from_input_selector, target=start_date)
+        to_filled = fill_date_input(page, selector=to_input_selector, target=end_date)
+        if not (from_filled and to_filled):
+            pick_date(page, select_button_index=2, target=start_date)
+            pick_date(page, select_button_index=3, target=end_date)
 
         page.get_by_role("button", name="Submit").click()
         page.locator(".dx-menu-item-popout").wait_for(state="visible", timeout=15_000)
@@ -123,6 +156,8 @@ def main() -> int:
             headless=args.headless,
             start_date=start_date,
             end_date=end_date,
+            from_input_selector=args.from_input_selector,
+            to_input_selector=args.to_input_selector,
             download_path=download_path,
         )
     return 0
