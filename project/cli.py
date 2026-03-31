@@ -20,7 +20,11 @@ from project.erp import (
 )
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
-from project.outlook import SimulatedMailMoveProvider, Win32ComMailMoveProvider
+from project.outlook import (
+    SimulatedMailMoveProvider,
+    Win32ComMailMoveProvider,
+    Win32ComOutlookFolderCatalogProvider,
+)
 from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, SimulatedPrintProvider
 from project.models import SavedDocument
 from project.reporting.persistence import (
@@ -120,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_document_text(args)
     if args.command == "inspect-mail-snapshot":
         return _handle_inspect_mail_snapshot(args)
+    if args.command == "inspect-outlook-folders":
+        return _handle_inspect_outlook_folders(args)
     if args.command == "inspect-erp":
         return _handle_inspect_erp(args)
     if args.command == "inspect-workbook":
@@ -300,6 +306,24 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    inspect_outlook_folders_parser = subparsers.add_parser(
+        "inspect-outlook-folders",
+        help="List Outlook folders with EntryIDs for manual config setup.",
+    )
+    inspect_outlook_folders_parser.add_argument(
+        "--outlook-profile",
+        help="Optional Outlook profile name to log on with.",
+    )
+    inspect_outlook_folders_parser.add_argument(
+        "--contains",
+        help="Optional case-insensitive filter against folder name, path, or EntryID.",
+    )
+    inspect_outlook_folders_parser.add_argument(
+        "--max-depth",
+        type=int,
+        help="Optional maximum folder depth to enumerate, where 0 means only top-level stores.",
     )
 
     inspect_erp_parser = subparsers.add_parser(
@@ -2251,6 +2275,30 @@ def _handle_inspect_mail_snapshot(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_inspect_outlook_folders(args: argparse.Namespace) -> int:
+    try:
+        provider = Win32ComOutlookFolderCatalogProvider(
+            outlook_profile=(args.outlook_profile.strip() if args.outlook_profile else None) or None
+        )
+        folders = provider.list_folders(
+            contains=args.contains,
+            max_depth=args.max_depth,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "outlook_profile": (args.outlook_profile.strip() if args.outlook_profile else None) or None,
+        "contains": args.contains,
+        "max_depth": args.max_depth,
+        "folder_count": len(folders),
+        "folders": to_jsonable(folders),
+    }
     print(pretty_json_dumps(payload), end="")
     return 0
 

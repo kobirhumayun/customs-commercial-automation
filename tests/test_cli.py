@@ -230,6 +230,46 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["analysis"]["extracted_pi_number"], "PDL-26-0042")
         self.assertEqual(payload["analysis"]["extracted_amendment_number"], "5")
 
+    def test_inspect_outlook_folders_command_prints_folder_catalog(self) -> None:
+        class FakeProvider:
+            def list_folders(self, *, contains=None, max_depth=None):
+                self.contains = contains
+                self.max_depth = max_depth
+                return [
+                    {
+                        "entry_id": "working-1",
+                        "display_name": "Working",
+                        "folder_path": "Mailbox - Operations / Inbox / Export / Working",
+                        "depth": 3,
+                        "store_name": "Mailbox - Operations",
+                        "parent_entry_id": "export-1",
+                    }
+                ]
+
+        buffer = io.StringIO()
+        with patch("project.cli.Win32ComOutlookFolderCatalogProvider", return_value=FakeProvider()) as provider_mock:
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "inspect-outlook-folders",
+                        "--outlook-profile",
+                        "Operations",
+                        "--contains",
+                        "working",
+                        "--max-depth",
+                        "4",
+                    ]
+                )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["outlook_profile"], "Operations")
+        self.assertEqual(payload["contains"], "working")
+        self.assertEqual(payload["max_depth"], 4)
+        self.assertEqual(payload["folder_count"], 1)
+        self.assertEqual(payload["folders"][0]["entry_id"], "working-1")
+        provider_mock.assert_called_once_with(outlook_profile="Operations")
+
     def test_inspect_mail_snapshot_command_prints_ordered_snapshot_from_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

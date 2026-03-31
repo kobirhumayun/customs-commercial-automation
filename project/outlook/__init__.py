@@ -1,8 +1,11 @@
 from project.outlook.folders import (
     ConfiguredFolderGateway,
     FolderResolutionResult,
+    OutlookFolderCatalogProvider,
     OutlookFolderGateway,
+    OutlookFolderRecord,
     ResolvedFolder,
+    Win32ComOutlookFolderCatalogProvider,
 )
 from project.outlook.moves import (
     MailMoveAdapterUnavailableError,
@@ -17,6 +20,8 @@ from project.outlook.moves import (
 __all__ = [
     "ConfiguredFolderGateway",
     "FolderResolutionResult",
+    "OutlookFolderCatalogProvider",
+    "OutlookFolderRecord",
     "MailMoveAdapterUnavailableError",
     "MailMoveDestinationVerificationError",
     "MailMoveProvider",
@@ -25,5 +30,6 @@ __all__ = [
     "OutlookFolderGateway",
     "ResolvedFolder",
     "SimulatedMailMoveProvider",
+    "Win32ComOutlookFolderCatalogProvider",
     "Win32ComMailMoveProvider",
 ]
