@@ -89,6 +89,57 @@ class CLITests(unittest.TestCase):
         self.assertEqual(provider_mock.call_args.kwargs["browser_channel"], "msedge")
         self.assertEqual(provider_mock.call_args.kwargs["storage_state_path"], storage_state_path)
 
+    def test_load_erp_provider_defaults_to_download_flow_when_config_selectors_are_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = datetime.datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = load_workflow_config(WORKFLOW_REGISTRY["export_lc_sc"], config_path)
+
+            with patch("project.cli.PlaywrightERPRowProvider") as provider_mock:
+                _load_erp_provider(
+                    erp_json=None,
+                    erp_export=None,
+                    live_erp=True,
+                    config=config,
+                )
+
+        self.assertEqual(provider_mock.call_args.kwargs["submit_selector"], 'button:has-text("Submit")')
+        self.assertEqual(provider_mock.call_args.kwargs["post_submit_wait_selector"], ".dx-menu-item-popout")
+        self.assertEqual(provider_mock.call_args.kwargs["download_menu_selector"], ".dx-menu-item-popout")
+        self.assertEqual(provider_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(
+            provider_mock.call_args.kwargs["field_values"][0][0],
+            ":nth-match(.dx-texteditor-input, 3)",
+        )
+        self.assertEqual(
+            provider_mock.call_args.kwargs["field_values"][1][0],
+            ":nth-match(.dx-texteditor-input, 4)",
+        )
+
     def test_inspect_document_text_command_writes_json_audit_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

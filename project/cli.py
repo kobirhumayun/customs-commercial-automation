@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from project.config import load_workflow_config
@@ -3401,6 +3401,19 @@ def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[
     return _resolve_configured_erp_fill_values(config)
 
 
+def _format_erp_report_date(value) -> str:
+    return value.strftime("%d-%b-%Y")
+
+
+def _default_live_erp_fill_values(config) -> list[tuple[str, str]]:
+    today = datetime.now(tz=validate_timezone(config.state_timezone)).date()
+    start_date = today - timedelta(days=365)
+    return [
+        (":nth-match(.dx-texteditor-input, 3)", _format_erp_report_date(start_date)),
+        (":nth-match(.dx-texteditor-input, 4)", _format_erp_report_date(today)),
+    ]
+
+
 def _load_snapshot_if_supplied(
     *,
     snapshot_json: Path | None,
@@ -3437,6 +3450,7 @@ def _load_erp_provider(
         return DelimitedERPExportRowProvider(erp_export)
     if live_erp:
         storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+        configured_fill_values = _resolve_configured_erp_fill_values(config)
         return PlaywrightERPRowProvider(
             base_url=str(config.values.get("erp_base_url", "")).strip(),
             report_relative_url=str(
@@ -3448,16 +3462,21 @@ def _load_erp_provider(
             or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
-            field_values=tuple(_resolve_configured_erp_fill_values(config)),
-            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip() or None,
+            field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
+            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip()
+            or 'button:has-text("Submit")',
             post_submit_wait_selector=str(
-                config.values.get("erp_report_post_submit_wait_selector", "")
+                config.values.get("erp_report_post_submit_wait_selector", ".dx-menu-item-popout")
             ).strip()
-            or None,
-            download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip()
-            or None,
-            download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip()
-            or None,
+            or ".dx-menu-item-popout",
+            download_menu_selector=str(
+                config.values.get("erp_report_download_menu_selector", ".dx-menu-item-popout")
+            ).strip()
+            or ".dx-menu-item-popout",
+            download_format_selector=str(
+                config.values.get("erp_report_download_format_selector", "text=CSV")
+            ).strip()
+            or "text=CSV",
             table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
             headless=bool(config.values.get("playwright_headless", True)),
