@@ -12,7 +12,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from project.cli import main
+from project.cli import _load_erp_provider, main
+from project.config import load_workflow_config
 from project.models import (
     EmailAttachment,
     EmailMessage,
@@ -29,10 +30,65 @@ from project.models import (
 )
 from project.storage import create_run_artifact_layout
 from project.workflows.document_verification import DocumentManualVerificationResult
+from project.workflows.registry import WORKFLOW_REGISTRY
 from project.workbook import WorkbookHeader
 
 
 class CLITests(unittest.TestCase):
+    def test_load_erp_provider_uses_configured_download_flow_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = datetime.datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            storage_state_path = root / "storage-state.json"
+            storage_state_path.write_text("{}", encoding="utf-8")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'playwright_storage_state_path = "{storage_state_path.as_posix()}"',
+                        'erp_report_fill_values = ["#fromDate=01-Apr-2025", "#toDate=31-Mar-2026"]',
+                        'erp_report_submit_selector = "#show"',
+                        'erp_report_post_submit_wait_selector = "#downloadDropdown"',
+                        'erp_report_download_menu_selector = "#downloadDropdown"',
+                        'erp_report_download_format_selector = "text=CSV"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = load_workflow_config(WORKFLOW_REGISTRY["export_lc_sc"], config_path)
+
+            with patch("project.cli.PlaywrightERPRowProvider") as provider_mock:
+                _load_erp_provider(
+                    erp_json=None,
+                    erp_export=None,
+                    live_erp=True,
+                    config=config,
+                )
+
+        self.assertEqual(provider_mock.call_args.kwargs["field_values"], (("#fromDate", "01-Apr-2025"), ("#toDate", "31-Mar-2026")))
+        self.assertEqual(provider_mock.call_args.kwargs["submit_selector"], "#show")
+        self.assertEqual(provider_mock.call_args.kwargs["post_submit_wait_selector"], "#downloadDropdown")
+        self.assertEqual(provider_mock.call_args.kwargs["download_menu_selector"], "#downloadDropdown")
+        self.assertEqual(provider_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(provider_mock.call_args.kwargs["browser_channel"], "msedge")
+        self.assertEqual(provider_mock.call_args.kwargs["storage_state_path"], storage_state_path)
+
     def test_inspect_document_text_command_writes_json_audit_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

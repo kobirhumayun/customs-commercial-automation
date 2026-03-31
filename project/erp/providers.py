@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import hashlib
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -68,11 +69,32 @@ class PlaywrightERPRowProvider:
     report_relative_url: str = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
     browser_channel: str | None = None
     storage_state_path: Path | None = None
+    field_values: tuple[tuple[str, str], ...] = ()
+    submit_selector: str | None = None
+    post_submit_wait_selector: str | None = None
+    download_menu_selector: str | None = None
+    download_format_selector: str | None = None
     table_selector: str = "table"
     timeout_ms: int = 120_000
     headless: bool = True
 
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
+        if self._uses_download_flow:
+            rows = _load_rows_from_playwright_download(
+                base_url=self.base_url,
+                report_relative_url=self.report_relative_url,
+                browser_channel=self.browser_channel,
+                storage_state_path=self.storage_state_path,
+                timeout_ms=self.timeout_ms,
+                headless=self.headless,
+                field_values=list(self.field_values),
+                submit_selector=self.submit_selector,
+                post_submit_wait_selector=self.post_submit_wait_selector,
+                download_menu_selector=self.download_menu_selector,
+                download_format_selector=self.download_format_selector,
+            )
+            return _index_rows(file_numbers=file_numbers, rows=rows)
+
         tables = _fetch_playwright_report_tables(
             base_url=self.base_url,
             report_relative_url=self.report_relative_url,
@@ -96,6 +118,16 @@ class PlaywrightERPRowProvider:
         if last_error is not None:
             raise ValueError(f"Live ERP report did not expose a parseable register table: {last_error}") from last_error
         raise ValueError("Live ERP report did not expose any table content")
+
+    @property
+    def _uses_download_flow(self) -> bool:
+        return bool(
+            self.field_values
+            or self.submit_selector
+            or self.post_submit_wait_selector
+            or self.download_menu_selector
+            or self.download_format_selector
+        )
 
 
 def inspect_playwright_report_download(
@@ -241,6 +273,79 @@ def _index_rows(*, file_numbers: list[str], rows: list[ERPRegisterRow]) -> dict[
     for file_number, matched_rows in indexed.items():
         matched_rows.sort(key=lambda row: row.source_row_index)
     return indexed
+
+
+def _load_rows_from_playwright_download(
+    *,
+    base_url: str,
+    report_relative_url: str,
+    browser_channel: str | None,
+    storage_state_path: Path | None,
+    timeout_ms: int,
+    headless: bool,
+    field_values: list[tuple[str, str]],
+    submit_selector: str | None,
+    post_submit_wait_selector: str | None,
+    download_menu_selector: str | None,
+    download_format_selector: str | None,
+) -> list[ERPRegisterRow]:
+    if not download_format_selector:
+        raise ValueError("Live ERP download flow requires a configured download format selector.")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        payload = inspect_playwright_report_download(
+            base_url=base_url,
+            report_relative_url=report_relative_url,
+            browser_channel=browser_channel,
+            storage_state_path=storage_state_path,
+            timeout_ms=timeout_ms,
+            headless=headless,
+            output_dir=Path(temp_dir),
+            field_values=field_values,
+            submit_selector=submit_selector,
+            post_submit_wait_selector=post_submit_wait_selector,
+            download_menu_selector=download_menu_selector,
+            download_format_selector=download_format_selector,
+        )
+
+        if payload.get("status") != "ready":
+            raise ValueError(f"Live ERP download flow failed: {payload.get('error') or 'unknown error'}")
+
+        readbacks = payload.get("field_readbacks")
+        if isinstance(readbacks, list):
+            mismatched_selectors = [
+                str(item.get("selector"))
+                for item in readbacks
+                if isinstance(item, dict) and item.get("matched") is False
+            ]
+            if mismatched_selectors:
+                raise ValueError(
+                    "Live ERP form did not retain one or more filled values: "
+                    + ", ".join(mismatched_selectors)
+                )
+
+        downloaded_file_path = str(payload.get("downloaded_file_path") or "").strip()
+        if not downloaded_file_path:
+            raise ValueError("Live ERP download flow completed without a downloaded file.")
+
+        receipt = payload.get("download_receipt")
+        if isinstance(receipt, dict):
+            if receipt.get("exists") is False:
+                raise ValueError("Live ERP downloaded file was not saved successfully.")
+            if receipt.get("is_empty") is True:
+                raise ValueError("Live ERP downloaded file is empty.")
+            if receipt.get("looks_like_html") is True:
+                raise ValueError("Live ERP downloaded file appears to be HTML instead of a delimited export.")
+            if receipt.get("has_required_erp_headers") is False:
+                missing = receipt.get("erp_header_missing")
+                if isinstance(missing, list) and missing:
+                    raise ValueError(
+                        "Live ERP downloaded file is missing required ERP headers: "
+                        + ", ".join(str(item) for item in missing)
+                    )
+                raise ValueError("Live ERP downloaded file did not expose required ERP headers.")
+
+        return _load_delimited_export_rows(Path(downloaded_file_path), delimiter=None)
 
 
 def _load_manifest_rows(path: Path) -> list[ERPRegisterRow]:

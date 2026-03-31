@@ -174,6 +174,57 @@ class ERPProviderTests(unittest.TestCase):
             "/RptCommercialExport/DateWiseLCRegisterForDocuments",
         )
 
+    def test_playwright_provider_can_download_and_parse_export_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "report.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "rptDateWiseLCRegister",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value",
+                        "P/26/42,LC-0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,12345.00",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.providers.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(export_path),
+                    "field_readbacks": [
+                        {"selector": "#fromDate", "matched": True},
+                        {"selector": "#toDate", "matched": True},
+                    ],
+                    "download_receipt": {
+                        "exists": True,
+                        "is_empty": False,
+                        "looks_like_html": False,
+                        "has_required_erp_headers": True,
+                    },
+                },
+            ) as inspect_mock:
+                provider = PlaywrightERPRowProvider(
+                    base_url="https://erp.local",
+                    field_values=(("#fromDate", "01-Apr-2025"), ("#toDate", "31-Mar-2026")),
+                    submit_selector="#show",
+                    post_submit_wait_selector="#downloadDropdown",
+                    download_menu_selector="#downloadDropdown",
+                    download_format_selector="text=CSV",
+                    browser_channel="msedge",
+                )
+                rows = provider.lookup_rows(file_numbers=["P/26/0042"])
+
+        self.assertEqual(len(rows["P/26/0042"]), 1)
+        self.assertEqual(rows["P/26/0042"][0].lc_sc_number, "LC-0038")
+        self.assertEqual(rows["P/26/0042"][0].current_lc_value, "12345.00")
+        self.assertEqual(
+            inspect_mock.call_args.kwargs["field_values"],
+            [("#fromDate", "01-Apr-2025"), ("#toDate", "31-Mar-2026")],
+        )
+        self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+
     def test_json_manifest_provider_normalizes_and_sorts_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "erp.json"

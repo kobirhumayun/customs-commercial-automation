@@ -3381,10 +3381,7 @@ def _parse_selector_value_pairs(items: list[str], *, option_name: str) -> list[t
     return pairs
 
 
-def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[str, str]]:
-    if args.fills:
-        return _parse_selector_value_pairs(args.fills, option_name="--fill")
-
+def _resolve_configured_erp_fill_values(config) -> list[tuple[str, str]]:
     configured_items = config.values.get("erp_report_fill_values")
     if configured_items is None:
         return []
@@ -3396,6 +3393,12 @@ def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[
             raise ValueError("Configuration key 'erp_report_fill_values' must contain only strings")
         normalized_items.append(item)
     return _parse_selector_value_pairs(normalized_items, option_name="erp_report_fill_values")
+
+
+def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[str, str]]:
+    if args.fills:
+        return _parse_selector_value_pairs(args.fills, option_name="--fill")
+    return _resolve_configured_erp_fill_values(config)
 
 
 def _load_snapshot_if_supplied(
@@ -3445,6 +3448,16 @@ def _load_erp_provider(
             or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
+            field_values=tuple(_resolve_configured_erp_fill_values(config)),
+            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip() or None,
+            post_submit_wait_selector=str(
+                config.values.get("erp_report_post_submit_wait_selector", "")
+            ).strip()
+            or None,
+            download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip()
+            or None,
+            download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip()
+            or None,
             table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
             headless=bool(config.values.get("playwright_headless", True)),
