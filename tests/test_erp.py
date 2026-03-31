@@ -40,9 +40,18 @@ class ERPProviderTests(unittest.TestCase):
                 def __init__(self, page, selector: str) -> None:
                     self.page = page
                     self.selector = selector
+                    self.value = None
+
+                @property
+                def first(self):
+                    return self
+
+                def count(self) -> int:
+                    return 1
 
                 def fill(self, value: str) -> None:
                     self.page.fills.append((self.selector, value))
+                    self.value = value
 
                 def click(self) -> None:
                     self.page.clicks.append(self.selector)
@@ -50,12 +59,16 @@ class ERPProviderTests(unittest.TestCase):
                 def wait_for(self, state: str, timeout: int) -> None:
                     self.page.waits.append((self.selector, state, timeout))
 
+                def input_value(self) -> str:
+                    return self.value or ""
+
             class FakePage:
                 def __init__(self) -> None:
                     self.url = "https://erp.local/final"
                     self.fills: list[tuple[str, str]] = []
                     self.clicks: list[str] = []
                     self.waits: list[tuple[str, str, int]] = []
+                    self.locators: dict[str, FakeLocator] = {}
 
                 def goto(self, url: str, wait_until: str, timeout: int) -> None:
                     self.goto_call = (url, wait_until, timeout)
@@ -64,7 +77,9 @@ class ERPProviderTests(unittest.TestCase):
                     self.load_state_call = (state, timeout)
 
                 def locator(self, selector: str):
-                    return FakeLocator(self, selector)
+                    if selector not in self.locators:
+                        self.locators[selector] = FakeLocator(self, selector)
+                    return self.locators[selector]
 
                 def expect_download(self, timeout: int):
                     self.download_timeout = timeout
@@ -134,6 +149,12 @@ class ERPProviderTests(unittest.TestCase):
             self.assertTrue(Path(str(payload["html_path"])).exists())
             self.assertTrue(Path(str(payload["screenshot_path"])).exists())
             self.assertTrue(Path(str(payload["downloaded_file_path"])).exists())
+            self.assertEqual(len(payload["field_readbacks"]), 2)
+            self.assertTrue(payload["field_readbacks"][0]["matched"])
+            self.assertIsNotNone(payload["download_receipt"])
+            self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
+            self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
+            self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
 
     def test_playwright_provider_defaults_to_live_documents_report_path(self) -> None:
         tables = [

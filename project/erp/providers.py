@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -130,6 +131,8 @@ def inspect_playwright_report_download(
         "html_path": None,
         "screenshot_path": None,
         "downloaded_file_path": None,
+        "field_readbacks": [],
+        "download_receipt": None,
         "error": None,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +171,7 @@ def inspect_playwright_report_download(
 
             for selector, value in field_values:
                 page.locator(selector).fill(value)
+            payload["field_readbacks"] = _collect_field_readbacks(page, field_values)
 
             if submit_selector:
                 page.locator(submit_selector).click()
@@ -190,6 +194,10 @@ def inspect_playwright_report_download(
                 downloaded_path = output_dir / suggested_filename
                 download.save_as(str(downloaded_path))
                 payload["downloaded_file_path"] = str(downloaded_path)
+                payload["download_receipt"] = _build_download_receipt(
+                    downloaded_path=downloaded_path,
+                    suggested_filename=download.suggested_filename,
+                )
 
             payload["final_url"] = page.url
             payload["page_title"] = page.title()
@@ -460,3 +468,119 @@ def _write_debug_page_artifacts(page, *, html_path: Path, screenshot_path: Path)
 def _sanitize_download_filename(filename: str) -> str:
     normalized = filename.strip() or "erp-download.bin"
     return Path(normalized).name or "erp-download.bin"
+
+
+def _collect_field_readbacks(page, field_values: list[tuple[str, str]]) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for selector, expected_value in field_values:
+        locator = page.locator(selector)
+        try:
+            matched_count = locator.count()
+        except Exception as exc:
+            records.append(
+                {
+                    "selector": selector,
+                    "expected_value": expected_value,
+                    "observed_value": None,
+                    "matched": False,
+                    "matched_count": None,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        observed_value: str | None = None
+        error: str | None = None
+        if matched_count > 0:
+            try:
+                observed_value = locator.first.input_value()
+            except Exception as exc:
+                error = str(exc)
+        records.append(
+            {
+                "selector": selector,
+                "expected_value": expected_value,
+                "observed_value": observed_value,
+                "matched": observed_value == expected_value,
+                "matched_count": matched_count,
+                "error": error,
+            }
+        )
+    return records
+
+
+def _build_download_receipt(*, downloaded_path: Path, suggested_filename: str | None) -> dict[str, object]:
+    exists = downloaded_path.exists()
+    size_bytes = downloaded_path.stat().st_size if exists else None
+    sha256 = _sha256_file(downloaded_path) if exists else None
+    file_probe = _probe_downloaded_file(downloaded_path) if exists else {
+        "content_kind": "missing",
+        "looks_like_html": False,
+        "is_empty": True,
+        "line_count": 0,
+        "header_preview": None,
+        "has_required_erp_headers": False,
+        "erp_header_missing": list(REQUIRED_ERP_EXPORT_HEADERS),
+    }
+    return {
+        "path": str(downloaded_path),
+        "exists": exists,
+        "size_bytes": size_bytes,
+        "sha256": sha256,
+        "suggested_filename": suggested_filename,
+        "saved_filename": downloaded_path.name,
+        **file_probe,
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _probe_downloaded_file(path: Path) -> dict[str, object]:
+    raw_bytes = path.read_bytes()
+    if not raw_bytes:
+        return {
+            "content_kind": "empty",
+            "looks_like_html": False,
+            "is_empty": True,
+            "line_count": 0,
+            "header_preview": None,
+            "has_required_erp_headers": False,
+            "erp_header_missing": list(REQUIRED_ERP_EXPORT_HEADERS),
+        }
+
+    header_sample = raw_bytes[:512].decode("utf-8", errors="ignore").lstrip()
+    looks_like_html = header_sample.lower().startswith("<!doctype html") or header_sample.lower().startswith("<html")
+
+    text = raw_bytes.decode("utf-8-sig", errors="ignore")
+    lines = [line.strip() for line in text.splitlines()]
+    non_empty_lines = [line for line in lines if line]
+    header_preview = non_empty_lines[1] if len(non_empty_lines) >= 2 else (non_empty_lines[0] if non_empty_lines else None)
+    header_cells = [cell.strip() for cell in header_preview.split(",")] if header_preview else []
+    has_required_headers = False
+    missing_headers = list(REQUIRED_ERP_EXPORT_HEADERS)
+    if header_cells:
+        try:
+            mapping = _resolve_header_mapping(header_cells, source_name=str(path))
+            has_required_headers = all(key in mapping for key in REQUIRED_ERP_EXPORT_HEADERS)
+            missing_headers = []
+        except ValueError:
+            has_required_headers = False
+
+    return {
+        "content_kind": "html" if looks_like_html else "delimited_text",
+        "looks_like_html": looks_like_html,
+        "is_empty": False,
+        "line_count": len(non_empty_lines),
+        "header_preview": header_preview,
+        "has_required_erp_headers": has_required_headers,
+        "erp_header_missing": missing_headers,
+    }
