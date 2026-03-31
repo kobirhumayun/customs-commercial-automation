@@ -53,13 +53,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--from-input-selector",
-        default='input[placeholder="From Date"]',
-        help="Selector for the start-date text input.",
+        default=".dx-texteditor-input",
+        help="Selector for the start-date text input collection. Defaults to a DevExpress text input selector.",
     )
     parser.add_argument(
         "--to-input-selector",
-        default='input[placeholder="To Date"]',
-        help="Selector for the end-date text input.",
+        default=".dx-texteditor-input",
+        help="Selector for the end-date text input collection. Defaults to a DevExpress text input selector.",
+    )
+    parser.add_argument(
+        "--from-input-index",
+        type=int,
+        default=2,
+        help="Zero-based index to use when the start-date selector matches multiple inputs.",
+    )
+    parser.add_argument(
+        "--to-input-index",
+        type=int,
+        default=3,
+        help="Zero-based index to use when the end-date selector matches multiple inputs.",
     )
     parser.add_argument(
         "--download-path",
@@ -84,15 +96,16 @@ def pick_date(page, select_button_index: int, target: date) -> None:
     page.get_by_text(day_text, exact=True).last.click()
 
 
-def fill_date_input(page, *, selector: str, target: date) -> bool:
+def fill_date_input(page, *, selector: str, index: int, target: date) -> bool:
     formatted = format_erp_date(target)
     locator = page.locator(selector)
-    if locator.count() < 1:
+    if locator.count() <= index:
         return False
-    locator.first.wait_for(state="visible", timeout=10_000)
-    locator.first.click()
-    locator.first.fill(formatted)
-    locator.first.press("Tab")
+    target_locator = locator.nth(index)
+    target_locator.wait_for(state="visible", timeout=10_000)
+    target_locator.click()
+    target_locator.fill(formatted)
+    target_locator.press("Tab")
     return True
 
 
@@ -106,6 +119,8 @@ def run(
     end_date: date,
     from_input_selector: str,
     to_input_selector: str,
+    from_input_index: int,
+    to_input_index: int,
     download_path: Path,
 ) -> None:
     browser = playwright.chromium.launch(channel=channel, headless=headless)
@@ -118,8 +133,18 @@ def run(
 
         # Prefer direct date-field input using the confirmed ERP format dd-MMM-yyyy.
         # Fall back to the date-picker flow if those inputs are not available.
-        from_filled = fill_date_input(page, selector=from_input_selector, target=start_date)
-        to_filled = fill_date_input(page, selector=to_input_selector, target=end_date)
+        from_filled = fill_date_input(
+            page,
+            selector=from_input_selector,
+            index=from_input_index,
+            target=start_date,
+        )
+        to_filled = fill_date_input(
+            page,
+            selector=to_input_selector,
+            index=to_input_index,
+            target=end_date,
+        )
         if not (from_filled and to_filled):
             pick_date(page, select_button_index=2, target=start_date)
             pick_date(page, select_button_index=3, target=end_date)
@@ -136,7 +161,11 @@ def run(
         download.save_as(str(download_path))
         print(f"Downloaded ERP report to: {download_path}")
     except TimeoutError as exc:
+        _write_debug_failure_artifacts(page)
         raise SystemExit(f"Timed out while waiting for the ERP page flow: {exc}") from exc
+    except Exception:
+        _write_debug_failure_artifacts(page)
+        raise
     finally:
         context.close()
         browser.close()
@@ -158,9 +187,22 @@ def main() -> int:
             end_date=end_date,
             from_input_selector=args.from_input_selector,
             to_input_selector=args.to_input_selector,
+            from_input_index=args.from_input_index,
+            to_input_index=args.to_input_index,
             download_path=download_path,
         )
     return 0
+
+
+def _write_debug_failure_artifacts(page) -> None:
+    try:
+        Path("erp-debug-failure.html").write_text(page.content(), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        page.screenshot(path="erp-debug-failure.png", full_page=True)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
