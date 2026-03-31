@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from playwright.sync_api import Playwright, TimeoutError, expect, sync_playwright
@@ -10,10 +10,9 @@ from playwright.sync_api import Playwright, TimeoutError, expect, sync_playwrigh
 DEFAULT_REPORT_URL = "https://pdlerp.pioneerdenim.com/RptCommercialExport/DateWiseLCRegisterForDocuments"
 
 
-def previous_calendar_year_range(today: date | None = None) -> tuple[date, date]:
+def rolling_365_day_range(today: date | None = None) -> tuple[date, date]:
     today = today or date.today()
-    year = today.year - 1
-    return date(year, 1, 1), date(year, 12, 31)
+    return today - timedelta(days=365), today
 
 
 def format_erp_date(value: date) -> str:
@@ -21,7 +20,7 @@ def format_erp_date(value: date) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    default_start, default_end = previous_calendar_year_range()
+    default_start, default_end = rolling_365_day_range()
 
     parser = argparse.ArgumentParser(
         description="Debug helper for the ERP export report download flow.",
@@ -44,12 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--from-date",
         default=default_start.isoformat(),
-        help="Report start date in YYYY-MM-DD format. Defaults to January 1 of the previous calendar year.",
+        help="Report start date in YYYY-MM-DD format. Defaults to today minus 365 days.",
     )
     parser.add_argument(
         "--to-date",
         default=default_end.isoformat(),
-        help="Report end date in YYYY-MM-DD format. Defaults to December 31 of the previous calendar year.",
+        help="Report end date in YYYY-MM-DD format. Defaults to today.",
     )
     parser.add_argument(
         "--from-input-selector",
