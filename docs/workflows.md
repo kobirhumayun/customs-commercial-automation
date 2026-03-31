@@ -18,6 +18,23 @@ Every CLI workflow should follow the same control shape:
 
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
 
+### Operator setup helper: Outlook folder EntryIDs
+Live Outlook workflows require real folder `EntryID` values in local config for keys such as:
+- `source_working_folder_entry_id`
+- `destination_success_entry_id`
+
+Operators may discover these values with the read-only inspection command:
+
+```powershell
+uv run python -m project inspect-outlook-folders --outlook-profile "outlook"
+```
+
+Optional narrowing flags:
+- `--contains <text>` filters by folder name, full folder path, or EntryID
+- `--max-depth <n>` limits recursion depth for large mailboxes
+
+The command returns JSON records containing `display_name`, `folder_path`, `entry_id`, `depth`, `store_name`, and `parent_entry_id`. These records are intended for manual config setup only; the command does not create run artifacts or mutate Outlook state.
+
 ### Shared decision and phase-state enums (normative)
 
 #### Decision enum
