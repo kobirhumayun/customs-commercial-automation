@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import tempfile
@@ -168,7 +168,7 @@ class SnapshotTests(unittest.TestCase):
         with patch("project.intake.providers.create_outlook_namespace", return_value=namespace):
             snapshot = Win32ComMailSnapshotProvider(
                 source_folder_entry_id="src-folder",
-                outlook_profile="Operations",
+                outlook_profile="outlook",
             ).load_snapshot(state_timezone="Asia/Dhaka")
 
         self.assertEqual(namespace.requested_folder_id, "src-folder")
@@ -218,3 +218,4 @@ class SnapshotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

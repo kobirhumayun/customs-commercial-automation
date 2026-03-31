@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import tempfile
@@ -110,7 +110,7 @@ class WritePreparationTests(unittest.TestCase):
                     f'report_root = "{report_root.as_posix()}"',
                     f'run_artifact_root = "{run_root.as_posix()}"',
                     f'backup_root = "{backup_root.as_posix()}"',
-                    'outlook_profile = "Operations"',
+                    'outlook_profile = "outlook"',
                     f'master_workbook_root = "{workbook_root.as_posix()}"',
                     'erp_base_url = "https://erp.local"',
                     'playwright_browser_channel = "msedge"',
@@ -218,3 +218,4 @@ class WritePreparationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
@@ -30,7 +30,7 @@ class OutlookMoveProviderTests(unittest.TestCase):
 
         namespace = FakeNamespace()
         with patch("project.outlook.moves.create_outlook_namespace", return_value=namespace):
-            provider = Win32ComMailMoveProvider(outlook_profile="Operations")
+            provider = Win32ComMailMoveProvider(outlook_profile="outlook")
             provider.move_mail(_build_operation())
 
         self.assertEqual(namespace.requested_entry_id, "entry-1")
@@ -47,7 +47,7 @@ class OutlookMoveProviderTests(unittest.TestCase):
                 raise AssertionError("Destination folder lookup should not run on source mismatch")
 
         with patch("project.outlook.moves.create_outlook_namespace", return_value=FakeNamespace()):
-            provider = Win32ComMailMoveProvider(outlook_profile="Operations")
+            provider = Win32ComMailMoveProvider(outlook_profile="outlook")
             with self.assertRaises(MailMoveSourceLocationError):
                 provider.move_mail(_build_operation())
 
@@ -63,7 +63,7 @@ class OutlookMoveProviderTests(unittest.TestCase):
                 return self.destination
 
         with patch("project.outlook.moves.create_outlook_namespace", return_value=FakeNamespace()):
-            provider = Win32ComMailMoveProvider(outlook_profile="Operations")
+            provider = Win32ComMailMoveProvider(outlook_profile="outlook")
             with self.assertRaises(MailMoveDestinationVerificationError):
                 provider.move_mail(_build_operation())
 
@@ -112,3 +112,4 @@ def _build_operation() -> MailMoveOperation:
 
 if __name__ == "__main__":
     unittest.main()
+

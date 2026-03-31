@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
@@ -19,7 +19,7 @@ class OutlookFolderCatalogTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.Folders = [
                     FakeFolder(
-                        "Mailbox - Operations",
+                        "Mailbox - outlook",
                         "store-1",
                         [
                             FakeFolder(
@@ -35,11 +35,11 @@ class OutlookFolderCatalogTests(unittest.TestCase):
 
         namespace = FakeNamespace()
         with patch("project.outlook.folders.create_outlook_namespace", return_value=namespace):
-            records = Win32ComOutlookFolderCatalogProvider(outlook_profile="Operations").list_folders()
+            records = Win32ComOutlookFolderCatalogProvider(outlook_profile="outlook").list_folders()
 
         self.assertEqual(len(records), 4)
-        self.assertEqual(records[0].folder_path, "Mailbox - Operations")
-        self.assertEqual(records[-1].folder_path, "Mailbox - Operations / Inbox / Export / Working")
+        self.assertEqual(records[0].folder_path, "Mailbox - outlook")
+        self.assertEqual(records[-1].folder_path, "Mailbox - outlook / Inbox / Export / Working")
         self.assertEqual(records[-1].entry_id, "working-1")
         self.assertEqual(records[-1].parent_entry_id, "export-1")
 
@@ -54,7 +54,7 @@ class OutlookFolderCatalogTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.Folders = [
                     FakeFolder(
-                        "Mailbox - Operations",
+                        "Mailbox - outlook",
                         "store-1",
                         [
                             FakeFolder("Inbox", "inbox-1", [FakeFolder("Export", "export-1")]),
@@ -89,10 +89,11 @@ class OutlookFolderCatalogTests(unittest.TestCase):
                 )()
 
         with patch("project.outlook.session._load_win32com_client_module", return_value=FakeClient()):
-            namespace = create_outlook_namespace(outlook_profile="Operations")
+            namespace = create_outlook_namespace(outlook_profile="outlook")
 
         self.assertEqual(len(list(namespace.Folders)), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+

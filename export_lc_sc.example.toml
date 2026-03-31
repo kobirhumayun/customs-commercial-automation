@@ -1,4 +1,4 @@
-# Ready-to-fill local config template for the export LC/SC workflow.
+﻿# Ready-to-fill local config template for the export LC/SC workflow.
 # Copy this file outside git-tracked paths or rename it locally before use.
 # Do not commit real credentials, real profile secrets, or protected EntryIDs.
 
@@ -11,7 +11,7 @@ backup_root = "C:/customs-automation/state/backups"
 master_workbook_root = "C:/customs-automation/workbooks"
 
 # Outlook / ERP / browser settings.
-outlook_profile = "Operations"
+outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
 playwright_browser_channel = "msedge"
 
@@ -33,3 +33,4 @@ destination_success_entry_id = "REPLACE_WITH_EXPORT_SUCCESS_FOLDER_ENTRY_ID"
 # print_printer_driver = "Microsoft Print To PDF"
 # print_printer_port = "PORTPROMPT:"
 # print_command_timeout_seconds = 60
+
