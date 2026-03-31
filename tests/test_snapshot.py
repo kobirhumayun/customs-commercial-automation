@@ -164,21 +164,8 @@ class SnapshotTests(unittest.TestCase):
                 self.requested_folder_id = entry_id
                 return self.folder
 
-        class FakeClient:
-            def __init__(self, namespace) -> None:
-                self.namespace = namespace
-
-            def Dispatch(self, app_name: str):
-                self.app_name = app_name
-                return type(
-                    "FakeApplication",
-                    (),
-                    {"GetNamespace": lambda _self, namespace_name: self.namespace},
-                )()
-
         namespace = FakeNamespace()
-
-        with patch("project.intake.providers._load_win32com_client_module", return_value=FakeClient(namespace)):
+        with patch("project.intake.providers.create_outlook_namespace", return_value=namespace):
             snapshot = Win32ComMailSnapshotProvider(
                 source_folder_entry_id="src-folder",
                 outlook_profile="Operations",

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from project.outlook import Win32ComOutlookFolderCatalogProvider
+from project.outlook.session import create_outlook_namespace
 
 
 class OutlookFolderCatalogTests(unittest.TestCase):
@@ -32,23 +33,8 @@ class OutlookFolderCatalogTests(unittest.TestCase):
                     )
                 ]
 
-            def Logon(self, **_kwargs) -> None:
-                return None
-
-        class FakeClient:
-            def __init__(self, namespace) -> None:
-                self.namespace = namespace
-
-            def Dispatch(self, app_name: str):
-                self.app_name = app_name
-                return type(
-                    "FakeApplication",
-                    (),
-                    {"GetNamespace": lambda _self, namespace_name: self.namespace},
-                )()
-
         namespace = FakeNamespace()
-        with patch("project.outlook.folders._load_win32com_client_module", return_value=FakeClient(namespace)):
+        with patch("project.outlook.folders.create_outlook_namespace", return_value=namespace):
             records = Win32ComOutlookFolderCatalogProvider(outlook_profile="Operations").list_folders()
 
         self.assertEqual(len(records), 4)
@@ -77,24 +63,35 @@ class OutlookFolderCatalogTests(unittest.TestCase):
                     )
                 ]
 
-        class FakeClient:
-            def __init__(self, namespace) -> None:
-                self.namespace = namespace
-
-            def Dispatch(self, _app_name: str):
-                return type(
-                    "FakeApplication",
-                    (),
-                    {"GetNamespace": lambda _self, _namespace_name: self.namespace},
-                )()
-
         namespace = FakeNamespace()
-        with patch("project.outlook.folders._load_win32com_client_module", return_value=FakeClient(namespace)):
+        with patch("project.outlook.folders.create_outlook_namespace", return_value=namespace):
             filtered = Win32ComOutlookFolderCatalogProvider().list_folders(contains="export", max_depth=2)
 
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].display_name, "Export")
         self.assertEqual(filtered[0].depth, 2)
+
+    def test_create_outlook_namespace_falls_back_to_existing_session_when_profile_logon_fails(self) -> None:
+        class FakeNamespace:
+            def __init__(self) -> None:
+                self.Folders = [object()]
+
+            def Logon(self, **_kwargs) -> None:
+                raise RuntimeError("Cannot complete the operation. You are not connected.")
+
+        class FakeClient:
+            def Dispatch(self, _app_name: str):
+                namespace = FakeNamespace()
+                return type(
+                    "FakeApplication",
+                    (),
+                    {"GetNamespace": lambda _self, _namespace_name: namespace},
+                )()
+
+        with patch("project.outlook.session._load_win32com_client_module", return_value=FakeClient()):
+            namespace = create_outlook_namespace(outlook_profile="Operations")
+
+        self.assertEqual(len(list(namespace.Folders)), 1)
 
 
 if __name__ == "__main__":

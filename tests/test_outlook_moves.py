@@ -20,9 +20,6 @@ class OutlookMoveProviderTests(unittest.TestCase):
                 self.destination = FakeFolder("dst-folder")
                 self.mail = FakeMailItem("entry-1", "src-folder", moved_items)
 
-            def Logon(self, **_kwargs) -> None:
-                return None
-
             def GetItemFromID(self, entry_id: str):
                 self.requested_entry_id = entry_id
                 return self.mail
@@ -32,9 +29,7 @@ class OutlookMoveProviderTests(unittest.TestCase):
                 return self.destination
 
         namespace = FakeNamespace()
-        fake_client = FakeClient(namespace)
-
-        with patch("project.outlook.moves._load_win32com_client_module", return_value=fake_client):
+        with patch("project.outlook.moves.create_outlook_namespace", return_value=namespace):
             provider = Win32ComMailMoveProvider(outlook_profile="Operations")
             provider.move_mail(_build_operation())
 
@@ -45,18 +40,13 @@ class OutlookMoveProviderTests(unittest.TestCase):
 
     def test_win32_provider_hard_fails_when_source_folder_does_not_match(self) -> None:
         class FakeNamespace:
-            def Logon(self, **_kwargs) -> None:
-                return None
-
             def GetItemFromID(self, _entry_id: str):
                 return FakeMailItem("entry-1", "other-folder", [])
 
             def GetFolderFromID(self, _entry_id: str):
                 raise AssertionError("Destination folder lookup should not run on source mismatch")
 
-        fake_client = FakeClient(FakeNamespace())
-
-        with patch("project.outlook.moves._load_win32com_client_module", return_value=fake_client):
+        with patch("project.outlook.moves.create_outlook_namespace", return_value=FakeNamespace()):
             provider = Win32ComMailMoveProvider(outlook_profile="Operations")
             with self.assertRaises(MailMoveSourceLocationError):
                 provider.move_mail(_build_operation())
@@ -66,40 +56,16 @@ class OutlookMoveProviderTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.destination = FakeFolder("dst-folder")
 
-            def Logon(self, **_kwargs) -> None:
-                return None
-
             def GetItemFromID(self, _entry_id: str):
                 return FakeMailItem("entry-1", "src-folder", [], moved_parent_entry_id="wrong-folder")
 
             def GetFolderFromID(self, _entry_id: str):
                 return self.destination
 
-        fake_client = FakeClient(FakeNamespace())
-
-        with patch("project.outlook.moves._load_win32com_client_module", return_value=fake_client):
+        with patch("project.outlook.moves.create_outlook_namespace", return_value=FakeNamespace()):
             provider = Win32ComMailMoveProvider(outlook_profile="Operations")
             with self.assertRaises(MailMoveDestinationVerificationError):
                 provider.move_mail(_build_operation())
-
-
-class FakeClient:
-    def __init__(self, namespace) -> None:
-        self._namespace = namespace
-
-    def Dispatch(self, app_name: str):
-        self.app_name = app_name
-        return FakeApplication(self._namespace)
-
-
-class FakeApplication:
-    def __init__(self, namespace) -> None:
-        self._namespace = namespace
-
-    def GetNamespace(self, namespace_name: str):
-        if namespace_name != "MAPI":
-            raise AssertionError(f"Unexpected namespace requested: {namespace_name}")
-        return self._namespace
 
 
 class FakeFolder:

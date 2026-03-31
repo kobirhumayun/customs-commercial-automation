@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from project.models import EmailMessage
+from project.outlook.session import create_outlook_namespace
 from project.utils.time import validate_timezone
 from project.workflows.snapshot import (
     SourceAttachmentRecord,
@@ -82,13 +83,8 @@ class Win32ComMailSnapshotProvider:
     def _get_namespace(self):
         if self._namespace is not None:
             return self._namespace
-        win32_client = _load_win32com_client_module()
         try:
-            application = win32_client.Dispatch("Outlook.Application")
-            namespace = application.GetNamespace("MAPI")
-            profile_name = (self.outlook_profile or "").strip()
-            if profile_name:
-                namespace.Logon(Profile=profile_name, ShowDialog=False, NewSession=False)
+            namespace = create_outlook_namespace(outlook_profile=self.outlook_profile)
         except Exception as exc:  # pragma: no cover - exercised through unit fakes
             raise ValueError(f"Outlook session initialization failed: {exc}") from exc
         self._namespace = namespace
@@ -134,11 +130,3 @@ def _load_attachment_records(value: object) -> list[SourceAttachmentRecord]:
             )
         )
     return records
-
-
-def _load_win32com_client_module():
-    try:
-        from win32com import client  # type: ignore
-    except ImportError as exc:
-        raise ValueError("pywin32 is required for live Outlook snapshots") from exc
-    return client
