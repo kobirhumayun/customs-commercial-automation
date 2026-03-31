@@ -410,6 +410,82 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["match_count"], 1)
         self.assertEqual(payload["rows_by_file_number"]["P/26/0042"][0]["source_row_index"], 4)
 
+    def test_inspect_erp_download_command_prints_debug_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "output_dir": str(root / "reports" / "erp_debug" / "bundle"),
+                    "downloaded_file_path": str(root / "reports" / "erp_debug" / "bundle" / "report.csv"),
+                    "html_path": str(root / "reports" / "erp_debug" / "bundle" / "erp-page.html"),
+                    "screenshot_path": str(root / "reports" / "erp_debug" / "bundle" / "erp-page.png"),
+                    "error": None,
+                },
+            ) as inspect_mock:
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-erp-download",
+                            "export_lc_sc",
+                            "--config",
+                            str(config_path),
+                            "--fill",
+                            "#fromDate=2026-03-01",
+                            "--fill",
+                            "#toDate=2026-03-31",
+                            "--submit-selector",
+                            "#show",
+                            "--download-format-selector",
+                            "text=CSV",
+                            "--headed",
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(
+            payload["downloaded_file_path"],
+            str(root / "reports" / "erp_debug" / "bundle" / "report.csv"),
+        )
+        self.assertEqual(
+            inspect_mock.call_args.kwargs["field_values"],
+            [("#fromDate", "2026-03-01"), ("#toDate", "2026-03-31")],
+        )
+        self.assertEqual(inspect_mock.call_args.kwargs["submit_selector"], "#show")
+        self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(inspect_mock.call_args.kwargs["headless"], False)
+
     def test_prepare_document_verification_command_prints_bundle_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

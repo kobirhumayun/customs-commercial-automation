@@ -97,6 +97,134 @@ class PlaywrightERPRowProvider:
         raise ValueError("Live ERP report did not expose any table content")
 
 
+def inspect_playwright_report_download(
+    *,
+    base_url: str,
+    report_relative_url: str,
+    browser_channel: str | None,
+    storage_state_path: Path | None,
+    timeout_ms: int,
+    headless: bool,
+    output_dir: Path,
+    field_values: list[tuple[str, str]],
+    submit_selector: str | None = None,
+    post_submit_wait_selector: str | None = None,
+    download_menu_selector: str | None = None,
+    download_format_selector: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": "issue",
+        "target_url": None,
+        "final_url": None,
+        "page_title": None,
+        "headless": headless,
+        "output_dir": str(output_dir),
+        "filled_fields": [
+            {"selector": selector, "value": value}
+            for selector, value in field_values
+        ],
+        "submit_selector": submit_selector,
+        "post_submit_wait_selector": post_submit_wait_selector,
+        "download_menu_selector": download_menu_selector,
+        "download_format_selector": download_format_selector,
+        "html_path": None,
+        "screenshot_path": None,
+        "downloaded_file_path": None,
+        "error": None,
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not base_url.strip():
+        payload["error"] = "Live ERP provider requires a non-empty erp_base_url"
+        return payload
+    if storage_state_path is not None and not storage_state_path.exists():
+        payload["error"] = f"Playwright storage state path does not exist: {storage_state_path}"
+        return payload
+
+    target_url = urljoin(base_url.rstrip("/") + "/", report_relative_url.lstrip("/"))
+    payload["target_url"] = target_url
+    screenshot_path = output_dir / "erp-page.png"
+    html_path = output_dir / "erp-page.html"
+    payload["screenshot_path"] = str(screenshot_path)
+    payload["html_path"] = str(html_path)
+
+    page = None
+    browser = None
+    context = None
+    try:
+        sync_playwright = _load_playwright_sync_api()
+        with sync_playwright() as playwright:
+            browser_launch_kwargs: dict[str, object] = {"headless": headless}
+            if browser_channel:
+                browser_launch_kwargs["channel"] = browser_channel
+            browser = playwright.chromium.launch(**browser_launch_kwargs)
+            context_kwargs: dict[str, object] = {"accept_downloads": True}
+            if storage_state_path is not None:
+                context_kwargs["storage_state"] = str(storage_state_path)
+            context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+
+            for selector, value in field_values:
+                page.locator(selector).fill(value)
+
+            if submit_selector:
+                page.locator(submit_selector).click()
+                if post_submit_wait_selector:
+                    page.locator(post_submit_wait_selector).wait_for(
+                        state="visible",
+                        timeout=timeout_ms,
+                    )
+                else:
+                    _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+
+            if download_menu_selector:
+                page.locator(download_menu_selector).click()
+
+            if download_format_selector:
+                with page.expect_download(timeout=timeout_ms) as download_info:
+                    page.locator(download_format_selector).click()
+                download = download_info.value
+                suggested_filename = _sanitize_download_filename(download.suggested_filename)
+                downloaded_path = output_dir / suggested_filename
+                download.save_as(str(downloaded_path))
+                payload["downloaded_file_path"] = str(downloaded_path)
+
+            payload["final_url"] = page.url
+            payload["page_title"] = page.title()
+            _write_debug_page_artifacts(page, html_path=html_path, screenshot_path=screenshot_path)
+            payload["status"] = "ready"
+            return payload
+    except Exception as exc:
+        payload["error"] = str(exc)
+        if page is not None:
+            try:
+                payload["final_url"] = payload["final_url"] or page.url
+            except Exception:
+                pass
+            try:
+                payload["page_title"] = payload["page_title"] or page.title()
+            except Exception:
+                pass
+            try:
+                _write_debug_page_artifacts(page, html_path=html_path, screenshot_path=screenshot_path)
+            except Exception:
+                pass
+        return payload
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
 def _index_rows(*, file_numbers: list[str], rows: list[ERPRegisterRow]) -> dict[str, list[ERPRegisterRow]]:
     indexed: dict[str, list[ERPRegisterRow]] = {file_number: [] for file_number in file_numbers}
     for row in rows:
@@ -253,12 +381,8 @@ def _fetch_playwright_report_tables(
     if storage_state_path is not None and not storage_state_path.exists():
         raise ValueError(f"Playwright storage state path does not exist: {storage_state_path}")
 
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise ValueError("Playwright is required for live ERP lookup") from exc
-
     target_url = urljoin(base_url.rstrip("/") + "/", report_relative_url.lstrip("/"))
+    sync_playwright = _load_playwright_sync_api()
     with sync_playwright() as playwright:
         browser_launch_kwargs: dict[str, object] = {"headless": headless}
         if browser_channel:
@@ -272,7 +396,7 @@ def _fetch_playwright_report_tables(
             try:
                 page = context.new_page()
                 page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
-                page.wait_for_load_state("networkidle", timeout=timeout_ms)
+                _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
                 return _extract_table_matrices(page, table_selector=table_selector)
             finally:
                 context.close()
@@ -311,3 +435,28 @@ def _require_int(item: dict[str, object], key: str, index: int) -> int:
 
 def _optional_string(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _load_playwright_sync_api():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise ValueError("Playwright is required for live ERP lookup") from exc
+    return sync_playwright
+
+
+def _best_effort_wait_for_network_idle(page, *, timeout_ms: int) -> None:
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        return None
+
+
+def _write_debug_page_artifacts(page, *, html_path: Path, screenshot_path: Path) -> None:
+    html_path.write_text(page.content(), encoding="utf-8")
+    page.screenshot(path=str(screenshot_path), full_page=True)
+
+
+def _sanitize_download_filename(filename: str) -> str:
+    normalized = filename.strip() or "erp-download.bin"
+    return Path(normalized).name or "erp-download.bin"

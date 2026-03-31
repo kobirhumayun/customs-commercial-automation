@@ -3,6 +3,7 @@ from project.erp.providers import (
     DelimitedERPExportRowProvider,
     EmptyERPRowProvider,
     ERPRowProvider,
+    inspect_playwright_report_download,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "DelimitedERPExportRowProvider",
     "EmptyERPRowProvider",
     "ERPRowProvider",
+    "inspect_playwright_report_download",
     "JsonManifestERPRowProvider",
     "PlaywrightERPRowProvider",
 ]

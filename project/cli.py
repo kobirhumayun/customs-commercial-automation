@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from project.config import load_workflow_config
@@ -15,6 +15,7 @@ from project.documents import (
 from project.erp import (
     DelimitedERPExportRowProvider,
     EmptyERPRowProvider,
+    inspect_playwright_report_download,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
@@ -128,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_inspect_outlook_folders(args)
     if args.command == "inspect-erp":
         return _handle_inspect_erp(args)
+    if args.command == "inspect-erp-download":
+        return _handle_inspect_erp_download(args)
     if args.command == "inspect-workbook":
         return _handle_inspect_workbook(args)
     if args.command == "inspect-workbook-readiness":
@@ -363,6 +366,61 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Load ERP register rows from the configured ERP report page via Playwright.",
     )
     inspect_erp_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    inspect_erp_download_parser = subparsers.add_parser(
+        "inspect-erp-download",
+        help="Drive the live ERP report form and capture HTML, screenshot, and downloaded export evidence.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    inspect_erp_download_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--fill",
+        dest="fills",
+        action="append",
+        default=[],
+        help="Fill one form field using SELECTOR=VALUE syntax. May be repeated in order.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--submit-selector",
+        help="Selector for the form submit button. Defaults to config key erp_report_submit_selector when set.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--post-submit-wait-selector",
+        help="Selector that should become visible after submit. Defaults to config key erp_report_post_submit_wait_selector when set.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--download-menu-selector",
+        help="Optional selector for a download dropdown/button revealed after submit.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--download-format-selector",
+        help="Optional selector for the specific download format item that triggers the file download.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional directory for saved ERP debug artifacts. Defaults under report_root/erp_debug.",
+    )
+    inspect_erp_download_parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Force headed browser mode for selector debugging.",
+    )
+    inspect_erp_download_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2339,6 +2397,56 @@ def _handle_inspect_erp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        output_dir = args.output_dir or _default_erp_download_output_dir(
+            report_root=config.report_root,
+            workflow_id=descriptor.workflow_id.value,
+        )
+        storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+        payload = inspect_playwright_report_download(
+            base_url=str(config.values.get("erp_base_url", "")).strip(),
+            report_relative_url=str(
+                config.values.get(
+                    "erp_lc_register_relative_url",
+                    "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+                )
+            ).strip()
+            or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+            browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
+            storage_state_path=Path(storage_state_value) if storage_state_value else None,
+            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
+            headless=(False if args.headed else bool(config.values.get("playwright_headless", True))),
+            output_dir=output_dir,
+            field_values=_parse_selector_value_pairs(args.fills, option_name="--fill"),
+            submit_selector=args.submit_selector
+            or str(config.values.get("erp_report_submit_selector", "")).strip()
+            or None,
+            post_submit_wait_selector=args.post_submit_wait_selector
+            or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
+            or None,
+            download_menu_selector=args.download_menu_selector
+            or str(config.values.get("erp_report_download_menu_selector", "")).strip()
+            or None,
+            download_format_selector=args.download_format_selector
+            or str(config.values.get("erp_report_download_format_selector", "")).strip()
+            or None,
+        )
+        payload["workflow_id"] = descriptor.workflow_id.value
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
 def _handle_inspect_workbook(args: argparse.Namespace) -> int:
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
@@ -3260,6 +3368,19 @@ def _parse_overrides(items: list[str]) -> dict[str, str]:
     return overrides
 
 
+def _parse_selector_value_pairs(items: list[str], *, option_name: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"{option_name} must use SELECTOR=VALUE syntax: {item}")
+        selector, value = item.split("=", 1)
+        selector = selector.strip()
+        if not selector:
+            raise ValueError(f"{option_name} selector cannot be empty: {item}")
+        pairs.append((selector, value))
+    return pairs
+
+
 def _load_snapshot_if_supplied(
     *,
     snapshot_json: Path | None,
@@ -3350,6 +3471,11 @@ def _resolve_run_artifact_paths(*, run_artifact_root: Path, backup_root: Path, w
 
 def _default_extraction_output_path(document_path: Path, mode: str) -> Path:
     return document_path.with_suffix(f"{document_path.suffix}.extraction.{mode}.json")
+
+
+def _default_erp_download_output_dir(*, report_root: Path, workflow_id: str) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return report_root / "erp_debug" / f"{workflow_id}.{timestamp}"
 
 
 def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:
