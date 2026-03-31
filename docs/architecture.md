@@ -40,7 +40,7 @@ The architecture must optimize for:
    - save-only-new-file guarantees
 5. **ERP downloader**
    - Playwright login/navigation
-   - `rptDateWiseLCRegister` retrieval
+   - `RptCommercialExport/DateWiseLCRegisterForDocuments` retrieval
    - normalization and row selection across all extracted file numbers, including family-consistency checks
 6. **Parsing and normalization layer**
    - subject parsing
@@ -187,7 +187,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - CLI snapshots all messages currently present in `working` and binds them to the active run before any side effects occur.
 - Body parser extracts all file numbers matching `P/<yy>/<nnnn>`.
 - Every extracted file number is used for ERP lookup, subject validation, and folder-path verification to confirm they all belong to the same LC/SC family.
-- ERP downloader retrieves `rptDateWiseLCRegister`, normalizes row-2 headers, and validates family consistency using LC/SC number, normalized buyer, and LC/SC date. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
+- ERP downloader retrieves `RptCommercialExport/DateWiseLCRegisterForDocuments`, normalizes row-2 headers, and validates family consistency using LC/SC number, normalized buyer, and LC/SC date. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
 - Subject validation compares normalized buyer name and LC/SC number against the verified family; any mismatch is a hard block.
 - Attachment classifier identifies LC/SC and PI PDFs using naming conventions, clauses, amendment context, and ERP PI references.
 - Storage manager saves only new PDFs into export folder hierarchy:

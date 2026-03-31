@@ -488,7 +488,7 @@ Mail-level:
 
 ### Inputs
 - Outlook folder: `working` after operator triage from `temp-export`; snapshot all messages in the folder when the CLI is triggered
-- ERP report: `rptDateWiseLCRegister`
+- ERP report: `RptCommercialExport/DateWiseLCRegisterForDocuments`
 - Attachments: LC/SC PDFs and PI PDFs
 
 ### Deterministic checks

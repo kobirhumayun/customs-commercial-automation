@@ -64,7 +64,7 @@ class DelimitedERPExportRowProvider:
 @dataclass(slots=True, frozen=True)
 class PlaywrightERPRowProvider:
     base_url: str
-    report_relative_url: str = "/rptDateWiseLCRegister"
+    report_relative_url: str = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
     browser_channel: str | None = None
     storage_state_path: Path | None = None
     table_selector: str = "table"

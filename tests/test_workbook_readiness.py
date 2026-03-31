@@ -8,6 +8,41 @@ from project.workflows.workbook_readiness import summarize_workbook_readiness
 
 
 class WorkbookReadinessTests(unittest.TestCase):
+    def test_summarize_workbook_readiness_resolves_real_export_master_headers(self) -> None:
+        snapshot = WorkbookSnapshot(
+            sheet_name="UP Issuing Status # 2026-2027",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="Name of Buyers"),
+                WorkbookHeader(column_index=3, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=4, text="L/C & S/C No."),
+                WorkbookHeader(column_index=5, text="LC Issue Date"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=13, text="Lien Bank"),
+                WorkbookHeader(column_index=14, text="Master L/C No."),
+                WorkbookHeader(column_index=15, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=29, text="Commercial File No."),
+            ],
+            rows=[WorkbookRow(row_index=3, values={29: "P/26/0042"})],
+        )
+
+        payload = summarize_workbook_readiness(
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            workbook_snapshot=snapshot,
+        )
+
+        self.assertEqual(payload["header_mapping_status"], "resolved")
+        self.assertEqual(payload["header_mapping"]["file_no"], 29)
+        self.assertEqual(payload["header_mapping"]["buyer_name"], 2)
+        self.assertEqual(payload["header_mapping"]["lc_sc_no"], 4)
+        self.assertEqual(payload["header_mapping"]["export_amount"], 6)
+
     def test_summarize_workbook_readiness_reports_resolved_export_mapping(self) -> None:
         snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",

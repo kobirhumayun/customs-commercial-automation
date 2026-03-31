@@ -3299,9 +3299,12 @@ def _load_erp_provider(
         return PlaywrightERPRowProvider(
             base_url=str(config.values.get("erp_base_url", "")).strip(),
             report_relative_url=str(
-                config.values.get("erp_lc_register_relative_url", "/rptDateWiseLCRegister")
+                config.values.get(
+                    "erp_lc_register_relative_url",
+                    "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+                )
             ).strip()
-            or "/rptDateWiseLCRegister",
+            or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
             table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",

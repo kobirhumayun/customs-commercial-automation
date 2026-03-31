@@ -11,6 +11,24 @@ from project.workflows.erp_inspection import inspect_erp_rows
 
 
 class ERPProviderTests(unittest.TestCase):
+    def test_playwright_provider_defaults_to_live_documents_report_path(self) -> None:
+        tables = [
+            [
+                ["DateWiseLCRegisterForDocuments"],
+                ["File No.", "L/C No.", "Buyer Name", "LC DT."],
+                ["P/26/42", "LC-0038", "Ananta Garments Ltd.\\Dhaka.", "2026-01-10"],
+            ],
+        ]
+
+        with patch("project.erp.providers._fetch_playwright_report_tables", return_value=tables) as fetch_mock:
+            provider = PlaywrightERPRowProvider(base_url="https://erp.local")
+            provider.lookup_rows(file_numbers=["P/26/0042"])
+
+        self.assertEqual(
+            fetch_mock.call_args.kwargs["report_relative_url"],
+            "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+        )
+
     def test_json_manifest_provider_normalizes_and_sorts_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "erp.json"

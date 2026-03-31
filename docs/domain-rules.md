@@ -183,7 +183,7 @@ Decision rules:
 - Non-required low-confidence fields may emit `ocr_non_required_field_low_confidence` warning if all required fields pass.
 
 ## ERP normalization rules
-- ERP report is `rptDateWiseLCRegister`.
+- ERP report is `RptCommercialExport/DateWiseLCRegisterForDocuments`.
 - Headers are read from row 2 of sheet 1.
 - Canonical row selection follows ERP row order.
 - The first occurrence row is the canonical row for that file number/family context.
@@ -211,9 +211,9 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 #### Mapping matrix — shared/core fields
 | column_key | Required header text (exact) | Allowed aliases | Source | Write mode | Pre-write constraint |
 |---|---|---|---|---|---|
-| `file_no` | `File No.` | `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
-| `lc_sc_no` | `L/C No.` | `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
-| `buyer_name` | `Buyer Name` | `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
+| `file_no` | `Commercial File No.` | `File No.`, `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
+| `lc_sc_no` | `L/C & S/C No.` | `L/C No.`, `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
+| `buyer_name` | `Name of Buyers` | `Buyer Name`, `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
 | `ud_ip_shared` | `UD No. & IP No.` | none | UD/IP/EXP extraction and ordering rules | `update_if_blank_or_append_multiline` | existing value may be preserved and line-extended only by deterministic rule pack |
 | `up_no` | `UP No.` | `UP` | workflow filters only in phase 1 | `never_write` (except future approved workflow) | n/a |
 

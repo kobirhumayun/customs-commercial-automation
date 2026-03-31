@@ -14,9 +14,21 @@ class HeaderMappingSpec:
 
 
 EXPORT_HEADER_SPECS = (
-    HeaderMappingSpec("file_no", "File No.", ("FILE NO", "File Number")),
-    HeaderMappingSpec("lc_sc_no", "L/C No.", ("LC/SC No.", "LC No.")),
-    HeaderMappingSpec("buyer_name", "Buyer Name", ("Buyer",)),
+    HeaderMappingSpec(
+        "file_no",
+        "Commercial File No.",
+        ("File No.", "FILE NO", "File Number"),
+    ),
+    HeaderMappingSpec(
+        "lc_sc_no",
+        "L/C & S/C No.",
+        ("L/C No.", "LC/SC No.", "LC No."),
+    ),
+    HeaderMappingSpec(
+        "buyer_name",
+        "Name of Buyers",
+        ("Buyer Name", "Buyer"),
+    ),
     HeaderMappingSpec("lc_issuing_bank", "L/C Issuing Bank"),
     HeaderMappingSpec("lc_issue_date", "LC Issue Date"),
     HeaderMappingSpec("export_amount", "Amount", required_column_index=6),
