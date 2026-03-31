@@ -35,6 +35,32 @@ Optional narrowing flags:
 
 The command returns JSON records containing `display_name`, `folder_path`, `entry_id`, `depth`, `store_name`, and `parent_entry_id`. These records are intended for manual config setup only; the command does not create run artifacts or mutate Outlook state.
 
+### Operator setup helper: ERP download debugging
+When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+```
+
+The command accepts repeated `--fill SELECTOR=VALUE` inputs plus optional selectors for submit, post-submit wait state, download menu, and download format click.
+
+For stable local reuse, the same fill values may be stored in config under:
+- `erp_report_fill_values = ["SELECTOR=VALUE", ...]`
+
+Typical example:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+  --fill "#fromDate=2026-03-01" `
+  --fill "#toDate=2026-03-31" `
+  --submit-selector "#btnShow" `
+  --post-submit-wait-selector "#downloadDropdown" `
+  --download-menu-selector "#downloadDropdown" `
+  --download-format-selector "text=CSV"
+```
+
+The debug run writes page HTML, a full-page screenshot, and any downloaded export file under `report_root/erp_debug/...`. This command is intended for selector discovery and evidence capture only; it does not create run artifacts or stage workflow validation.
+
 ### Shared decision and phase-state enums (normative)
 
 #### Decision enum

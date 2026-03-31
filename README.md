@@ -35,3 +35,37 @@ uv run python -m project inspect-outlook-folders --outlook-profile "outlook" --m
 ```
 
 The command prints JSON with folder `display_name`, `folder_path`, `entry_id`, `depth`, `store_name`, and `parent_entry_id`. Copy the relevant `entry_id` values into your local TOML config.
+
+## ERP download debugging
+The live ERP page currently behaves like a form-driven download flow rather than a directly parseable HTML table. Use the debug command below to capture the real page state, form behavior, and downloaded export while refining selectors.
+
+Example:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+```
+
+Typical selector-driven run:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+  --fill "#fromDate=2026-03-01" `
+  --fill "#toDate=2026-03-31" `
+  --submit-selector "#btnShow" `
+  --post-submit-wait-selector "#downloadDropdown" `
+  --download-menu-selector "#downloadDropdown" `
+  --download-format-selector "text=CSV"
+```
+
+Once the selectors are known, you can store them in the TOML config and rerun the command without repeating all the flags. The config-friendly key for repeated form fields is:
+
+```toml
+erp_report_fill_values = ["#fromDate=2026-03-01", "#toDate=2026-03-31"]
+```
+
+The command saves:
+- page HTML
+- full-page screenshot
+- downloaded file, when the format click triggers one
+
+By default, artifacts are written under `report_root/erp_debug/<workflow>.<timestamp>/`.

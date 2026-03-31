@@ -2424,7 +2424,7 @@ def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
             headless=(False if args.headed else bool(config.values.get("playwright_headless", True))),
             output_dir=output_dir,
-            field_values=_parse_selector_value_pairs(args.fills, option_name="--fill"),
+            field_values=_resolve_erp_fill_values(args=args, config=config),
             submit_selector=args.submit_selector
             or str(config.values.get("erp_report_submit_selector", "")).strip()
             or None,
@@ -3379,6 +3379,23 @@ def _parse_selector_value_pairs(items: list[str], *, option_name: str) -> list[t
             raise ValueError(f"{option_name} selector cannot be empty: {item}")
         pairs.append((selector, value))
     return pairs
+
+
+def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[str, str]]:
+    if args.fills:
+        return _parse_selector_value_pairs(args.fills, option_name="--fill")
+
+    configured_items = config.values.get("erp_report_fill_values")
+    if configured_items is None:
+        return []
+    if not isinstance(configured_items, list):
+        raise ValueError("Configuration key 'erp_report_fill_values' must be a TOML array of SELECTOR=VALUE strings")
+    normalized_items: list[str] = []
+    for item in configured_items:
+        if not isinstance(item, str):
+            raise ValueError("Configuration key 'erp_report_fill_values' must contain only strings")
+        normalized_items.append(item)
+    return _parse_selector_value_pairs(normalized_items, option_name="erp_report_fill_values")
 
 
 def _load_snapshot_if_supplied(

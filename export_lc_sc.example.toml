@@ -15,6 +15,23 @@ outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
 playwright_browser_channel = "msedge"
 
+# Optional live ERP report settings.
+# Current production report path:
+# erp_lc_register_relative_url = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
+#
+# Optional Playwright session/debug settings:
+# playwright_storage_state_path = "C:/customs-automation/secrets/erp-storage-state.json"
+# playwright_headless = false
+# erp_download_timeout_seconds = 120
+#
+# Optional ERP report selectors for `inspect-erp-download`.
+# Fill these from Playwright codegen or manual inspection.
+# erp_report_fill_values = ["#fromDate=2026-03-01", "#toDate=2026-03-31"]
+# erp_report_submit_selector = "#btnShow"
+# erp_report_post_submit_wait_selector = "#downloadDropdown"
+# erp_report_download_menu_selector = "#downloadDropdown"
+# erp_report_download_format_selector = "text=CSV"
+
 # Write-capable workflow settings.
 master_workbook_path_template = "C:/customs-automation/workbooks/{year}.xlsx"
 excel_lock_timeout_seconds = 120
@@ -35,9 +52,6 @@ source_working_folder_entry_id = "REPLACE_WITH_EXPORT_WORKING_FOLDER_ENTRY_ID"
 destination_success_entry_id = "REPLACE_WITH_EXPORT_SUCCESS_FOLDER_ENTRY_ID"
 
 # Optional live-adapter settings.
-# playwright_storage_state_path = "C:/customs-automation/secrets/erp-storage-state.json"
-# playwright_headless = false
-# erp_download_timeout_seconds = 120
 # acrobat_executable_path = "C:/Program Files/Adobe/Acrobat DC/Acrobat/Acrobat.exe"
 # print_printer_name = "Your Printer Name"
 # print_printer_driver = "Microsoft Print To PDF"
