@@ -21,6 +21,16 @@ excel_lock_timeout_seconds = 120
 print_enabled = true
 
 # Required Outlook folder EntryIDs for the export workflow.
+# Discover them with:
+# uv run python -m project inspect-outlook-folders --outlook-profile "outlook"
+#
+# Helpful filters:
+# uv run python -m project inspect-outlook-folders --outlook-profile "outlook" --contains "working"
+# uv run python -m project inspect-outlook-folders --outlook-profile "outlook" --contains "UD and LC"
+#
+# Then copy the matching JSON `entry_id` values into the two fields below:
+# - source_working_folder_entry_id: the folder this workflow reads pending mails from
+# - destination_success_entry_id: the folder successful mails move to after completion
 source_working_folder_entry_id = "REPLACE_WITH_EXPORT_WORKING_FOLDER_ENTRY_ID"
 destination_success_entry_id = "REPLACE_WITH_EXPORT_SUCCESS_FOLDER_ENTRY_ID"
 
