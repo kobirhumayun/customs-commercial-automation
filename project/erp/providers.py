@@ -202,7 +202,14 @@ def inspect_playwright_report_download(
             _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
 
             for selector, value in field_values:
-                page.locator(selector).fill(value)
+                locator = page.locator(selector)
+                locator.wait_for(state="visible", timeout=timeout_ms)
+                locator.click()
+                locator.fill(value)
+                try:
+                    locator.press("Tab")
+                except Exception:
+                    pass
             payload["field_readbacks"] = _collect_field_readbacks(page, field_values)
 
             if submit_selector:

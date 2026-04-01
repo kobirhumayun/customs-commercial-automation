@@ -2424,19 +2424,19 @@ def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
             headless=(False if args.headed else bool(config.values.get("playwright_headless", True))),
             output_dir=output_dir,
-            field_values=_resolve_erp_fill_values(args=args, config=config),
+            field_values=_resolve_erp_fill_values(args=args, config=config) or _default_live_erp_fill_values(config),
             submit_selector=args.submit_selector
             or str(config.values.get("erp_report_submit_selector", "")).strip()
-            or None,
+            or 'role=button[name="Submit"]',
             post_submit_wait_selector=args.post_submit_wait_selector
             or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
-            or None,
+            or ".dx-menu-item-popout",
             download_menu_selector=args.download_menu_selector
             or str(config.values.get("erp_report_download_menu_selector", "")).strip()
-            or None,
+            or ".dx-menu-item-popout",
             download_format_selector=args.download_format_selector
             or str(config.values.get("erp_report_download_format_selector", "")).strip()
-            or None,
+            or "text=CSV",
         )
         payload["workflow_id"] = descriptor.workflow_id.value
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
