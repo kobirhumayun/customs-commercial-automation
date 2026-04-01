@@ -127,7 +127,7 @@ class CLITests(unittest.TestCase):
                     config=config,
                 )
 
-        self.assertEqual(provider_mock.call_args.kwargs["submit_selector"], 'button:has-text("Submit")')
+        self.assertEqual(provider_mock.call_args.kwargs["submit_selector"], 'role=button[name="Submit"]')
         self.assertEqual(provider_mock.call_args.kwargs["post_submit_wait_selector"], ".dx-menu-item-popout")
         self.assertEqual(provider_mock.call_args.kwargs["download_menu_selector"], ".dx-menu-item-popout")
         self.assertEqual(provider_mock.call_args.kwargs["download_format_selector"], "text=CSV")

@@ -3464,7 +3464,7 @@ def _load_erp_provider(
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
             field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
             submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip()
-            or 'button:has-text("Submit")',
+            or 'role=button[name="Submit"]',
             post_submit_wait_selector=str(
                 config.values.get("erp_report_post_submit_wait_selector", ".dx-menu-item-popout")
             ).strip()
