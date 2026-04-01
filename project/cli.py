@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1994,13 +1995,13 @@ def _collect_live_readiness_report(*, descriptor: WorkflowDescriptor, config, er
             snapshot_section = build_issue_section("snapshot", str(exc))
 
     try:
-        erp_provider = _load_erp_provider(
-            erp_json=None,
-            erp_export=None,
-            live_erp=True,
-            config=config,
-        )
         if erp_file_numbers:
+            erp_provider = _load_erp_provider(
+                erp_json=None,
+                erp_export=None,
+                live_erp=True,
+                config=config,
+            )
             erp_payload = inspect_erp_rows(
                 provider=erp_provider,
                 requested_file_numbers=list(erp_file_numbers),
@@ -2010,7 +2011,7 @@ def _collect_live_readiness_report(*, descriptor: WorkflowDescriptor, config, er
                 erp_payload=erp_payload,
             )
         else:
-            erp_provider.lookup_rows(file_numbers=[])
+            _probe_live_erp_download_readiness(config)
             erp_section = build_erp_readiness_section(
                 requested_file_numbers=[],
                 erp_payload=None,
@@ -3528,6 +3529,53 @@ def _default_extraction_output_path(document_path: Path, mode: str) -> Path:
 def _default_erp_download_output_dir(*, report_root: Path, workflow_id: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return report_root / "erp_debug" / f"{workflow_id}.{timestamp}"
+
+
+def _probe_live_erp_download_readiness(config) -> None:
+    storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+    payload = inspect_playwright_report_download(
+        base_url=str(config.values.get("erp_base_url", "")).strip(),
+        report_relative_url=str(
+            config.values.get(
+                "erp_lc_register_relative_url",
+                "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+            )
+        ).strip()
+        or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+        browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
+        storage_state_path=Path(storage_state_value) if storage_state_value else None,
+        timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
+        headless=bool(config.values.get("playwright_headless", True)),
+        output_dir=Path(tempfile.mkdtemp(prefix="erp-readiness-")),
+        field_values=_resolve_configured_erp_fill_values(config) or _default_live_erp_fill_values(config),
+        submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip()
+        or 'role=button[name="Submit"]',
+        post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
+        or ".dx-menu-item-popout",
+        download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip()
+        or ".dx-menu-item-popout",
+        download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip()
+        or '.dxrd-preview-export-item-text:text-is("CSV")',
+    )
+    if payload.get("status") != "ready":
+        raise ValueError(f"Live ERP download flow failed: {payload.get('error') or 'unknown error'}")
+    receipt = payload.get("download_receipt")
+    if not isinstance(receipt, dict):
+        raise ValueError("Live ERP readiness probe did not return a download receipt.")
+    if receipt.get("exists") is False:
+        raise ValueError("Live ERP readiness probe did not save the downloaded file.")
+    if receipt.get("is_empty") is True:
+        raise ValueError("Live ERP readiness probe downloaded an empty file.")
+    if receipt.get("looks_like_html") is True:
+        raise ValueError("Live ERP readiness probe downloaded HTML instead of a report export.")
+    if receipt.get("has_required_erp_headers") is False:
+        missing = receipt.get("erp_header_missing")
+        if isinstance(missing, list) and missing:
+            raise ValueError(
+                "Live ERP readiness probe is missing required ERP headers: "
+                + ", ".join(str(item) for item in missing)
+            )
+        raise ValueError("Live ERP readiness probe did not expose required ERP headers.")
 
 
 def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:

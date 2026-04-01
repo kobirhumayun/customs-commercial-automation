@@ -3580,6 +3580,106 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["sections"]["print"]["status"], "ready")
         self.assertEqual(payload["sections"]["erp"]["match_count"], 1)
 
+    def test_report_live_readiness_command_uses_download_probe_without_file_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fake_session_result = type(
+                "FakeSessionResult",
+                (),
+                {"snapshot": object(), "preflight": {"status": "ready"}},
+            )()
+
+            buffer = io.StringIO()
+            with patch("project.cli._load_snapshot_if_supplied", return_value=object()):
+                with patch(
+                    "project.cli.summarize_mail_snapshot",
+                    return_value={
+                        "snapshot_count": 0,
+                        "attachment_count": 0,
+                        "entry_id_order": [],
+                        "mail_iteration_order": [],
+                    },
+                ):
+                    with patch(
+                        "project.cli.inspect_playwright_report_download",
+                        return_value={
+                            "status": "ready",
+                            "download_receipt": {
+                                "exists": True,
+                                "is_empty": False,
+                                "looks_like_html": False,
+                                "has_required_erp_headers": True,
+                            },
+                        },
+                    ) as inspect_mock:
+                        with patch(
+                            "project.cli.XLWingsWorkbookWriteSessionProvider"
+                        ) as workbook_provider_mock:
+                            workbook_provider_mock.return_value.open_preflight_session.return_value = (
+                                fake_session_result
+                            )
+                            with patch(
+                                "project.cli.summarize_workbook_readiness",
+                                return_value={
+                                    "workbook_available": True,
+                                    "sheet_name": "2026",
+                                    "header_mapping_status": "resolved",
+                                    "row_count": 10,
+                                    "session_preflight": {"status": "ready"},
+                                },
+                            ):
+                                with patch(
+                                    "project.cli.inspect_acrobat_print_adapter",
+                                    return_value={
+                                        "available": True,
+                                        "resolved_executable_path": "C:\\Acrobat.exe",
+                                        "printer_name": "Office Printer",
+                                        "blank_separator_exists": True,
+                                        "error": None,
+                                    },
+                                ):
+                                    with redirect_stdout(buffer):
+                                        exit_code = main(
+                                            [
+                                                "report-live-readiness",
+                                                "export_lc_sc",
+                                                "--config",
+                                                str(config_path),
+                                            ]
+                                        )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["sections"]["erp"]["status"], "ready")
+        self.assertEqual(payload["sections"]["erp"]["lookup_scope"], "connectivity_only")
+        inspect_mock.assert_called_once()
+
     def test_report_live_readiness_command_keeps_section_errors_in_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3615,7 +3715,7 @@ class CLITests(unittest.TestCase):
                 side_effect=RuntimeError("Outlook unavailable"),
             ):
                 with patch(
-                    "project.cli._load_erp_provider",
+                    "project.cli.inspect_playwright_report_download",
                     side_effect=RuntimeError("ERP unavailable"),
                 ):
                     with patch("project.cli.XLWingsWorkbookWriteSessionProvider") as workbook_provider_mock:
@@ -3700,7 +3800,18 @@ class CLITests(unittest.TestCase):
                         "mail_iteration_order": [],
                     },
                 ):
-                    with patch("project.cli._load_erp_provider", return_value=fake_erp_provider):
+                    with patch(
+                        "project.cli.inspect_playwright_report_download",
+                        return_value={
+                            "status": "ready",
+                            "download_receipt": {
+                                "exists": True,
+                                "is_empty": False,
+                                "looks_like_html": False,
+                                "has_required_erp_headers": True,
+                            },
+                        },
+                    ):
                         with patch(
                             "project.cli.XLWingsWorkbookWriteSessionProvider"
                         ) as workbook_provider_mock:
