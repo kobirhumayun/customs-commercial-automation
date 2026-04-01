@@ -2436,7 +2436,7 @@ def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
             or ".dx-menu-item-popout",
             download_format_selector=args.download_format_selector
             or str(config.values.get("erp_report_download_format_selector", "")).strip()
-            or "text=CSV",
+            or '.dxrd-preview-export-item-text:text-is("CSV")',
         )
         payload["workflow_id"] = descriptor.workflow_id.value
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
@@ -3474,9 +3474,12 @@ def _load_erp_provider(
             ).strip()
             or ".dx-menu-item-popout",
             download_format_selector=str(
-                config.values.get("erp_report_download_format_selector", "text=CSV")
+                config.values.get(
+                    "erp_report_download_format_selector",
+                    '.dxrd-preview-export-item-text:text-is("CSV")',
+                )
             ).strip()
-            or "text=CSV",
+            or '.dxrd-preview-export-item-text:text-is("CSV")',
             table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
             headless=bool(config.values.get("playwright_headless", True)),

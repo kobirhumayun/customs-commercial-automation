@@ -130,7 +130,10 @@ class CLITests(unittest.TestCase):
         self.assertEqual(provider_mock.call_args.kwargs["submit_selector"], 'role=button[name="Submit"]')
         self.assertEqual(provider_mock.call_args.kwargs["post_submit_wait_selector"], ".dx-menu-item-popout")
         self.assertEqual(provider_mock.call_args.kwargs["download_menu_selector"], ".dx-menu-item-popout")
-        self.assertEqual(provider_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(
+            provider_mock.call_args.kwargs["download_format_selector"],
+            '.dxrd-preview-export-item-text:text-is("CSV")',
+        )
         self.assertEqual(
             provider_mock.call_args.kwargs["field_values"][0][0],
             ":nth-match(.dx-texteditor-input, 3)",
@@ -700,7 +703,10 @@ class CLITests(unittest.TestCase):
         self.assertEqual(inspect_mock.call_args.kwargs["submit_selector"], 'role=button[name="Submit"]')
         self.assertEqual(inspect_mock.call_args.kwargs["post_submit_wait_selector"], ".dx-menu-item-popout")
         self.assertEqual(inspect_mock.call_args.kwargs["download_menu_selector"], ".dx-menu-item-popout")
-        self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(
+            inspect_mock.call_args.kwargs["download_format_selector"],
+            '.dxrd-preview-export-item-text:text-is("CSV")',
+        )
         self.assertEqual(
             inspect_mock.call_args.kwargs["field_values"][0][0],
             ":nth-match(.dx-texteditor-input, 3)",

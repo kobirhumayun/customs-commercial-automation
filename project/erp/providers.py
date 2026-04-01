@@ -251,10 +251,6 @@ def inspect_playwright_report_download(
             except Exception:
                 pass
             try:
-                payload["page_title"] = payload["page_title"] or page.title()
-            except Exception:
-                pass
-            try:
                 _write_debug_page_artifacts(page, html_path=html_path, screenshot_path=screenshot_path)
             except Exception:
                 pass
