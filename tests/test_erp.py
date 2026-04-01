@@ -282,6 +282,25 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
         self.assertEqual(rows["P/26/0042"][0].amd_no, "05")
 
+    def test_delimited_export_provider_falls_back_to_windows_encoding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "erp.csv"
+            export_path.write_bytes(
+                "\n".join(
+                    [
+                        "rptDateWiseLCRegister",
+                        "File No.,L/C No.,Buyer Name,LC DT.",
+                        "P/26/42,LC-0038,Ananta Garments “Test”,2026-01-10",
+                    ]
+                ).encode("cp1252")
+            )
+
+            provider = DelimitedERPExportRowProvider(export_path)
+            rows = provider.lookup_rows(file_numbers=["P/26/0042"])
+
+        self.assertEqual(len(rows["P/26/0042"]), 1)
+        self.assertIn("ANANTA GARMENTS", rows["P/26/0042"][0].buyer_name)
+
     def test_delimited_export_provider_rejects_invalid_required_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             export_path = Path(temp_dir) / "erp.csv"

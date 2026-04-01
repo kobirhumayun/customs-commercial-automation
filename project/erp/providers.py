@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import hashlib
+import io
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -379,13 +380,27 @@ def _load_manifest_rows(path: Path) -> list[ERPRegisterRow]:
 def _load_delimited_export_rows(path: Path, *, delimiter: str | None) -> list[ERPRegisterRow]:
     if not path.exists():
         raise ValueError(f"ERP export path does not exist: {path}")
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        sample = handle.read(4096)
-        handle.seek(0)
-        resolved_delimiter = delimiter or _resolve_delimiter(path, sample)
-        reader = csv.reader(handle, delimiter=resolved_delimiter)
-        matrix = [[cell.strip() for cell in row] for row in reader]
+    text = _decode_delimited_export_text(path)
+    handle = io.StringIO(text, newline="")
+    sample = handle.read(4096)
+    handle.seek(0)
+    resolved_delimiter = delimiter or _resolve_delimiter(path, sample)
+    reader = csv.reader(handle, delimiter=resolved_delimiter)
+    matrix = [[cell.strip() for cell in row] for row in reader]
     return _load_rows_from_table_matrix(matrix, source_name=str(path))
+
+
+def _decode_delimited_export_text(path: Path) -> str:
+    raw_bytes = path.read_bytes()
+    decode_errors: list[str] = []
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return raw_bytes.decode(encoding)
+        except UnicodeDecodeError as exc:
+            decode_errors.append(f"{encoding}: {exc}")
+    raise ValueError(
+        f"ERP export could not be decoded using supported encodings for {path}: " + "; ".join(decode_errors)
+    )
 
 
 def _resolve_delimiter(path: Path, sample: str) -> str:
