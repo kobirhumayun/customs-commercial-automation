@@ -346,6 +346,72 @@ class WorkbookTests(unittest.TestCase):
         self.assertEqual(result.discrepancy_reports, [])
         self.assertEqual([probe.classification for probe in result.probes], ["matches_pre_write", "matches_pre_write"])
 
+    def test_prevalidate_staged_write_plan_treats_blank_optional_cells_as_pre_write_matches(self) -> None:
+        snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="File No."),
+                WorkbookHeader(column_index=2, text="L/C No."),
+                WorkbookHeader(column_index=3, text="Buyer Name"),
+                WorkbookHeader(column_index=4, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=5, text="LC Issue Date"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=22, text="Amount"),
+            ],
+            rows=[WorkbookRow(row_index=3, values={3: "", 10: "", 11: ""})],
+        )
+        staged_write_plan = [
+            WriteOperation(
+                write_operation_id="op-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                operation_index_within_mail=0,
+                sheet_name="Sheet1",
+                row_index=3,
+                column_key="lc_amnd_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="",
+                row_eligibility_checks=[
+                    "append_target_row_has_blank_buyer_name_or_is_new",
+                    "target_cell_blank_by_construction",
+                ],
+            ),
+            WriteOperation(
+                write_operation_id="op-2",
+                run_id="run-1",
+                mail_id="mail-1",
+                operation_index_within_mail=1,
+                sheet_name="Sheet1",
+                row_index=3,
+                column_key="lc_amnd_date",
+                expected_pre_write_value=None,
+                expected_post_write_value="",
+                row_eligibility_checks=[
+                    "append_target_row_has_blank_buyer_name_or_is_new",
+                    "target_cell_blank_by_construction",
+                ],
+            ),
+        ]
+
+        result = prevalidate_staged_write_plan(
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            run_id="run-1",
+            workbook_snapshot=snapshot,
+            staged_write_plan=staged_write_plan,
+        )
+
+        self.assertEqual(result.summary.status, "passed")
+        self.assertEqual(result.discrepancy_reports, [])
+        self.assertEqual([probe.classification for probe in result.probes], ["matches_pre_write", "matches_pre_write"])
+
 
 if __name__ == "__main__":
     unittest.main()

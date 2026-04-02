@@ -198,11 +198,11 @@ def _classify_probe(
 ) -> str:
     if failure_reason is not None:
         return "mismatch_unknown"
+    if expected_pre_write_value is None and _normalize_value(observed_value) in {"", None}:
+        return "matches_pre_write"
     if _normalize_value(observed_value) == _normalize_value(expected_post_write_value):
         return "matches_post_write"
     if _normalize_value(observed_value) == _normalize_value(expected_pre_write_value):
-        return "matches_pre_write"
-    if expected_pre_write_value is None and _normalize_value(observed_value) in {"", None}:
         return "matches_pre_write"
     return "mismatch_unknown"
 
