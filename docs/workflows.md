@@ -521,6 +521,7 @@ Mail-level:
 - parse subject into document type, LC/SC end sequence, buyer, and optional suffix
 - extract all body file numbers matching `P/<yy>/<nnnn>`
 - validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
+- deduplicate repeated mentions of the same canonical file number within one mail body before ERP lookup and workbook staging
 - define ERP family consistency using ERP `LC No.`, normalized buyer, and canonicalized ERP `LC DT.`
 - canonical row selection follows ERP row order
 - the first occurrence row is the canonical row for that file number/family context
@@ -556,6 +557,7 @@ Note: the master workbook intentionally contains duplicate `Amount` headers. The
 - any extracted file number is missing its required ERP row
 - any partial family match across LC/SC number, normalized buyer, and LC/SC date
 - duplicate file number already present when workflow expects skip
+- duplicate file number already staged earlier in the same run when workflow expects skip
 - ambiguous document identity not resolved by rules
 - any incomplete validation needed for append/skip decision
 
@@ -563,6 +565,8 @@ Note: the master workbook intentionally contains duplicate `Amount` headers. The
 - blocked emails remain in `working`
 - successfully processed export-team emails move to `UD and LC` only after the batch workbook-write and batch print phases finish
 - print batches are built from successful mails in the active run snapshot, using only newly saved PDFs
+- duplicate prevention is enforced by canonical file number, not by identical mail subject/body detection
+- if multiple mails in one run contain the same canonical file number, deterministic `mail_iteration_order` decides which mail is evaluated first and later mails must not create an additional workbook row for that file
 
 ## UD / IP / EXP processing
 

@@ -204,6 +204,14 @@ Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` a
 - Export workflow generally appends new rows.
 - Before appending, check whether the same file number already exists.
 - If the same file number exists, skip that file.
+- The uniqueness contract for export writes is the canonical workbook file number in `Commercial File No.`.
+- Phase-1 operating assumption: once an automation cycle starts, no manual or external workbook edits occur until that cycle finishes.
+- Under that operating assumption, duplicate prevention is enforced by canonical file number across:
+  - repeated mentions of the same file in one mail body
+  - different mails within the same run
+  - files already present in the workbook before the run starts
+- A duplicate file must never produce a second staged workbook row in the same run.
+- A file already present in `Commercial File No.` must never be written again as a new workbook row.
 - If required, first attempt to locate an existing row for the same file/amendment to avoid duplicate insertion.
 - Operational ordering is row sequence and drives staged write ordering, reporting, and print ordering.
 
@@ -349,6 +357,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 - If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
 - Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
+- Duplicate suppression is file-number-driven, not subject/body identity-driven.
+- If two mails in the same run resolve to the same canonical file number, only the earliest eligible mail in deterministic `mail_iteration_order` may stage that file; later mails must skip it.
 - The run initialization stage must capture both the email snapshot and a master-workbook backup before write-capable phases continue.
 - The workbook write stage must commit as an all-or-nothing batch from the approved staged write plan.
 - If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
