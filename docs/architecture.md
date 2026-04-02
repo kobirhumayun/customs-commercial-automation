@@ -186,9 +186,9 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Operator moves eligible emails from `temp-export` to `working`.
 - CLI snapshots all messages currently present in `working` and binds them to the active run before any side effects occur.
 - Body parser extracts all file numbers matching `P/<yy>/<nnnn>`.
-- Every extracted file number is used for ERP lookup, subject validation, and folder-path verification to confirm they all belong to the same LC/SC family.
-- ERP downloader retrieves `RptCommercialExport/DateWiseLCRegisterForDocuments`, normalizes row-2 headers, and validates family consistency using LC/SC number, normalized buyer, and LC/SC date. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
-- Subject validation compares normalized buyer name and LC/SC number against the verified family; any mismatch is a hard block.
+- Every extracted file number is used for ERP lookup and folder-path verification to confirm they all belong to the same ERP family.
+- ERP downloader retrieves `RptCommercialExport/DateWiseLCRegisterForDocuments`, normalizes row-2 headers, and validates family consistency using ERP `LC No.`, normalized buyer, and canonicalized `LC DT.`. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
+- Mail subject parsing is optional and advisory only. ERP rows selected by extracted body file numbers are the final source for family data, workbook values, and storage path construction.
 - Attachment classifier identifies LC/SC and PI PDFs using naming conventions, clauses, amendment context, and ERP PI references.
 - Storage manager saves only new PDFs into export folder hierarchy:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`.
@@ -326,7 +326,8 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 - A duplicate informational attachment (not selected for extraction/write) is present in the email, while at least one required document is valid and all write-gating checks pass.
 
 ### Examples of hard blocks
-- subject validation mismatch against ERP buyer name and LC/SC number
+- any extracted file number missing its ERP row
+- ERP family inconsistency across extracted file numbers
 - missing required extraction fields
 - contradictory matching results
 - workbook row eligibility not satisfied

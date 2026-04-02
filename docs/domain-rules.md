@@ -188,10 +188,13 @@ Decision rules:
 - Canonical row selection follows ERP row order.
 - The first occurrence row is the canonical row for that file number/family context.
 - Canonical row fields drive folder path construction, workbook mapping, and reporting metadata.
+- ERP `LC No.` is preserved as the canonical family number exactly as exported, after shared string normalization. It is not constrained to mail-subject-style `LC-...` or `SC-...` patterns.
+- ERP `LC DT.` is canonicalized to ISO `YYYY-MM-DD` for internal storage/pathing.
 - Duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen.
 - When multiple file numbers are extracted from one email, each must be validated against ERP and all resolved rows must be consistent with the same LC/SC family.
 - Any partial family match is a hard block.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
+- Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
 
 Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
 

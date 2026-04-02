@@ -13,25 +13,12 @@ def evaluate_export_subject_parseable(context) -> RuleEvaluationResult:
         return RuleEvaluationResult(
             rule_id="export_lc_sc.subject_parseable.v1",
             outcome=FinalDecision.PASS,
-            rationale="Export subject parsed successfully.",
+            rationale="Export subject parsed successfully for optional comparison only.",
         )
     return RuleEvaluationResult(
         rule_id="export_lc_sc.subject_parseable.v1",
-        outcome=FinalDecision.HARD_BLOCK,
-        rationale="Export subject must parse into deterministic LC/SC and buyer fields.",
-        discrepancies=(
-            RuleDiscrepancy(
-                code="export_subject_unparseable",
-                severity=FinalDecision.HARD_BLOCK,
-                message="The export subject does not match a supported LC/SC naming pattern.",
-                subject_scope="mail",
-                target_ref=context.mail.mail_id,
-                details={
-                    "mail_id": context.mail.mail_id,
-                    "subject_raw": context.mail.subject_raw,
-                },
-            ),
-        ),
+        outcome=FinalDecision.PASS,
+        rationale="Export subject parsing is optional because ERP rows are the final source of family data.",
     )
 
 
@@ -141,7 +128,7 @@ def evaluate_export_subject_family_match(context) -> RuleEvaluationResult:
         return RuleEvaluationResult(
             rule_id="export_lc_sc.subject_family_match.v1",
             outcome=FinalDecision.PASS,
-            rationale="Subject-to-family comparison awaits parsed subject and verified ERP family.",
+            rationale="Subject-to-family comparison is optional and does not block ERP-driven processing.",
         )
     if (
         payload.parsed_subject.lc_sc_number == payload.verified_family.lc_sc_number
@@ -150,29 +137,12 @@ def evaluate_export_subject_family_match(context) -> RuleEvaluationResult:
         return RuleEvaluationResult(
             rule_id="export_lc_sc.subject_family_match.v1",
             outcome=FinalDecision.PASS,
-            rationale="Parsed subject matches the verified ERP family.",
+            rationale="Parsed subject matches the verified ERP family for optional comparison.",
         )
     return RuleEvaluationResult(
         rule_id="export_lc_sc.subject_family_match.v1",
-        outcome=FinalDecision.HARD_BLOCK,
-        rationale="Parsed subject LC/SC number and buyer must match the verified ERP family.",
-        discrepancies=(
-            RuleDiscrepancy(
-                code="export_subject_family_mismatch",
-                severity=FinalDecision.HARD_BLOCK,
-                message="Parsed subject fields do not match the verified ERP family.",
-                subject_scope="mail",
-                target_ref=context.mail.mail_id,
-                details={
-                    "mail_id": context.mail.mail_id,
-                    "subject_lc_sc_number": payload.parsed_subject.lc_sc_number,
-                    "subject_buyer_name": payload.parsed_subject.buyer_name,
-                    "family_lc_sc_number": payload.verified_family.lc_sc_number,
-                    "family_buyer_name": payload.verified_family.buyer_name,
-                    "family_lc_sc_date": payload.verified_family.lc_sc_date,
-                },
-            ),
-        ),
+        outcome=FinalDecision.PASS,
+        rationale="Subject-to-ERP family mismatch is advisory only because ERP rows are final.",
     )
 
 

@@ -190,6 +190,98 @@ class ValidationTests(unittest.TestCase):
             )
             self.assertEqual(initialized.artifact_paths.discrepancies_path.read_text(encoding="utf-8"), "")
 
+    def test_validate_run_snapshot_uses_erp_family_as_final_source_even_when_subject_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(
+                tz=validate_timezone("Asia/Dhaka")
+            ).year
+            report_root = root / "reports"
+            run_root = root / "runs"
+            backup_root = root / "backups"
+            workbook_root = root / "workbooks"
+            for directory in (report_root, run_root, backup_root, workbook_root):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            snapshot_manifest_path = root / "snapshot.json"
+            snapshot_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-001",
+                            "received_time": "2026-03-28T03:00:00Z",
+                            "subject_raw": "LC-5392-CUTTING EDGE INDUSTRIES LTD_ACK",
+                            "sender_address": "one@example.com",
+                            "body_text": "Please process file P/26/0624 today.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            erp_manifest_path = root / "erp.json"
+            erp_manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "file_number": "P/26/0624",
+                            "lc_sc_number": "DPCBD1175392",
+                            "buyer_name": "CUTTING EDGE INDUSTRIES LTD",
+                            "lc_sc_date": "2026-03-30",
+                            "source_row_index": 5,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.EXPORT_LC_SC)
+            snapshot = build_email_snapshot(
+                load_snapshot_manifest(snapshot_manifest_path),
+                state_timezone="Asia/Dhaka",
+            )
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=snapshot,
+            )
+
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=JsonManifestERPRowProvider(erp_manifest_path),
+            )
+
+            self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+            self.assertEqual(validation_result.mail_outcomes[0].processing_status, MailProcessingStatus.VALIDATED)
+            self.assertEqual(validation_result.mail_outcomes[0].file_numbers_extracted, ["P/26/0624"])
+
     def test_validate_run_snapshot_hard_blocks_blank_subject(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

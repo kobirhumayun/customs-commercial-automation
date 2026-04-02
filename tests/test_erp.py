@@ -282,6 +282,28 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
         self.assertEqual(rows["P/26/0042"][0].amd_no, "05")
 
+    def test_delimited_export_provider_accepts_live_erp_style_lc_numbers_and_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "erp.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "L/C Register For Documents",
+                        "File No.,LC No.,Buyer Name,LC DT.,Current LC Value",
+                        "P/26/0624,DPCBD1175392,CUTTING EDGE INDUSTRIES LTD.\\1612,30-Mar-26,36467.20",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = DelimitedERPExportRowProvider(export_path)
+            rows = provider.lookup_rows(file_numbers=["P/26/0624"])
+
+        self.assertEqual(len(rows["P/26/0624"]), 1)
+        self.assertEqual(rows["P/26/0624"][0].lc_sc_number, "DPCBD1175392")
+        self.assertEqual(rows["P/26/0624"][0].buyer_name, "CUTTING EDGE INDUSTRIES LTD")
+        self.assertEqual(rows["P/26/0624"][0].lc_sc_date, "2026-03-30")
+
     def test_delimited_export_provider_falls_back_to_windows_encoding(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             export_path = Path(temp_dir) / "erp.csv"
