@@ -164,7 +164,7 @@ def build_export_attachment_directory(document_root: Path, family: ERPFamily) ->
     return (
         document_root
         / _sanitize_path_segment(str(year))
-        / _sanitize_path_segment(family.buyer_name)
+        / _sanitize_path_segment(family.attachment_buyer_name)
         / _sanitize_path_segment(family.lc_sc_number)
         / "All Attachments"
     )

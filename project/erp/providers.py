@@ -11,7 +11,12 @@ from typing import Protocol
 from urllib.parse import urljoin
 
 from project.erp.models import ERPRegisterRow
-from project.erp.normalization import normalize_buyer_name, normalize_lc_sc_date, normalize_lc_sc_number
+from project.erp.normalization import (
+    normalize_buyer_name,
+    normalize_buyer_name_for_paths,
+    normalize_lc_sc_date,
+    normalize_lc_sc_number,
+)
 from project.workflows.export_lc_sc.parsing import normalize_file_number
 
 REQUIRED_ERP_EXPORT_HEADERS = ("file_number", "lc_sc_number", "buyer_name", "lc_sc_date")
@@ -463,9 +468,17 @@ def _extract_canonical_row_values(row_values: list[str], header_mapping: dict[st
 def _build_erp_row(item: dict[str, object], *, source_row_index: int, row_label: str) -> ERPRegisterRow:
     file_number = normalize_file_number(_require_string(item, "file_number", row_label))
     lc_sc_number = normalize_lc_sc_number(_require_string(item, "lc_sc_number", row_label))
-    buyer_name = normalize_buyer_name(_require_string(item, "buyer_name", row_label))
+    raw_buyer_name = _require_string(item, "buyer_name", row_label)
+    buyer_name = normalize_buyer_name(raw_buyer_name)
+    folder_buyer_name = normalize_buyer_name_for_paths(raw_buyer_name)
     lc_sc_date = normalize_lc_sc_date(_require_string(item, "lc_sc_date", row_label))
-    if file_number is None or lc_sc_number is None or buyer_name is None or lc_sc_date is None:
+    if (
+        file_number is None
+        or lc_sc_number is None
+        or buyer_name is None
+        or folder_buyer_name is None
+        or lc_sc_date is None
+    ):
         raise ValueError(f"{row_label} contains an invalid canonical ERP field")
     return ERPRegisterRow(
         file_number=file_number,
@@ -473,6 +486,7 @@ def _build_erp_row(item: dict[str, object], *, source_row_index: int, row_label:
         buyer_name=buyer_name,
         lc_sc_date=lc_sc_date,
         source_row_index=source_row_index,
+        folder_buyer_name=folder_buyer_name,
         notify_bank=_optional_string(item.get("notify_bank")),
         current_lc_value=_optional_string(item.get("current_lc_value")),
         ship_date=_optional_string(item.get("ship_date")),

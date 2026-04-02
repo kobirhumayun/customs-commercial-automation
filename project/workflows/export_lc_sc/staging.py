@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
@@ -26,8 +27,8 @@ class ExportWriteStagingResult:
 EXPORT_FIELD_VALUE_MAP = (
     ("file_no", lambda match: match.file_number),
     ("lc_sc_no", lambda match: match.canonical_row.lc_sc_number),
-    ("buyer_name", lambda match: match.canonical_row.buyer_name),
-    ("lc_issuing_bank", lambda match: match.canonical_row.notify_bank),
+    ("buyer_name", lambda match: _format_buyer_name_for_sheet(match.canonical_row.buyer_name)),
+    ("lc_issuing_bank", lambda match: _format_bank_name_for_sheet(match.canonical_row.notify_bank)),
     ("lc_issue_date", lambda match: match.canonical_row.lc_sc_date),
     ("export_amount", lambda match: match.canonical_row.current_lc_value),
     ("shipment_date", lambda match: match.canonical_row.ship_date),
@@ -35,7 +36,7 @@ EXPORT_FIELD_VALUE_MAP = (
     ("quantity_fabrics", lambda match: match.canonical_row.lc_qty),
     ("lc_amnd_no", lambda match: match.canonical_row.amd_no),
     ("lc_amnd_date", lambda match: match.canonical_row.amd_date),
-    ("lien_bank", lambda match: match.canonical_row.nego_bank),
+    ("lien_bank", lambda match: _format_lien_bank_for_sheet(match.canonical_row.nego_bank)),
     ("master_lc_no", lambda match: match.canonical_row.master_lc_no),
     ("master_lc_issue_date", lambda match: match.canonical_row.master_lc_date),
 )
@@ -170,3 +171,22 @@ def _resolve_next_export_row_index(
         if not row.values.get(buyer_name_column_index, "").strip():
             return row.row_index
     return max((row.row_index for row in workbook_snapshot.rows), default=2) + 1
+
+
+def _format_buyer_name_for_sheet(value: str) -> str:
+    return _title_case_words(value.replace("\\", ", "))
+
+
+def _format_bank_name_for_sheet(value: str) -> str:
+    return _title_case_words(value.replace("\\", ", "))
+
+
+def _format_lien_bank_for_sheet(value: str) -> str:
+    primary_value = value.split("\\", 1)[0].strip()
+    return _title_case_words(primary_value)
+
+
+def _title_case_words(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip())
+    normalized = re.sub(r"\s*,\s*", ", ", normalized)
+    return normalized.title()

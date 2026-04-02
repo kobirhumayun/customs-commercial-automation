@@ -23,8 +23,9 @@ class DocumentSavingTests(unittest.TestCase):
             Path("C:/exports"),
             ERPFamily(
                 lc_sc_number='LC:0038/01',
-                buyer_name='ANANTA GARMENTS LTD.',
+                buyer_name='ANANTA GARMENTS LTD.\\DHAKA',
                 lc_sc_date="2026-01-10",
+                folder_buyer_name="ANANTA GARMENTS LTD.",
             ),
         )
 
@@ -91,6 +92,22 @@ class DocumentSavingTests(unittest.TestCase):
             self.assertEqual(result.saved_documents[1].destination_path, result.saved_documents[0].destination_path)
             self.assertIn("Saved new attachment LC.pdf.", result.decision_reasons)
             self.assertIn("Skipped duplicate attachment filename LC.pdf.", result.decision_reasons)
+
+    def test_build_export_attachment_directory_uses_name_only_for_folder_segment(self) -> None:
+        destination = build_export_attachment_directory(
+            Path("C:/exports"),
+            ERPFamily(
+                lc_sc_number="DPCBD1175392",
+                buyer_name="CUTTING EDGE INDUSTRIES LTD\\1612",
+                lc_sc_date="2026-03-30",
+                folder_buyer_name="CUTTING EDGE INDUSTRIES LTD",
+            ),
+        )
+
+        self.assertEqual(
+            destination.as_posix(),
+            "C:/exports/2026/CUTTING EDGE INDUSTRIES LTD/DPCBD1175392/All Attachments",
+        )
 
     def test_save_export_mail_documents_hard_blocks_when_family_is_missing(self) -> None:
         mail = build_email_snapshot(

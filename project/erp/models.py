@@ -8,6 +8,11 @@ class ERPFamily:
     lc_sc_number: str
     buyer_name: str
     lc_sc_date: str
+    folder_buyer_name: str | None = None
+
+    @property
+    def attachment_buyer_name(self) -> str:
+        return self.folder_buyer_name or self.buyer_name
 
 
 @dataclass(slots=True, frozen=True)
@@ -17,6 +22,7 @@ class ERPRegisterRow:
     buyer_name: str
     lc_sc_date: str
     source_row_index: int
+    folder_buyer_name: str = ""
     notify_bank: str = ""
     current_lc_value: str = ""
     ship_date: str = ""
@@ -35,4 +41,5 @@ class ERPRegisterRow:
             lc_sc_number=self.lc_sc_number,
             buyer_name=self.buyer_name,
             lc_sc_date=self.lc_sc_date,
+            folder_buyer_name=self.folder_buyer_name or self.buyer_name,
         )
