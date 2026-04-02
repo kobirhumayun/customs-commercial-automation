@@ -999,7 +999,7 @@ class ValidationTests(unittest.TestCase):
                         {
                             "file_number": "P/26/0042",
                             "lc_sc_number": "LC-0038",
-                            "buyer_name": "ANANTA GARMENTS LTD\\DHAKA",
+                            "buyer_name": "ANANTA GARMENTS LTD.\\DHAKA.",
                             "lc_sc_date": "2026-01-10",
                             "source_row_index": 5,
                             "notify_bank": "ABC BANK\\DHAKA BRANCH",
@@ -1072,7 +1072,7 @@ class ValidationTests(unittest.TestCase):
                 operation.column_key: operation.expected_post_write_value
                 for operation in validation_result.staged_write_plan
             }
-            self.assertEqual(operations_by_column["buyer_name"], "Ananta Garments Ltd, Dhaka")
+            self.assertEqual(operations_by_column["buyer_name"], "Ananta Garments Ltd., Dhaka.")
             self.assertEqual(operations_by_column["lc_issuing_bank"], "Abc Bank, Dhaka Branch")
             self.assertEqual(operations_by_column["lien_bank"], "Xyz Bank")
 

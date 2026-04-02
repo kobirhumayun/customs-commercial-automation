@@ -278,7 +278,7 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(len(rows["P/26/0042"]), 1)
         self.assertEqual(rows["P/26/0042"][0].source_row_index, 3)
         self.assertEqual(rows["P/26/0042"][0].lc_sc_number, "LC-0038")
-        self.assertEqual(rows["P/26/0042"][0].buyer_name, "ANANTA GARMENTS LTD\\DHAKA")
+        self.assertEqual(rows["P/26/0042"][0].buyer_name, "ANANTA GARMENTS LTD.\\DHAKA.")
         self.assertEqual(rows["P/26/0042"][0].folder_buyer_name, "ANANTA GARMENTS LTD")
         self.assertEqual(rows["P/26/0042"][0].current_lc_value, "12345.00")
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
@@ -303,7 +303,7 @@ class ERPProviderTests(unittest.TestCase):
 
         self.assertEqual(len(rows["P/26/0624"]), 1)
         self.assertEqual(rows["P/26/0624"][0].lc_sc_number, "DPCBD1175392")
-        self.assertEqual(rows["P/26/0624"][0].buyer_name, "CUTTING EDGE INDUSTRIES LTD\\1612")
+        self.assertEqual(rows["P/26/0624"][0].buyer_name, "CUTTING EDGE INDUSTRIES LTD.\\1612")
         self.assertEqual(rows["P/26/0624"][0].folder_buyer_name, "CUTTING EDGE INDUSTRIES LTD")
         self.assertEqual(rows["P/26/0624"][0].lc_sc_date, "2026-03-30")
 
@@ -363,7 +363,7 @@ class ERPProviderTests(unittest.TestCase):
             rows = provider.lookup_rows(file_numbers=["P/26/0042"])
 
         self.assertEqual(len(rows["P/26/0042"]), 1)
-        self.assertEqual(rows["P/26/0042"][0].buyer_name, "ANANTA GARMENTS LTD\\DHAKA")
+        self.assertEqual(rows["P/26/0042"][0].buyer_name, "ANANTA GARMENTS LTD.\\DHAKA.")
         self.assertEqual(rows["P/26/0042"][0].folder_buyer_name, "ANANTA GARMENTS LTD")
         fetch_mock.assert_called_once()
         self.assertEqual(fetch_mock.call_args.kwargs["base_url"], "https://erp.local")

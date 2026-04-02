@@ -8,13 +8,11 @@ WHITESPACE_PATTERN = re.compile(r"\s+")
 NON_PRINTABLE_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 DASH_PATTERN = re.compile(r"[\u2010-\u2015]")
 REPEATED_DASH_PATTERN = re.compile(r"-+")
-PUNCTUATION_SPACE_PATTERN = re.compile(r"[.,;:]+")
+PATH_PUNCTUATION_SPACE_PATTERN = re.compile(r"[;:]+")
 
 
 def normalize_buyer_name(raw_value: str) -> str | None:
     normalized = _shared_string_normalize(raw_value)
-    normalized = normalized.rstrip(".")
-    normalized = PUNCTUATION_SPACE_PATTERN.sub(" ", normalized)
     normalized = re.sub(r"\s*\\\s*", r"\\", normalized)
     normalized = WHITESPACE_PATTERN.sub(" ", normalized).strip()
     return normalized or None
@@ -25,7 +23,7 @@ def normalize_buyer_name_for_paths(raw_value: str) -> str | None:
     if "\\" in normalized:
         normalized = normalized.split("\\", 1)[0].strip()
     normalized = normalized.rstrip(".")
-    normalized = PUNCTUATION_SPACE_PATTERN.sub(" ", normalized)
+    normalized = PATH_PUNCTUATION_SPACE_PATTERN.sub(" ", normalized)
     normalized = WHITESPACE_PATTERN.sub(" ", normalized).strip()
     return normalized or None
 
