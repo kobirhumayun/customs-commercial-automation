@@ -128,6 +128,64 @@ class WriteExecutionTests(unittest.TestCase):
         self.assertTrue(all(not outcome.eligible_for_print for outcome in executed.mail_outcomes))
         self.assertTrue(all(not outcome.eligible_for_mail_move for outcome in executed.mail_outcomes))
 
+    def test_execute_live_write_batch_treats_excel_native_date_and_numeric_values_as_post_write_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            validation_result, initialized, workbook_snapshot, workbook_path = self._build_staged_validation_result(root)
+            status_transitions: list[str] = []
+
+            session = FakeWorkbookMutationSession(
+                workbook_snapshot,
+                post_write_overrides={
+                    (5002, 5): "2026-01-10T00:00:00",
+                    (5002, 6): "10000.0",
+                    (5002, 7): "2026-02-01T00:00:00",
+                    (5002, 8): "2026-03-01T00:00:00",
+                    (5002, 9): "5000.0",
+                    (5002, 11): "2026-01-15T00:00:00",
+                    (5002, 14): "2025-12-20T00:00:00",
+                },
+            )
+
+            class FakeProvider:
+                def open_write_session(self, *, operator_context, max_attempts=3):
+                    return WorkbookMutationOpenResult(
+                        preflight=WorkbookSessionPreflight(
+                            workbook_path=str(workbook_path),
+                            adapter_name="fake-xlwings",
+                            status="ready",
+                            attempt_count=1,
+                            host_name=operator_context.host_name if operator_context else "host",
+                            process_id=operator_context.process_id if operator_context else 1,
+                            session_id="excel-session-001",
+                            opened_at_utc="2026-03-28T00:00:00Z",
+                            read_only=False,
+                            save_capable=True,
+                        ),
+                        session=session,
+                    )
+
+            executed = execute_live_write_batch(
+                validation_result=validation_result,
+                workbook_path=workbook_path,
+                operator_context=initialized.run_report.operator_context,
+                session_provider=FakeProvider(),
+                run_report_persistor=lambda report: status_transitions.append(report.write_phase_status.value),
+            )
+
+        self.assertEqual(
+            status_transitions,
+            ["prevalidating_targets", "prevalidated", "applying", "committed"],
+        )
+        self.assertEqual(executed.run_report.write_phase_status, WritePhaseStatus.COMMITTED)
+        self.assertTrue(
+            all(
+                probe.classification == "matches_post_write"
+                for probe in executed.target_probes
+                if probe.probe_stage == "post_write"
+            )
+        )
+
     def _build_staged_validation_result(self, root: Path):
         workflow_year = __import__("datetime").datetime.now().year
         report_root = root / "reports"
@@ -254,7 +312,12 @@ class WriteExecutionTests(unittest.TestCase):
 
 
 class FakeWorkbookMutationSession:
-    def __init__(self, workbook_snapshot, save_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        workbook_snapshot,
+        save_error: Exception | None = None,
+        post_write_overrides: dict[tuple[int, int], str] | None = None,
+    ) -> None:
         self._snapshot = workbook_snapshot
         self._cell_values = {
             (row.row_index, column_index): value
@@ -262,6 +325,7 @@ class FakeWorkbookMutationSession:
             for column_index, value in row.values.items()
         }
         self._save_error = save_error
+        self._post_write_overrides = post_write_overrides or {}
         self.closed = False
         self.preflight = None
 
@@ -272,6 +336,8 @@ class FakeWorkbookMutationSession:
         self._cell_values[(row_index, column_index)] = "" if value is None else str(value)
 
     def read_cell(self, *, sheet_name: str, row_index: int, column_index: int) -> str | None:
+        if (row_index, column_index) in self._post_write_overrides:
+            return self._post_write_overrides[(row_index, column_index)]
         return self._cell_values.get((row_index, column_index), "")
 
     def save(self) -> None:

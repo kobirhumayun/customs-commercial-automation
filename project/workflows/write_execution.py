@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -454,4 +456,46 @@ def _persist_target_probes(
 def _normalize_probe_value(value: str | int | float | None) -> str | None:
     if value is None:
         return None
-    return str(value).strip()
+    normalized = str(value).strip()
+    if not normalized:
+        return normalized
+
+    date_value = _try_normalize_date(normalized)
+    if date_value is not None:
+        return date_value
+
+    numeric_value = _try_normalize_decimal(normalized)
+    if numeric_value is not None:
+        return numeric_value
+
+    return normalized
+
+
+def _try_normalize_date(value: str) -> str | None:
+    try:
+        parsed_datetime = datetime.fromisoformat(value)
+    except ValueError:
+        parsed_datetime = None
+    if parsed_datetime is not None:
+        if parsed_datetime.time() == datetime.min.time():
+            return parsed_datetime.date().isoformat()
+        return parsed_datetime.isoformat()
+
+    for fmt in ("%Y-%m-%d", "%d-%b-%y", "%d-%b-%Y", "%d/%m/%y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _try_normalize_decimal(value: str) -> str | None:
+    candidate = value.replace(",", "")
+    try:
+        decimal_value = Decimal(candidate)
+    except InvalidOperation:
+        return None
+    normalized = format(decimal_value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized or "0"
