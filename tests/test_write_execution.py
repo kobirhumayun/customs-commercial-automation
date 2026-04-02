@@ -186,7 +186,45 @@ class WriteExecutionTests(unittest.TestCase):
             )
         )
 
-    def _build_staged_validation_result(self, root: Path):
+    def test_execute_live_write_batch_applies_mtr_quantity_number_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            validation_result, initialized, workbook_snapshot, workbook_path = self._build_staged_validation_result(
+                root, lc_unit="MTR"
+            )
+
+            session = FakeWorkbookMutationSession(workbook_snapshot)
+
+            class FakeProvider:
+                def open_write_session(self, *, operator_context, max_attempts=3):
+                    return WorkbookMutationOpenResult(
+                        preflight=WorkbookSessionPreflight(
+                            workbook_path=str(workbook_path),
+                            adapter_name="fake-xlwings",
+                            status="ready",
+                            attempt_count=1,
+                            host_name=operator_context.host_name if operator_context else "host",
+                            process_id=operator_context.process_id if operator_context else 1,
+                            session_id="excel-session-001",
+                            opened_at_utc="2026-03-28T00:00:00Z",
+                            read_only=False,
+                            save_capable=True,
+                        ),
+                        session=session,
+                    )
+
+            executed = execute_live_write_batch(
+                validation_result=validation_result,
+                workbook_path=workbook_path,
+                operator_context=initialized.run_report.operator_context,
+                session_provider=FakeProvider(),
+            )
+
+        self.assertEqual(executed.run_report.write_phase_status, WritePhaseStatus.COMMITTED)
+        quantity_write = next(call for call in session.write_calls if call["column_index"] == 9)
+        self.assertEqual(quantity_write["number_format"], '#,###.00 "Mtr"')
+
+    def _build_staged_validation_result(self, root: Path, *, lc_unit: str = "YDS"):
         workflow_year = __import__("datetime").datetime.now().year
         report_root = root / "reports"
         run_root = root / "runs"
@@ -248,7 +286,7 @@ class WriteExecutionTests(unittest.TestCase):
                         "ship_date": "2026-02-01",
                         "expiry_date": "2026-03-01",
                         "lc_qty": "5000",
-                        "lc_unit": "YDS",
+                        "lc_unit": lc_unit,
                         "amd_no": "05",
                         "amd_date": "2026-01-15",
                         "nego_bank": "XYZ BANK",
@@ -328,11 +366,29 @@ class FakeWorkbookMutationSession:
         self._post_write_overrides = post_write_overrides or {}
         self.closed = False
         self.preflight = None
+        self.write_calls: list[dict[str, object]] = []
 
     def capture_snapshot(self):
         return self._snapshot
 
-    def write_cell(self, *, sheet_name: str, row_index: int, column_index: int, value: object) -> None:
+    def write_cell(
+        self,
+        *,
+        sheet_name: str,
+        row_index: int,
+        column_index: int,
+        value: object,
+        number_format: str | None = None,
+    ) -> None:
+        self.write_calls.append(
+            {
+                "sheet_name": sheet_name,
+                "row_index": row_index,
+                "column_index": column_index,
+                "value": value,
+                "number_format": number_format,
+            }
+        )
         self._cell_values[(row_index, column_index)] = "" if value is None else str(value)
 
     def read_cell(self, *, sheet_name: str, row_index: int, column_index: int) -> str | None:

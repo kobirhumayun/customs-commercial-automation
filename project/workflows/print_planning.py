@@ -385,6 +385,7 @@ def _parse_write_operation(payload: dict[str, Any]) -> WriteOperation:
         expected_pre_write_value=payload.get("expected_pre_write_value"),
         expected_post_write_value=payload.get("expected_post_write_value"),
         row_eligibility_checks=[str(value) for value in payload.get("row_eligibility_checks", [])],
+        number_format=str(payload["number_format"]) if payload.get("number_format") is not None else None,
     )
 
 

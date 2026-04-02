@@ -150,6 +150,7 @@ def execute_live_write_batch(
                 row_index=operation.row_index,
                 column_index=probe.column_index,
                 value=operation.expected_post_write_value,
+                number_format=operation.number_format,
             )
 
         post_write_probes = _collect_post_write_probes(

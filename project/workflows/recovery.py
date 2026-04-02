@@ -569,6 +569,7 @@ def _parse_write_operation(item: Any) -> WriteOperation:
         expected_pre_write_value=item.get("expected_pre_write_value"),
         expected_post_write_value=item.get("expected_post_write_value"),
         row_eligibility_checks=[str(value) for value in item.get("row_eligibility_checks", [])],
+        number_format=str(item["number_format"]) if item.get("number_format") is not None else None,
     )
 
 

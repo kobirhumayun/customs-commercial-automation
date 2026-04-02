@@ -106,6 +106,7 @@ class WriteOperation:
     expected_pre_write_value: str | int | float | None
     expected_post_write_value: str | int | float | None
     row_eligibility_checks: list[str]
+    number_format: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

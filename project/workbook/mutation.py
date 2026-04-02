@@ -37,7 +37,15 @@ class WorkbookMutationSession(Protocol):
     def capture_snapshot(self) -> WorkbookSnapshot:
         """Capture the current workbook state without closing the session."""
 
-    def write_cell(self, *, sheet_name: str, row_index: int, column_index: int, value: object) -> None:
+    def write_cell(
+        self,
+        *,
+        sheet_name: str,
+        row_index: int,
+        column_index: int,
+        value: object,
+        number_format: str | None = None,
+    ) -> None:
         """Apply one cell mutation inside the active workbook session."""
 
     def read_cell(self, *, sheet_name: str, row_index: int, column_index: int) -> str | None:
@@ -69,9 +77,20 @@ class XLWingsWorkbookMutationSession:
     def capture_snapshot(self) -> WorkbookSnapshot:
         return _build_snapshot_from_book(self.book)
 
-    def write_cell(self, *, sheet_name: str, row_index: int, column_index: int, value: object) -> None:
+    def write_cell(
+        self,
+        *,
+        sheet_name: str,
+        row_index: int,
+        column_index: int,
+        value: object,
+        number_format: str | None = None,
+    ) -> None:
         sheet = _resolve_sheet(self.book, sheet_name)
-        sheet.range((row_index, column_index)).value = value
+        target_range = sheet.range((row_index, column_index))
+        target_range.value = value
+        if number_format is not None:
+            target_range.number_format = number_format
 
     def read_cell(self, *, sheet_name: str, row_index: int, column_index: int) -> str | None:
         sheet = _resolve_sheet(self.book, sheet_name)

@@ -71,7 +71,13 @@ def prevalidate_staged_write_plan(
             failure_reason = "sheet_name_mismatch"
         elif column_index is None:
             failure_reason = "column_key_unmapped"
-        elif not _row_eligibility_satisfied(operation, row, max_existing_row, observed_value):
+        elif not _row_eligibility_satisfied(
+            operation,
+            row,
+            max_existing_row,
+            observed_value,
+            buyer_name_column_index=mapping.get("buyer_name"),
+        ):
             failure_reason = "row_eligibility_failed"
 
         classification = _classify_probe(
@@ -158,6 +164,8 @@ def _row_eligibility_satisfied(
     row: WorkbookRow | None,
     max_existing_row: int,
     observed_value: str | None,
+    *,
+    buyer_name_column_index: int | None,
 ) -> bool:
     checks = set(operation.row_eligibility_checks)
     if "append_target_row_is_new" in checks:
@@ -165,6 +173,16 @@ def _row_eligibility_satisfied(
             return False
         if operation.row_index <= max_existing_row:
             return False
+    if "append_target_row_has_blank_buyer_name_or_is_new" in checks:
+        if row is None:
+            if operation.row_index <= max_existing_row:
+                return False
+        else:
+            if buyer_name_column_index is None:
+                return False
+            buyer_name_value = row.values.get(buyer_name_column_index, "")
+            if _normalize_value(buyer_name_value) not in {"", None}:
+                return False
     if "target_cell_blank_by_construction" in checks:
         if _normalize_value(observed_value) not in {"", None}:
             return False

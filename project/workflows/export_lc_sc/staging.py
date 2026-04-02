@@ -41,6 +41,7 @@ EXPORT_FIELD_VALUE_MAP = (
 )
 
 REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty")
+MTR_QUANTITY_NUMBER_FORMAT = '#,###.00 "Mtr"'
 
 
 def stage_export_append_operations(
@@ -76,7 +77,10 @@ def stage_export_append_operations(
         row.values.get(header_mapping["file_no"], "").strip().upper()
         for row in workbook_snapshot.rows
     }
-    next_row_index = max((row.row_index for row in workbook_snapshot.rows), default=2) + 1
+    next_row_index = _resolve_next_export_row_index(
+        workbook_snapshot=workbook_snapshot,
+        buyer_name_column_index=header_mapping["buyer_name"],
+    )
     operation_index = 0
     staged_write_operations: list[WriteOperation] = []
     discrepancies: list[ExportStagingDiscrepancy] = []
@@ -111,6 +115,11 @@ def stage_export_append_operations(
             continue
 
         for column_key, value_getter in EXPORT_FIELD_VALUE_MAP:
+            number_format = (
+                MTR_QUANTITY_NUMBER_FORMAT
+                if column_key == "quantity_fabrics" and match.canonical_row.lc_unit.strip().upper() == "MTR"
+                else None
+            )
             staged_write_operations.append(
                 WriteOperation(
                     write_operation_id=build_write_operation_id(
@@ -130,9 +139,10 @@ def stage_export_append_operations(
                     expected_pre_write_value=None,
                     expected_post_write_value=value_getter(match),
                     row_eligibility_checks=[
-                        "append_target_row_is_new",
+                        "append_target_row_has_blank_buyer_name_or_is_new",
                         "target_cell_blank_by_construction",
                     ],
+                    number_format=number_format,
                 )
             )
             operation_index += 1
@@ -148,3 +158,15 @@ def stage_export_append_operations(
         discrepancies=discrepancies,
         decision_reasons=decision_reasons,
     )
+
+
+def _resolve_next_export_row_index(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    buyer_name_column_index: int,
+) -> int:
+    sorted_rows = sorted(workbook_snapshot.rows, key=lambda row: row.row_index)
+    for row in sorted_rows:
+        if not row.values.get(buyer_name_column_index, "").strip():
+            return row.row_index
+    return max((row.row_index for row in workbook_snapshot.rows), default=2) + 1
