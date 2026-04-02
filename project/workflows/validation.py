@@ -24,7 +24,7 @@ from project.storage import AttachmentContentProvider, DocumentSaveIssue, Docume
 from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
-from project.workbook import WorkbookSnapshot
+from project.workbook import EXPORT_HEADER_SPECS, WorkbookRow, WorkbookSnapshot, resolve_header_mapping
 from project.workflows.export_lc_sc.document_classification import (
     ClassifiedDocumentSet,
     DocumentClassificationDiscrepancy,
@@ -79,6 +79,7 @@ def validate_run_snapshot(
     discrepancy_reports: list[DiscrepancyReport] = []
     staged_write_plan: list[WriteOperation] = []
     summary = {"pass": 0, "warning": 0, "hard_block": 0}
+    working_workbook_snapshot = workbook_snapshot
 
     for mail in run_report.mail_snapshot:
         context = WorkflowValidationContext(
@@ -115,7 +116,7 @@ def validate_run_snapshot(
             mail=mail,
             aggregated=aggregated,
             workflow_payload=context.workflow_payload,
-            workbook_snapshot=workbook_snapshot,
+            workbook_snapshot=working_workbook_snapshot,
         )
         mail_outcome = _build_mail_outcome(
             descriptor=descriptor,
@@ -142,6 +143,11 @@ def validate_run_snapshot(
         discrepancy_reports.extend(mail_discrepancies)
         staged_write_plan.extend(staging_result.staged_write_operations)
         summary[mail_outcome.final_decision.value] += 1
+        working_workbook_snapshot = _advance_workbook_snapshot_for_staged_writes(
+            descriptor=descriptor,
+            workbook_snapshot=working_workbook_snapshot,
+            staged_write_operations=staging_result.staged_write_operations,
+        )
 
     staged_write_plan_hash = canonical_json_hash(to_jsonable(staged_write_plan))
 
@@ -429,6 +435,46 @@ def _stage_mail_if_eligible(
         mail_id=mail.mail_id,
         payload=workflow_payload,
         workbook_snapshot=workbook_snapshot,
+    )
+
+
+def _advance_workbook_snapshot_for_staged_writes(
+    *,
+    descriptor: WorkflowDescriptor,
+    workbook_snapshot: WorkbookSnapshot | None,
+    staged_write_operations: list[WriteOperation],
+) -> WorkbookSnapshot | None:
+    if workbook_snapshot is None or not staged_write_operations:
+        return workbook_snapshot
+    if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
+        return workbook_snapshot
+
+    header_mapping = resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+    if header_mapping is None:
+        return workbook_snapshot
+
+    column_indices_by_key = dict(header_mapping)
+    rows_by_index = {
+        row.row_index: dict(row.values)
+        for row in workbook_snapshot.rows
+    }
+    for operation in staged_write_operations:
+        column_index = column_indices_by_key.get(operation.column_key)
+        if column_index is None:
+            continue
+        row_values = rows_by_index.setdefault(operation.row_index, {})
+        row_values[column_index] = (
+            "" if operation.expected_post_write_value is None else str(operation.expected_post_write_value)
+        )
+
+    updated_rows = [
+        WorkbookRow(row_index=row_index, values=rows_by_index[row_index])
+        for row_index in sorted(rows_by_index)
+    ]
+    return WorkbookSnapshot(
+        sheet_name=workbook_snapshot.sheet_name,
+        headers=list(workbook_snapshot.headers),
+        rows=updated_rows,
     )
 
 
