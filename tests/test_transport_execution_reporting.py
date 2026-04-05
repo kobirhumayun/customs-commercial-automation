@@ -23,6 +23,7 @@ class TransportExecutionReportingTests(unittest.TestCase):
                     {
                         "adapter_name": "win32com_outlook",
                         "manual_verification_summary": {"verified_count": 1},
+                        "write_disposition": "duplicate_only_noop",
                     },
                     {
                         "adapter_name": "win32com_outlook",
@@ -37,6 +38,7 @@ class TransportExecutionReportingTests(unittest.TestCase):
         self.assertEqual(payload["summary_counts"]["print_adapter_count"], 1)
         self.assertEqual(payload["summary_counts"]["mail_move_adapter_count"], 1)
         self.assertEqual(payload["summary_counts"]["manual_verification_visible_count"], 3)
+        self.assertEqual(payload["summary_counts"]["duplicate_only_mail_move_count"], 1)
         self.assertEqual(payload["adapter_summary"]["print_adapters"], ["acrobat"])
         self.assertEqual(payload["adapter_summary"]["mail_move_adapters"], ["win32com_outlook"])
 

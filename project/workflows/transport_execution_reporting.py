@@ -28,6 +28,11 @@ def build_transport_execution_report(
     manual_verification_visible_count = sum(
         1 for marker in print_markers + mail_move_markers if isinstance(marker.get("manual_verification_summary"), dict)
     )
+    duplicate_only_move_count = sum(
+        1
+        for marker in mail_move_markers
+        if str(marker.get("write_disposition", "")).strip() == "duplicate_only_noop"
+    )
 
     return {
         "summary_counts": {
@@ -36,6 +41,7 @@ def build_transport_execution_report(
             "print_adapter_count": len(print_adapter_names),
             "mail_move_adapter_count": len(mail_move_adapter_names),
             "manual_verification_visible_count": manual_verification_visible_count,
+            "duplicate_only_mail_move_count": duplicate_only_move_count,
         },
         "print_execution": print_marker_summary,
         "mail_move_execution": mail_move_marker_summary,

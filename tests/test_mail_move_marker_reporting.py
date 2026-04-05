@@ -23,6 +23,8 @@ class MailMoveMarkerReportingTests(unittest.TestCase):
                   "move_status": "moved",
                   "moved_at_utc": "2026-03-30T00:00:00Z",
                   "manual_verification_summary": {"verified_count": 1},
+                  "write_disposition": "duplicate_only_noop",
+                  "mail_move_policy_reason": "Mail move remains eligible because this mail was handled as duplicate-only and requires no print output.",
                   "move_execution_receipt": {
                     "adapter_name": "win32com_outlook",
                     "acknowledgment_mode": "parent_folder_entry_id_verification",
@@ -43,6 +45,8 @@ class MailMoveMarkerReportingTests(unittest.TestCase):
         self.assertEqual(marker["acknowledgment_mode"], "parent_folder_entry_id_verification")
         self.assertEqual(marker["acknowledged_source_folder"], "src-folder")
         self.assertEqual(marker["acknowledged_destination_folder"], "dst-folder")
+        self.assertEqual(marker["write_disposition"], "duplicate_only_noop")
+        self.assertIn("duplicate-only", marker["mail_move_policy_reason"])
 
 
 if __name__ == "__main__":

@@ -171,6 +171,7 @@ class RunReportingTests(unittest.TestCase):
         self.assertEqual(summary["duplicate_summary"]["mixed_duplicate_and_new_mail_count"], 1)
         self.assertEqual(summary["write_disposition_counts"]["duplicate_only_noop"], 1)
         self.assertEqual(summary["write_disposition_counts"]["mixed_duplicate_and_new_writes"], 1)
+        self.assertEqual(summary["mail_move_policy_summary"]["eligible_mail_count"], 0)
 
 
 if __name__ == "__main__":

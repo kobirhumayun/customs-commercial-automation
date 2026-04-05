@@ -16,7 +16,12 @@ from project.models import (
 )
 from project.outlook import SimulatedMailMoveProvider
 from project.storage import create_run_artifact_layout
-from project.workflows.mail_moves import execute_mail_moves, summarize_mail_move_manual_verification
+from project.workflows.mail_moves import (
+    build_mail_move_operations,
+    execute_mail_moves,
+    summarize_mail_move_manual_verification,
+    summarize_mail_move_policy,
+)
 
 
 class MailMoveExecutionTests(unittest.TestCase):
@@ -33,7 +38,7 @@ class MailMoveExecutionTests(unittest.TestCase):
                 print_phase_status=PrintPhaseStatus.COMPLETED,
                 mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
             )
-            mail_outcomes = [_build_mail_outcome()]
+            mail_outcomes = [_build_mail_outcome(write_disposition="duplicate_only_noop")]
             phase_updates: list[str] = []
 
             executed_report, executed_outcomes, move_operations, discrepancies = execute_mail_moves(
@@ -59,6 +64,8 @@ class MailMoveExecutionTests(unittest.TestCase):
         self.assertIn("Manual PDF verification status at mail-move time", executed_outcomes[0].decision_reasons[-2])
         self.assertTrue(marker_exists)
         self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
+        self.assertEqual(marker_payload["write_disposition"], "duplicate_only_noop")
+        self.assertIn("duplicate-only", marker_payload["mail_move_policy_reason"])
         self.assertEqual(marker_payload["move_execution_receipt"]["adapter_name"], "simulated")
         self.assertEqual(
             marker_payload["move_execution_receipt"]["acknowledgment_mode"],
@@ -151,6 +158,40 @@ class MailMoveExecutionTests(unittest.TestCase):
         self.assertEqual(summary["pending_count"], 1)
         self.assertEqual(summary["untracked_count"], 0)
 
+    def test_build_mail_move_operations_excludes_no_write_noop_mail(self) -> None:
+        run_report = _build_run_report(
+            print_phase_status=PrintPhaseStatus.COMPLETED,
+            mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+        )
+
+        updated_outcomes, move_operations = build_mail_move_operations(
+            run_report=run_report,
+            mail_outcomes=[_build_mail_outcome(write_disposition="no_write_noop")],
+        )
+
+        self.assertEqual(move_operations, [])
+        self.assertFalse(updated_outcomes[0].eligible_for_mail_move)
+        self.assertIn("Mail move not planned", updated_outcomes[0].decision_reasons[-1])
+
+    def test_summarize_mail_move_policy_counts_duplicate_only_and_new_write_mails(self) -> None:
+        summary = summarize_mail_move_policy(
+            [
+                _build_mail_outcome(write_disposition="duplicate_only_noop"),
+                _build_mail_outcome(mail_id="mail-2", source_entry_id="entry-2", write_disposition="new_writes_staged"),
+                _build_mail_outcome(
+                    mail_id="mail-3",
+                    source_entry_id="entry-3",
+                    write_disposition="no_write_noop",
+                    eligible_for_mail_move=False,
+                ),
+            ]
+        )
+
+        self.assertEqual(summary["eligible_mail_count"], 2)
+        self.assertEqual(summary["duplicate_only_move_eligible_count"], 1)
+        self.assertEqual(summary["new_writes_move_eligible_count"], 1)
+        self.assertEqual(summary["other_move_eligible_count"], 0)
+
 
 def _build_run_report(
     *,
@@ -188,6 +229,8 @@ def _build_mail_outcome(
     mail_id: str = "mail-1",
     source_entry_id: str = "entry-1",
     manual_document_verification_summary: dict | None = None,
+    write_disposition: str | None = "new_writes_staged",
+    eligible_for_mail_move: bool = True,
 ) -> MailOutcomeRecord:
     return MailOutcomeRecord(
         run_id="run-1",
@@ -199,11 +242,12 @@ def _build_mail_outcome(
         decision_reasons=[],
         eligible_for_write=False,
         eligible_for_print=False,
-        eligible_for_mail_move=True,
+        eligible_for_mail_move=eligible_for_mail_move,
         source_entry_id=source_entry_id,
         subject_raw="subject",
         sender_address="a@example.com",
         print_group_id="group-1",
+        write_disposition=write_disposition,
         manual_document_verification_summary=manual_document_verification_summary
         or {
             "document_count": 1,

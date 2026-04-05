@@ -7,6 +7,7 @@ from project.models import MailOutcomeRecord, MailProcessingStatus, RunReport, W
 from project.storage import RunArtifactPaths
 from project.workflows.duplicate_handling import classify_write_disposition, summarize_duplicate_decision_reasons
 from project.workflows.document_verification import summarize_manual_document_verification
+from project.workflows.mail_moves import summarize_mail_move_policy
 
 
 def summarize_run_status(
@@ -27,6 +28,7 @@ def summarize_run_status(
         "mail_processing_status_counts": mail_status_counts,
         "duplicate_summary": duplicate_summary,
         "write_disposition_counts": _write_disposition_counts(mail_outcomes),
+        "mail_move_policy_summary": summarize_mail_move_policy(mail_outcomes),
         "phases": {
             "write": {
                 "status": run_report.write_phase_status.value,

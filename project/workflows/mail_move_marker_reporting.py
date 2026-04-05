@@ -28,6 +28,8 @@ def summarize_mail_move_markers(*, mail_move_markers_dir: Path) -> dict[str, Any
                 "move_status": payload.get("move_status"),
                 "moved_at_utc": payload.get("moved_at_utc"),
                 "manual_verification_summary": payload.get("manual_verification_summary"),
+                "write_disposition": payload.get("write_disposition"),
+                "mail_move_policy_reason": payload.get("mail_move_policy_reason"),
                 "adapter_name": receipt.get("adapter_name") if isinstance(receipt, dict) else None,
                 "acknowledgment_mode": (
                     receipt.get("acknowledgment_mode") if isinstance(receipt, dict) else None

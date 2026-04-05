@@ -39,7 +39,11 @@ def build_mail_move_operations(
         (
             outcome
             for outcome in mail_outcomes
-            if outcome.final_decision != FinalDecision.HARD_BLOCK and outcome.eligible_for_mail_move
+            if (
+                outcome.final_decision != FinalDecision.HARD_BLOCK
+                and outcome.eligible_for_mail_move
+                and _mail_move_policy_allows(outcome)
+            )
         ),
         key=lambda outcome: (
             order_index.get(outcome.mail_id, len(order_index)),
@@ -74,11 +78,26 @@ def build_mail_move_operations(
                 else outcome.mail_move_operation_id
             ),
             decision_reasons=_append_reason(
-                outcome.decision_reasons,
+                _append_reason(
+                    outcome.decision_reasons,
+                    _mail_move_policy_reason(outcome),
+                ),
                 f"Planned mail move {operations_by_mail_id[outcome.mail_id].mail_move_operation_id}.",
             )
             if outcome.mail_id in operations_by_mail_id
-            else list(outcome.decision_reasons),
+            else (
+                _append_reason(
+                    outcome.decision_reasons,
+                    "Mail move not planned because the mail produced no workbook writes and no duplicate-only handling signal.",
+                )
+                if outcome.eligible_for_mail_move and not _mail_move_policy_allows(outcome)
+                else list(outcome.decision_reasons)
+            ),
+            eligible_for_mail_move=(
+                False
+                if outcome.eligible_for_mail_move and not _mail_move_policy_allows(outcome)
+                else outcome.eligible_for_mail_move
+            ),
         )
         for outcome in mail_outcomes
     ]
@@ -196,6 +215,11 @@ def execute_mail_moves(
                     "move_status": "moved",
                     "manual_verification_summary": dict(
                         _manual_verification_summary_for_mail(updated_mail_outcomes, operation.mail_id)
+                    ),
+                    "write_disposition": _write_disposition_for_mail(updated_mail_outcomes, operation.mail_id),
+                    "mail_move_policy_reason": _mail_move_policy_reason_for_mail(
+                        updated_mail_outcomes,
+                        operation.mail_id,
                     ),
                     "move_execution_receipt": to_jsonable(move_receipt),
                     "moved_at_utc": utc_timestamp(),
@@ -345,6 +369,30 @@ def summarize_mail_move_manual_verification(mail_outcomes: list[MailOutcomeRecor
     }
 
 
+def summarize_mail_move_policy(mail_outcomes: list[MailOutcomeRecord]) -> dict[str, int]:
+    summary = {
+        "eligible_mail_count": 0,
+        "duplicate_only_move_eligible_count": 0,
+        "mixed_duplicate_and_new_move_eligible_count": 0,
+        "new_writes_move_eligible_count": 0,
+        "other_move_eligible_count": 0,
+    }
+    for outcome in mail_outcomes:
+        if not outcome.eligible_for_mail_move:
+            continue
+        summary["eligible_mail_count"] += 1
+        disposition = str(outcome.write_disposition or "").strip()
+        if disposition == "duplicate_only_noop":
+            summary["duplicate_only_move_eligible_count"] += 1
+        elif disposition == "mixed_duplicate_and_new_writes":
+            summary["mixed_duplicate_and_new_move_eligible_count"] += 1
+        elif disposition == "new_writes_staged":
+            summary["new_writes_move_eligible_count"] += 1
+        else:
+            summary["other_move_eligible_count"] += 1
+    return summary
+
+
 def _manual_verification_summary_for_mail(
     mail_outcomes: list[MailOutcomeRecord],
     mail_id: str,
@@ -367,6 +415,44 @@ def _append_manual_verification_reason(
         f"{summary.get('pending_count', 0)} pending, {summary.get('untracked_count', 0)} untracked."
     )
     return _append_reason(reasons, reason)
+
+
+def _mail_move_policy_allows(outcome: MailOutcomeRecord) -> bool:
+    disposition = str(outcome.write_disposition or "").strip()
+    if disposition == "no_write_noop":
+        return False
+    return True
+
+
+def _mail_move_policy_reason(outcome: MailOutcomeRecord) -> str:
+    disposition = str(outcome.write_disposition or "").strip()
+    if disposition == "duplicate_only_noop":
+        return "Mail move remains eligible because this mail was handled as duplicate-only and requires no print output."
+    if disposition == "mixed_duplicate_and_new_writes":
+        return "Mail move remains eligible because this mail contained both duplicate files and newly written files."
+    if disposition == "new_writes_staged":
+        return "Mail move remains eligible because this mail produced newly written workbook rows."
+    return "Mail move remains eligible because validation completed without a hard block."
+
+
+def _write_disposition_for_mail(
+    mail_outcomes: list[MailOutcomeRecord],
+    mail_id: str,
+) -> str | None:
+    outcome = next((item for item in mail_outcomes if item.mail_id == mail_id), None)
+    if outcome is None or outcome.write_disposition is None:
+        return None
+    return str(outcome.write_disposition)
+
+
+def _mail_move_policy_reason_for_mail(
+    mail_outcomes: list[MailOutcomeRecord],
+    mail_id: str,
+) -> str | None:
+    outcome = next((item for item in mail_outcomes if item.mail_id == mail_id), None)
+    if outcome is None:
+        return None
+    return _mail_move_policy_reason(outcome)
 
 
 def _build_discrepancy(
