@@ -66,6 +66,9 @@ class WorkflowHandoffExportTests(unittest.TestCase):
         self.assertIn("workflow_summary", payload["workflow_handoff"])
         self.assertIn("recovery_packet", payload["workflow_handoff"])
         self.assertIn("recent_handoffs", payload["workflow_handoff"])
+        self.assertEqual(payload["summary_counts"]["handled_no_action_count"], 0)
+        self.assertEqual(payload["summary_counts"]["duplicate_only_handled_count"], 0)
+        self.assertEqual(payload["summary_counts"]["no_write_noop_handled_count"], 0)
         self.assertEqual(payload["summary_counts"]["recent_handoff_count"], 1)
         self.assertEqual(payload["summary_counts"]["total_handoff_count"], 1)
 

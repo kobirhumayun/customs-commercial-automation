@@ -67,6 +67,7 @@ class OperatorQueueTests(unittest.TestCase):
         self.assertEqual(payload["queue_count"], 2)
         self.assertEqual(payload["recovery_candidate_count"], 1)
         self.assertEqual(payload["manual_verification_pending_count"], 1)
+        self.assertEqual(payload["handled_no_action_count"], 0)
         self.assertEqual(payload["runs"][0]["run_id"], "run-recovery")
         self.assertEqual(payload["runs"][0]["queue_priority"], "recovery")
         self.assertEqual(payload["runs"][1]["run_id"], "run-manual")
@@ -106,6 +107,53 @@ class OperatorQueueTests(unittest.TestCase):
 
         self.assertEqual(payload["queue_count"], 2)
         self.assertEqual([item["run_id"] for item in payload["runs"]], ["run-3", "run-2"])
+
+    def test_build_operator_queue_tracks_duplicate_only_handled_runs_outside_attention_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            run_dir = root / "export_lc_sc" / "run-duplicate-only"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "run_metadata.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-duplicate-only",
+                        "started_at_utc": "2026-04-01T00:00:00Z",
+                        "write_phase_status": "committed",
+                        "print_phase_status": "completed",
+                        "mail_move_phase_status": "completed",
+                        "summary": {},
+                        "print_group_order": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "mail_outcomes.jsonl").write_text(
+                json.dumps(
+                    {
+                        "mail_id": "mail-1",
+                        "decision_reasons": [
+                            "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                        ],
+                        "staged_write_operations": [],
+                        "write_disposition": "duplicate_only_noop",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = build_operator_queue(
+                run_artifact_root=root,
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                limit=10,
+            )
+
+        self.assertEqual(payload["queue_count"], 0)
+        self.assertEqual(payload["handled_no_action_count"], 1)
+        self.assertEqual(payload["duplicate_only_handled_count"], 1)
+        self.assertEqual(payload["no_write_noop_handled_count"], 0)
+        self.assertEqual(payload["handled_runs"][0]["run_id"], "run-duplicate-only")
+        self.assertEqual(payload["handled_runs"][0]["handled_category"], "duplicate_only_handled")
 
 
 if __name__ == "__main__":

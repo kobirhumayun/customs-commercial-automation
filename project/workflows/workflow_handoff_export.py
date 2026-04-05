@@ -53,6 +53,13 @@ def build_workflow_handoff_export(
             "manual_verification_pending_count": workflow_summary["summary_counts"][
                 "manual_verification_pending_count"
             ],
+            "handled_no_action_count": workflow_summary["summary_counts"]["handled_no_action_count"],
+            "duplicate_only_handled_count": workflow_summary["summary_counts"][
+                "duplicate_only_handled_count"
+            ],
+            "no_write_noop_handled_count": workflow_summary["summary_counts"][
+                "no_write_noop_handled_count"
+            ],
             "recent_handoff_count": recent_handoffs["handoff_count"],
             "total_handoff_count": recent_handoffs["total_handoff_count"],
         },

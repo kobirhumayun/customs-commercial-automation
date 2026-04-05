@@ -21,11 +21,21 @@ def build_operator_queue(
         limit=max(limit, 1_000_000),
     )
     queued_runs: list[dict[str, Any]] = []
+    handled_runs: list[dict[str, Any]] = []
     recovery_candidate_count = 0
     manual_verification_pending_count = 0
     for run in indexed["runs"]:
         queue_reasons = _build_queue_reasons(run)
         if not queue_reasons:
+            handled_reason = _build_handled_reason(run)
+            if handled_reason is not None:
+                handled_runs.append(
+                    {
+                        **run,
+                        "handled_category": handled_reason["code"],
+                        "handled_reason": handled_reason["message"],
+                    }
+                )
             continue
         if any(reason["code"] == "recovery_attention_needed" for reason in queue_reasons):
             recovery_candidate_count += 1
@@ -48,6 +58,20 @@ def build_operator_queue(
     )
     queued_runs.sort(key=_queue_sort_key)
     queued_runs = queued_runs[:limit]
+    handled_runs.sort(
+        key=lambda item: (
+            str(item.get("started_at_utc") or ""),
+            str(item.get("run_id") or ""),
+        ),
+        reverse=True,
+    )
+    handled_runs = handled_runs[:limit]
+    duplicate_only_handled_count = sum(
+        1 for run in handled_runs if run.get("handled_category") == "duplicate_only_handled"
+    )
+    no_write_noop_handled_count = sum(
+        1 for run in handled_runs if run.get("handled_category") == "no_write_noop_handled"
+    )
     return {
         "workflow_id": workflow_id.value,
         "run_artifact_root": indexed["run_artifact_root"],
@@ -56,7 +80,11 @@ def build_operator_queue(
         "queue_count": len(queued_runs),
         "recovery_candidate_count": recovery_candidate_count,
         "manual_verification_pending_count": manual_verification_pending_count,
+        "handled_no_action_count": len(handled_runs),
+        "duplicate_only_handled_count": duplicate_only_handled_count,
+        "no_write_noop_handled_count": no_write_noop_handled_count,
         "runs": queued_runs,
+        "handled_runs": handled_runs,
     }
 
 
@@ -116,6 +144,35 @@ def _queue_priority(queue_reasons: list[dict[str, str]]) -> str:
     if any(reason["code"] == "recovery_attention_needed" for reason in queue_reasons):
         return "recovery"
     return "manual_verification"
+
+
+def _build_handled_reason(run: dict[str, Any]) -> dict[str, str] | None:
+    dispositions = (
+        dict(run.get("write_disposition_counts", {}))
+        if isinstance(run.get("write_disposition_counts"), dict)
+        else {}
+    )
+    duplicate_only_count = int(dispositions.get("duplicate_only_noop", 0) or 0)
+    no_write_noop_count = int(dispositions.get("no_write_noop", 0) or 0)
+    new_writes_count = int(dispositions.get("new_writes_staged", 0) or 0)
+    mixed_count = int(dispositions.get("mixed_duplicate_and_new_writes", 0) or 0)
+    if duplicate_only_count > 0 and new_writes_count == 0 and mixed_count == 0:
+        return {
+            "code": "duplicate_only_handled",
+            "message": (
+                "This run only encountered duplicate file numbers that were intentionally suppressed, "
+                "so no operator action is required."
+            ),
+        }
+    if no_write_noop_count > 0 and duplicate_only_count == 0 and new_writes_count == 0 and mixed_count == 0:
+        return {
+            "code": "no_write_noop_handled",
+            "message": (
+                "This run completed without new workbook writes or duplicate-handling actions, "
+                "so no operator action is required."
+            ),
+        }
+    return None
 
 
 def _queue_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
