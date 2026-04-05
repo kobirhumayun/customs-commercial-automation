@@ -362,6 +362,11 @@ def _parse_mail_outcome(payload: dict[str, Any]) -> MailOutcomeRecord:
         file_numbers_extracted=[str(value) for value in payload.get("file_numbers_extracted", [])],
         saved_documents=list(payload.get("saved_documents", [])),
         staged_write_operations=list(payload.get("staged_write_operations", [])),
+        write_disposition=(
+            str(payload["write_disposition"]).strip()
+            if payload.get("write_disposition") is not None
+            else None
+        ),
         manual_document_verification_summary=(
             dict(payload["manual_document_verification_summary"])
             if isinstance(payload.get("manual_document_verification_summary"), dict)

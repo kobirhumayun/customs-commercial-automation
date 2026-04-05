@@ -1,20 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 from typing import Any
 
 from project.models import MailOutcomeRecord, MailProcessingStatus, RunReport, WriteOperation
 from project.storage import RunArtifactPaths
+from project.workflows.duplicate_handling import classify_write_disposition, summarize_duplicate_decision_reasons
 from project.workflows.document_verification import summarize_manual_document_verification
-
-
-DUPLICATE_IN_WORKBOOK_REASON_PATTERN = re.compile(
-    r"^Skipped workbook append for (?P<file_number>P/\d{2}/\d{4}) because the file number already exists in the workbook\.$"
-)
-DUPLICATE_IN_RUN_REASON_PATTERN = re.compile(
-    r"^Skipped workbook append for (?P<file_number>P/\d{2}/\d{4}) because the file number was already staged earlier in this run\.$"
-)
 
 
 def summarize_run_status(
@@ -34,6 +26,7 @@ def summarize_run_status(
         "decision_summary": dict(run_report.summary),
         "mail_processing_status_counts": mail_status_counts,
         "duplicate_summary": duplicate_summary,
+        "write_disposition_counts": _write_disposition_counts(mail_outcomes),
         "phases": {
             "write": {
                 "status": run_report.write_phase_status.value,
@@ -88,15 +81,10 @@ def summarize_duplicate_file_handling(mail_outcomes: list[MailOutcomeRecord]) ->
     mixed_duplicate_and_new_mail_count = 0
 
     for outcome in mail_outcomes:
-        duplicate_in_workbook_for_mail = 0
-        duplicate_in_run_for_mail = 0
-        for reason in outcome.decision_reasons:
-            if DUPLICATE_IN_WORKBOOK_REASON_PATTERN.match(reason):
-                duplicate_in_workbook_for_mail += 1
-            elif DUPLICATE_IN_RUN_REASON_PATTERN.match(reason):
-                duplicate_in_run_for_mail += 1
-
-        duplicate_count_for_mail = duplicate_in_workbook_for_mail + duplicate_in_run_for_mail
+        per_mail_summary = summarize_duplicate_decision_reasons(outcome.decision_reasons)
+        duplicate_in_workbook_for_mail = per_mail_summary["duplicate_in_workbook_file_count"]
+        duplicate_in_run_for_mail = per_mail_summary["duplicate_in_run_file_count"]
+        duplicate_count_for_mail = per_mail_summary["duplicate_file_skip_count"]
         if duplicate_count_for_mail == 0:
             continue
 
@@ -116,6 +104,22 @@ def summarize_duplicate_file_handling(mail_outcomes: list[MailOutcomeRecord]) ->
         "duplicate_only_mail_count": duplicate_only_mail_count,
         "mixed_duplicate_and_new_mail_count": mixed_duplicate_and_new_mail_count,
     }
+
+
+def _write_disposition_counts(mail_outcomes: list[MailOutcomeRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for outcome in mail_outcomes:
+        disposition = str(
+            outcome.write_disposition
+            or classify_write_disposition(
+                decision_reasons=outcome.decision_reasons,
+                staged_write_operations=outcome.staged_write_operations,
+            )
+        ).strip()
+        if not disposition:
+            continue
+        counts[disposition] = counts.get(disposition, 0) + 1
+    return counts
 
 
 def _mail_processing_status_counts(mail_outcomes: list[MailOutcomeRecord]) -> dict[str, int]:

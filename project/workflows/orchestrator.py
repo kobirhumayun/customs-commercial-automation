@@ -24,6 +24,7 @@ def initialize_mail_outcomes(
             source_entry_id=mail.entry_id,
             subject_raw=mail.subject_raw,
             sender_address=mail.sender_address,
+            write_disposition=None,
         )
         for mail in mail_snapshot
     ]

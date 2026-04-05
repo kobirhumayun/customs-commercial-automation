@@ -1132,6 +1132,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["manual_verification"]["bundle"]["verified_document_count"], 1)
         self.assertEqual(payload["duplicate_summary"]["duplicate_file_skip_count"], 1)
         self.assertEqual(payload["duplicate_summary"]["duplicate_in_workbook_file_count"], 1)
+        self.assertEqual(payload["write_disposition_counts"]["mixed_duplicate_and_new_writes"], 1)
 
     def test_list_runs_command_prints_recent_run_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

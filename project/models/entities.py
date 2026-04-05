@@ -247,6 +247,7 @@ class MailOutcomeRecord:
     file_numbers_extracted: list[str] = field(default_factory=list)
     saved_documents: list[dict[str, Any]] = field(default_factory=list)
     staged_write_operations: list[dict[str, Any]] = field(default_factory=list)
+    write_disposition: str | None = None
     manual_document_verification_summary: dict[str, Any] | None = None
     import_keyword_revision: str | None = None
     print_group_id: str | None = None

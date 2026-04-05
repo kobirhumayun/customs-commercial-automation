@@ -30,6 +30,7 @@ from project.workflows.export_lc_sc.document_classification import (
     DocumentClassificationDiscrepancy,
     classify_saved_export_documents,
 )
+from project.workflows.duplicate_handling import classify_write_disposition
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
 from project.workflows.export_lc_sc.staging import (
     ExportStagingDiscrepancy,
@@ -250,6 +251,15 @@ def _build_mail_outcome(
         file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
         saved_documents=to_jsonable(document_classification_result.saved_documents),
         staged_write_operations=to_jsonable(staging_result.staged_write_operations),
+        write_disposition=classify_write_disposition(
+            decision_reasons=(
+                list(document_save_result.decision_reasons)
+                + list(document_classification_result.decision_reasons)
+                + list(aggregated.decision_reasons)
+                + list(staging_result.decision_reasons)
+            ),
+            staged_write_operations=staging_result.staged_write_operations,
+        ),
     )
 
 
