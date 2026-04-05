@@ -1246,11 +1246,13 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(validation_result.run_report.summary, {"pass": 3, "warning": 0, "hard_block": 0})
             self.assertEqual(len(validation_result.staged_write_plan), 28)
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "duplicate_only_noop")
+            self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
             staged_dispositions = {
                 outcome.write_disposition
                 for outcome in validation_result.mail_outcomes[1:]
             }
             self.assertEqual(staged_dispositions, {"new_writes_staged"})
+            self.assertTrue(all(outcome.eligible_for_print for outcome in validation_result.mail_outcomes[1:]))
             rows_by_mail = {}
             for operation in validation_result.staged_write_plan:
                 rows_by_mail.setdefault(operation.mail_id, set()).add(operation.row_index)
@@ -1389,6 +1391,7 @@ class ValidationTests(unittest.TestCase):
 
             self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
             self.assertFalse(validation_result.mail_outcomes[0].eligible_for_write)
+            self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
             self.assertEqual(validation_result.staged_write_plan, [])
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "duplicate_only_noop")
             self.assertIn(
@@ -1531,7 +1534,9 @@ class ValidationTests(unittest.TestCase):
 
             self.assertEqual(len(validation_result.staged_write_plan), 14)
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
+            self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
             self.assertFalse(validation_result.mail_outcomes[1].eligible_for_write)
+            self.assertFalse(validation_result.mail_outcomes[1].eligible_for_print)
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "new_writes_staged")
             self.assertEqual(validation_result.mail_outcomes[1].write_disposition, "duplicate_only_noop")
             self.assertIn(
@@ -1685,6 +1690,7 @@ class ValidationTests(unittest.TestCase):
 
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "mixed_duplicate_and_new_writes")
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
+            self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
             self.assertEqual(len(validation_result.staged_write_plan), 14)
 
     def test_validate_run_snapshot_hard_blocks_invalid_workbook_header_mapping(self) -> None:

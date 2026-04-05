@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from project.models import WorkflowId
+from project.workflows.duplicate_handling import classify_write_disposition, summarize_duplicate_decision_reasons
 
 
 def list_workflow_runs(
@@ -65,6 +66,7 @@ def _load_run_index_entry(run_dir: Path) -> dict[str, Any]:
     metadata_path = run_dir / "run_metadata.json"
     manual_verification_path = run_dir / "document_manual_verification.json"
     discrepancies_path = run_dir / "discrepancies.jsonl"
+    mail_outcomes_path = run_dir / "mail_outcomes.jsonl"
     if not metadata_path.exists():
         return {
             "run_id": run_dir.name,
@@ -81,6 +83,7 @@ def _load_run_index_entry(run_dir: Path) -> dict[str, Any]:
             "manual_verification_present": _nonempty_json_file_exists(manual_verification_path),
             "manual_verification_complete": None,
             "manual_verification_pending_count": None,
+            **_summarize_mail_outcomes(mail_outcomes_path),
         }
 
     try:
@@ -102,12 +105,14 @@ def _load_run_index_entry(run_dir: Path) -> dict[str, Any]:
             "manual_verification_present": _nonempty_json_file_exists(manual_verification_path),
             "manual_verification_complete": None,
             "manual_verification_pending_count": None,
+            **_summarize_mail_outcomes(mail_outcomes_path),
         }
 
     if not isinstance(payload, dict):
         raise ValueError(f"Run metadata must be a JSON object: {metadata_path}")
 
     manual_verification_summary = _summarize_manual_verification_bundle(manual_verification_path)
+    mail_outcome_summary = _summarize_mail_outcomes(mail_outcomes_path)
     return {
         "run_id": str(payload.get("run_id", run_dir.name)),
         "run_root": str(run_dir),
@@ -127,6 +132,7 @@ def _load_run_index_entry(run_dir: Path) -> dict[str, Any]:
         else 0,
         "discrepancy_count": _count_jsonl_records(discrepancies_path),
         **manual_verification_summary,
+        **mail_outcome_summary,
     }
 
 
@@ -180,6 +186,98 @@ def _run_index_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
     started_at_utc = str(item.get("started_at_utc") or "")
     run_id = str(item.get("run_id") or "")
     return metadata_rank, started_at_utc, run_id
+
+
+def _summarize_mail_outcomes(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "mail_outcome_count": 0,
+            "write_disposition_counts": {},
+            "duplicate_summary": {
+                "duplicate_file_skip_count": 0,
+                "duplicate_in_workbook_file_count": 0,
+                "duplicate_in_run_file_count": 0,
+                "duplicate_affected_mail_count": 0,
+                "duplicate_only_mail_count": 0,
+                "mixed_duplicate_and_new_mail_count": 0,
+            },
+        }
+
+    try:
+        records = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, json.JSONDecodeError):
+        return {
+            "mail_outcome_count": 0,
+            "write_disposition_counts": {},
+            "duplicate_summary": {
+                "duplicate_file_skip_count": 0,
+                "duplicate_in_workbook_file_count": 0,
+                "duplicate_in_run_file_count": 0,
+                "duplicate_affected_mail_count": 0,
+                "duplicate_only_mail_count": 0,
+                "mixed_duplicate_and_new_mail_count": 0,
+            },
+        }
+
+    write_disposition_counts: dict[str, int] = {}
+    duplicate_in_workbook_file_count = 0
+    duplicate_in_run_file_count = 0
+    duplicate_affected_mail_count = 0
+    duplicate_only_mail_count = 0
+    mixed_duplicate_and_new_mail_count = 0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        decision_reasons = (
+            list(record.get("decision_reasons", []))
+            if isinstance(record.get("decision_reasons"), list)
+            else []
+        )
+        staged_write_operations = (
+            list(record.get("staged_write_operations", []))
+            if isinstance(record.get("staged_write_operations"), list)
+            else []
+        )
+        disposition = str(
+            record.get("write_disposition")
+            or classify_write_disposition(
+                decision_reasons=decision_reasons,
+                staged_write_operations=staged_write_operations,
+            )
+        ).strip()
+        if disposition:
+            write_disposition_counts[disposition] = write_disposition_counts.get(disposition, 0) + 1
+
+        duplicate_counts = summarize_duplicate_decision_reasons(decision_reasons)
+        duplicate_file_skip_count = duplicate_counts["duplicate_file_skip_count"]
+        if duplicate_file_skip_count == 0:
+            continue
+
+        duplicate_in_workbook_file_count += duplicate_counts["duplicate_in_workbook_file_count"]
+        duplicate_in_run_file_count += duplicate_counts["duplicate_in_run_file_count"]
+        duplicate_affected_mail_count += 1
+        if disposition == "duplicate_only_noop":
+            duplicate_only_mail_count += 1
+        elif disposition == "mixed_duplicate_and_new_writes":
+            mixed_duplicate_and_new_mail_count += 1
+
+    return {
+        "mail_outcome_count": len([record for record in records if isinstance(record, dict)]),
+        "write_disposition_counts": write_disposition_counts,
+        "duplicate_summary": {
+            "duplicate_file_skip_count": duplicate_in_workbook_file_count + duplicate_in_run_file_count,
+            "duplicate_in_workbook_file_count": duplicate_in_workbook_file_count,
+            "duplicate_in_run_file_count": duplicate_in_run_file_count,
+            "duplicate_affected_mail_count": duplicate_affected_mail_count,
+            "duplicate_only_mail_count": duplicate_only_mail_count,
+            "mixed_duplicate_and_new_mail_count": mixed_duplicate_and_new_mail_count,
+        },
+    }
 
 
 def _is_recovery_candidate(item: dict[str, Any]) -> bool:

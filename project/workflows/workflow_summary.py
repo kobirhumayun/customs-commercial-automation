@@ -42,5 +42,17 @@ def build_workflow_summary(
             "operator_queue_count": operator_queue["queue_count"],
             "recovery_candidate_count": operator_queue["recovery_candidate_count"],
             "manual_verification_pending_count": operator_queue["manual_verification_pending_count"],
+            "recent_duplicate_file_skip_count": sum(
+                int(run.get("duplicate_summary", {}).get("duplicate_file_skip_count", 0))
+                for run in recent_runs["runs"]
+            ),
+            "recent_duplicate_only_mail_count": sum(
+                int(run.get("duplicate_summary", {}).get("duplicate_only_mail_count", 0))
+                for run in recent_runs["runs"]
+            ),
+            "recent_mixed_duplicate_and_new_mail_count": sum(
+                int(run.get("duplicate_summary", {}).get("mixed_duplicate_and_new_mail_count", 0))
+                for run in recent_runs["runs"]
+            ),
         },
     }

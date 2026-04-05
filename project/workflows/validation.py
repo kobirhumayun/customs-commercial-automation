@@ -217,6 +217,15 @@ def _build_mail_outcome(
         else MailProcessingStatus.VALIDATED
     )
     allowed = final_decision != FinalDecision.HARD_BLOCK
+    write_disposition = classify_write_disposition(
+        decision_reasons=(
+            list(document_save_result.decision_reasons)
+            + list(document_classification_result.decision_reasons)
+            + list(aggregated.decision_reasons)
+            + list(staging_result.decision_reasons)
+        ),
+        staged_write_operations=staging_result.staged_write_operations,
+    )
     return MailOutcomeRecord(
         run_id=run_report.run_id,
         mail_id=mail.mail_id,
@@ -231,7 +240,11 @@ def _build_mail_outcome(
             + list(staging_result.decision_reasons)
         ),
         eligible_for_write=allowed and descriptor.write_capable and bool(staging_result.staged_write_operations),
-        eligible_for_print=allowed and descriptor.supports_print,
+        eligible_for_print=(
+            allowed
+            and descriptor.supports_print
+            and write_disposition in {"new_writes_staged", "mixed_duplicate_and_new_writes"}
+        ),
         eligible_for_mail_move=allowed,
         source_entry_id=mail.entry_id,
         subject_raw=mail.subject_raw,
@@ -251,15 +264,7 @@ def _build_mail_outcome(
         file_numbers_extracted=_extract_file_numbers(descriptor, workflow_payload),
         saved_documents=to_jsonable(document_classification_result.saved_documents),
         staged_write_operations=to_jsonable(staging_result.staged_write_operations),
-        write_disposition=classify_write_disposition(
-            decision_reasons=(
-                list(document_save_result.decision_reasons)
-                + list(document_classification_result.decision_reasons)
-                + list(aggregated.decision_reasons)
-                + list(staging_result.decision_reasons)
-            ),
-            staged_write_operations=staging_result.staged_write_operations,
-        ),
+        write_disposition=write_disposition,
     )
 
 

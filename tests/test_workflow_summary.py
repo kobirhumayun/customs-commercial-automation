@@ -31,6 +31,20 @@ class WorkflowSummaryTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (recent_run / "mail_outcomes.jsonl").write_text(
+                json.dumps(
+                    {
+                        "mail_id": "mail-recent",
+                        "decision_reasons": [
+                            "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                        ],
+                        "staged_write_operations": [],
+                        "write_disposition": "duplicate_only_noop",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
             clean_run = workflow_root / "run-clean"
             clean_run.mkdir(parents=True, exist_ok=True)
@@ -62,6 +76,9 @@ class WorkflowSummaryTests(unittest.TestCase):
         self.assertEqual(payload["operator_queue"]["runs"][0]["run_id"], "run-recent")
         self.assertEqual(payload["summary_counts"]["recent_run_count"], 2)
         self.assertEqual(payload["summary_counts"]["operator_queue_count"], 1)
+        self.assertEqual(payload["summary_counts"]["recent_duplicate_file_skip_count"], 1)
+        self.assertEqual(payload["summary_counts"]["recent_duplicate_only_mail_count"], 1)
+        self.assertEqual(payload["summary_counts"]["recent_mixed_duplicate_and_new_mail_count"], 0)
 
 
 if __name__ == "__main__":
