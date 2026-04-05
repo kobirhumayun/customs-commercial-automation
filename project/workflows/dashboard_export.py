@@ -55,6 +55,9 @@ def build_workflow_dashboard_markdown(
         f"- Operator queue: {workflow_summary['summary_counts']['operator_queue_count']}",
         f"- Recovery candidates: {workflow_summary['summary_counts']['recovery_candidate_count']}",
         f"- Manual verification pending: {workflow_summary['summary_counts']['manual_verification_pending_count']}",
+        f"- Handled with no action needed: {workflow_summary['summary_counts']['handled_no_action_count']}",
+        f"- Duplicate-only handled runs: {workflow_summary['summary_counts']['duplicate_only_handled_count']}",
+        f"- No-write/no-op handled runs: {workflow_summary['summary_counts']['no_write_noop_handled_count']}",
         f"- Retention stale runs: {retention_summary['summary_counts']['stale_run_count']}",
         f"- Generated summaries on disk: {summary_catalog['summary_counts']['total_summary_count']}",
         "",
@@ -72,6 +75,24 @@ def build_workflow_dashboard_markdown(
             )
     else:
         lines.append("- No actionable runs in the current operator queue.")
+
+    lines.extend(
+        [
+            "",
+            "## Handled Runs",
+            "",
+        ]
+    )
+    handled_runs = workflow_summary["operator_queue"]["handled_runs"]
+    if handled_runs:
+        for run in handled_runs:
+            lines.append(
+                f"- `{run['run_id']}` [{run['handled_category']}] "
+                f"write={run.get('write_phase_status')}, print={run.get('print_phase_status')}, "
+                f"move={run.get('mail_move_phase_status')} | {run.get('handled_reason')}"
+            )
+    else:
+        lines.append("- No recently indexed runs were classified as handled with no action needed.")
 
     lines.extend(
         [

@@ -45,6 +45,41 @@ class DashboardHtmlExportTests(unittest.TestCase):
             )
             (run_dir / "mail_outcomes.jsonl").write_text("", encoding="utf-8")
             (run_dir / "staged_write_plan.json").write_text("[]\n", encoding="utf-8")
+            handled_run_dir = run_root / "export_lc_sc" / "run-duplicate-only"
+            handled_run_dir.mkdir(parents=True, exist_ok=True)
+            (handled_run_dir / "run_metadata.json").write_text(
+                """
+                {
+                  "run_id": "run-duplicate-only",
+                  "workflow_id": "export_lc_sc",
+                  "tool_version": "0.1.0",
+                  "rule_pack_id": "export_lc_sc.default",
+                  "rule_pack_version": "1.0.0",
+                  "started_at_utc": "2026-03-29T00:00:00Z",
+                  "completed_at_utc": "2026-03-29T01:00:00Z",
+                  "state_timezone": "Asia/Dhaka",
+                  "mail_iteration_order": [],
+                  "print_group_order": [],
+                  "write_phase_status": "committed",
+                  "print_phase_status": "completed",
+                  "mail_move_phase_status": "completed",
+                  "hash_algorithm": "sha256",
+                  "run_start_backup_hash": "%s",
+                  "current_workbook_hash": "%s",
+                  "staged_write_plan_hash": "%s",
+                  "summary": {}
+                }
+                """ % ("d" * 64, "e" * 64, "f" * 64),
+                encoding="utf-8",
+            )
+            (handled_run_dir / "mail_outcomes.jsonl").write_text(
+                """
+                {"mail_id":"mail-1","decision_reasons":["Skipped workbook append for P/26/0042 because the file number already exists in the workbook."],"staged_write_operations":[],"write_disposition":"duplicate_only_noop"}
+                """.strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (handled_run_dir / "staged_write_plan.json").write_text("[]\n", encoding="utf-8")
             backup_dir = backup_root / "export_lc_sc" / "run-123"
             backup_dir.mkdir(parents=True, exist_ok=True)
             (backup_dir / "master_workbook_backup.xlsx").write_bytes(b"fake")
@@ -97,10 +132,16 @@ class DashboardHtmlExportTests(unittest.TestCase):
         self.assertIn("<h1>Workflow Dashboard: export_lc_sc</h1>", html)
         self.assertIn("<h2>Snapshot</h2>", html)
         self.assertIn("<h2>Operator Queue</h2>", html)
+        self.assertIn("<h2>Handled Runs</h2>", html)
         self.assertIn("<h2>Recovery Candidates</h2>", html)
         self.assertIn("<h2>Generated Summaries</h2>", html)
+        self.assertIn("Handled with no action needed", html)
+        self.assertIn("Duplicate-only handled runs", html)
+        self.assertIn("No-write/no-op handled runs", html)
         self.assertIn("Workflow handoffs", html)
         self.assertIn("Run handoffs", html)
+        self.assertIn("<code>run-duplicate-only</code>", html)
+        self.assertIn("duplicate_only_handled", html)
         self.assertIn("<h2>Workflow Handoffs</h2>", html)
         self.assertIn("<h2>Recent Run Handoffs</h2>", html)
         self.assertIn("<td>1</td><td>1</td><td>1</td>", html)

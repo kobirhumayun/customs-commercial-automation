@@ -53,6 +53,18 @@ def build_workflow_dashboard_html(
             "Manual verification pending",
             workflow_summary["summary_counts"]["manual_verification_pending_count"],
         ),
+        (
+            "Handled with no action needed",
+            workflow_summary["summary_counts"]["handled_no_action_count"],
+        ),
+        (
+            "Duplicate-only handled runs",
+            workflow_summary["summary_counts"]["duplicate_only_handled_count"],
+        ),
+        (
+            "No-write/no-op handled runs",
+            workflow_summary["summary_counts"]["no_write_noop_handled_count"],
+        ),
         ("Retention stale runs", retention_summary["summary_counts"]["stale_run_count"]),
         ("Generated summaries on disk", summary_catalog["summary_counts"]["total_summary_count"]),
     ]
@@ -66,6 +78,17 @@ def build_workflow_dashboard_html(
                 str(run.get("write_phase_status")),
                 str(run.get("print_phase_status")),
                 ", ".join(reason["code"] for reason in run.get("queue_reasons", [])) or "none",
+            )
+        )
+    handled_rows: list[tuple[str, str, str, str, str]] = []
+    for run in workflow_summary["operator_queue"]["handled_runs"]:
+        handled_rows.append(
+            (
+                run["run_id"],
+                str(run.get("handled_category")),
+                str(run.get("write_phase_status")),
+                str(run.get("print_phase_status")),
+                str(run.get("handled_reason") or ""),
             )
         )
 
@@ -156,6 +179,13 @@ def build_workflow_dashboard_html(
                 headers=["Run ID", "Priority", "Write", "Print", "Reasons"],
                 rows=queue_rows,
                 empty_message="No actionable runs in the current operator queue.",
+                code_columns={0},
+            ),
+            _render_table_section(
+                "Handled Runs",
+                headers=["Run ID", "Category", "Write", "Print", "Reason"],
+                rows=handled_rows,
+                empty_message="No recently indexed runs were classified as handled with no action needed.",
                 code_columns={0},
             ),
             _render_table_section(
