@@ -156,6 +156,9 @@ def build_workflow_dashboard_markdown(
             lines.append(
                 f"- `{handoff.get('run_id')}` modified={handoff.get('modified_at_utc')} "
                 f"size_bytes={handoff.get('size_bytes')} discrepancies={metadata.get('discrepancy_count')} "
+                f"duplicate_skips={metadata.get('duplicate_file_skip_count')} "
+                f"duplicate_only_mails={metadata.get('duplicate_only_mail_count')} "
+                f"mixed_duplicate_new_mails={metadata.get('mixed_duplicate_and_new_mail_count')} "
                 f"print_markers={metadata.get('print_marker_count')} "
                 f"mail_move_markers={metadata.get('mail_move_marker_count')}"
             )

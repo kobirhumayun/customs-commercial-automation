@@ -81,7 +81,9 @@ class RunHandoffExportTests(unittest.TestCase):
                     snapshot_index=0,
                     processing_status=MailProcessingStatus.MOVED,
                     final_decision=FinalDecision.PASS,
-                    decision_reasons=[],
+                    decision_reasons=[
+                        "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                    ],
                     eligible_for_write=False,
                     eligible_for_print=False,
                     eligible_for_mail_move=False,
@@ -120,6 +122,8 @@ class RunHandoffExportTests(unittest.TestCase):
         self.assertEqual(payload["transport_execution"]["summary_counts"]["mail_move_marker_count"], 1)
         self.assertEqual(payload["handoff_counts"]["print_marker_count"], 1)
         self.assertEqual(payload["handoff_counts"]["mail_move_marker_count"], 1)
+        self.assertEqual(payload["handoff_counts"]["duplicate_file_skip_count"], 1)
+        self.assertEqual(payload["handoff_counts"]["duplicate_only_mail_count"], 1)
 
 
 if __name__ == "__main__":

@@ -117,6 +117,7 @@ def validate_run_snapshot(
             aggregated=aggregated,
             workflow_payload=context.workflow_payload,
             workbook_snapshot=working_workbook_snapshot,
+            baseline_workbook_snapshot=workbook_snapshot,
         )
         mail_outcome = _build_mail_outcome(
             descriptor=descriptor,
@@ -415,6 +416,7 @@ def _stage_mail_if_eligible(
     aggregated: AggregatedRuleEvaluation,
     workflow_payload: object | None,
     workbook_snapshot: WorkbookSnapshot | None,
+    baseline_workbook_snapshot: WorkbookSnapshot | None,
 ):
     if aggregated.final_decision == FinalDecision.HARD_BLOCK:
         return ExportWriteStagingResult(
@@ -435,6 +437,7 @@ def _stage_mail_if_eligible(
         mail_id=mail.mail_id,
         payload=workflow_payload,
         workbook_snapshot=workbook_snapshot,
+        baseline_workbook_snapshot=baseline_workbook_snapshot,
     )
 
 

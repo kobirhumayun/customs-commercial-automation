@@ -946,7 +946,9 @@ class CLITests(unittest.TestCase):
                     snapshot_index=0,
                     processing_status=MailProcessingStatus.PRINTED,
                     final_decision=FinalDecision.PASS,
-                    decision_reasons=[],
+                    decision_reasons=[
+                        "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                    ],
                     eligible_for_write=False,
                     eligible_for_print=False,
                     eligible_for_mail_move=True,
@@ -1069,7 +1071,9 @@ class CLITests(unittest.TestCase):
                     snapshot_index=0,
                     processing_status=MailProcessingStatus.PRINTED,
                     final_decision=FinalDecision.PASS,
-                    decision_reasons=[],
+                    decision_reasons=[
+                        "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                    ],
                     eligible_for_write=False,
                     eligible_for_print=False,
                     eligible_for_mail_move=True,
@@ -1077,6 +1081,7 @@ class CLITests(unittest.TestCase):
                     subject_raw="subject",
                     sender_address="a@example.com",
                     print_group_id="group-1",
+                    staged_write_operations=[{"write_operation_id": "op-1"}],
                     manual_document_verification_summary={
                         "document_count": 1,
                         "verified_count": 1,
@@ -1125,6 +1130,8 @@ class CLITests(unittest.TestCase):
         self.assertTrue(payload["phases"]["write"]["commit_marker_present"])
         self.assertEqual(payload["phases"]["print"]["planned_group_count"], 1)
         self.assertEqual(payload["manual_verification"]["bundle"]["verified_document_count"], 1)
+        self.assertEqual(payload["duplicate_summary"]["duplicate_file_skip_count"], 1)
+        self.assertEqual(payload["duplicate_summary"]["duplicate_in_workbook_file_count"], 1)
 
     def test_list_runs_command_prints_recent_run_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

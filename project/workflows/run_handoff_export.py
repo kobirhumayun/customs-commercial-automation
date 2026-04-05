@@ -44,6 +44,11 @@ def build_run_handoff_export(
             "manual_verification_pending_count": run_summary["summary_counts"][
                 "manual_verification_pending_count"
             ],
+            "duplicate_file_skip_count": run_summary["summary_counts"]["duplicate_file_skip_count"],
+            "duplicate_only_mail_count": run_summary["summary_counts"]["duplicate_only_mail_count"],
+            "mixed_duplicate_and_new_mail_count": run_summary["summary_counts"][
+                "mixed_duplicate_and_new_mail_count"
+            ],
             "print_marker_count": transport_execution["summary_counts"]["print_marker_count"],
             "mail_move_marker_count": transport_execution["summary_counts"]["mail_move_marker_count"],
         },

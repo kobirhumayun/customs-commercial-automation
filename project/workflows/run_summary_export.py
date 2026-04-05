@@ -43,5 +43,10 @@ def build_run_summary_export(
                 run_status["manual_verification"]["bundle"]["pending_document_count"]
             ),
             "discrepancy_count": run_status["artifact_counts"]["discrepancy_count"],
+            "duplicate_file_skip_count": run_status["duplicate_summary"]["duplicate_file_skip_count"],
+            "duplicate_only_mail_count": run_status["duplicate_summary"]["duplicate_only_mail_count"],
+            "mixed_duplicate_and_new_mail_count": run_status["duplicate_summary"][
+                "mixed_duplicate_and_new_mail_count"
+            ],
         },
     }

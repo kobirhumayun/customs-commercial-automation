@@ -58,6 +58,9 @@ class DashboardExportTests(unittest.TestCase):
                     "mail_count": 1,
                     "discrepancy_count": 2,
                     "manual_verification_pending_count": 1,
+                    "duplicate_file_skip_count": 3,
+                    "duplicate_only_mail_count": 1,
+                    "mixed_duplicate_and_new_mail_count": 1,
                     "print_marker_count": 1,
                     "mail_move_marker_count": 1
                   }
@@ -100,7 +103,10 @@ class DashboardExportTests(unittest.TestCase):
         self.assertIn("## Workflow Handoffs", markdown)
         self.assertIn("## Recent Run Handoffs", markdown)
         self.assertIn("queue=1 recovery=1 recent_handoffs=1", markdown)
-        self.assertIn("discrepancies=2 print_markers=1 mail_move_markers=1", markdown)
+        self.assertIn(
+            "discrepancies=2 duplicate_skips=3 duplicate_only_mails=1 mixed_duplicate_new_mails=1 print_markers=1 mail_move_markers=1",
+            markdown,
+        )
         self.assertIn("`run-123`", markdown)
 
 

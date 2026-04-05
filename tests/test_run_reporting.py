@@ -87,7 +87,9 @@ class RunReportingTests(unittest.TestCase):
                     snapshot_index=0,
                     processing_status=MailProcessingStatus.MOVED,
                     final_decision=FinalDecision.PASS,
-                    decision_reasons=[],
+                    decision_reasons=[
+                        "Skipped workbook append for P/26/0042 because the file number already exists in the workbook."
+                    ],
                     eligible_for_write=False,
                     eligible_for_print=False,
                     eligible_for_mail_move=False,
@@ -110,20 +112,28 @@ class RunReportingTests(unittest.TestCase):
                     snapshot_index=1,
                     processing_status=MailProcessingStatus.WRITTEN,
                     final_decision=FinalDecision.PASS,
-                    decision_reasons=[],
+                    decision_reasons=[
+                        "Skipped workbook append for P/26/0043 because the file number was already staged earlier in this run."
+                    ],
                     eligible_for_write=False,
                     eligible_for_print=True,
                     eligible_for_mail_move=False,
                     source_entry_id="entry-2",
                     subject_raw="subject-2",
                     sender_address="sender@example.com",
+                    staged_write_operations=[
+                        {
+                            "write_operation_id": "op-1",
+                            "mail_id": "mail-2",
+                        }
+                    ],
                 ),
             ]
             staged_write_plan = [
                 WriteOperation(
                     write_operation_id="op-1",
                     run_id="run-123",
-                    mail_id="mail-1",
+                    mail_id="mail-2",
                     operation_index_within_mail=0,
                     sheet_name="Sheet1",
                     row_index=3,
@@ -154,6 +164,11 @@ class RunReportingTests(unittest.TestCase):
         self.assertEqual(summary["phases"]["mail_moves"]["successful_mail_count"], 1)
         self.assertEqual(summary["artifact_counts"]["discrepancy_count"], 1)
         self.assertEqual(summary["manual_verification"]["bundle"]["document_count"], 2)
+        self.assertEqual(summary["duplicate_summary"]["duplicate_file_skip_count"], 2)
+        self.assertEqual(summary["duplicate_summary"]["duplicate_in_workbook_file_count"], 1)
+        self.assertEqual(summary["duplicate_summary"]["duplicate_in_run_file_count"], 1)
+        self.assertEqual(summary["duplicate_summary"]["duplicate_only_mail_count"], 1)
+        self.assertEqual(summary["duplicate_summary"]["mixed_duplicate_and_new_mail_count"], 1)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ def stage_export_append_operations(
     mail_id: str,
     payload: ExportMailPayload,
     workbook_snapshot: WorkbookSnapshot | None,
+    baseline_workbook_snapshot: WorkbookSnapshot | None = None,
 ) -> ExportWriteStagingResult:
     if workbook_snapshot is None:
         return ExportWriteStagingResult(
@@ -78,6 +79,10 @@ def stage_export_append_operations(
         row.values.get(header_mapping["file_no"], "").strip().upper()
         for row in workbook_snapshot.rows
     }
+    baseline_existing_file_numbers = {
+        row.values.get(header_mapping["file_no"], "").strip().upper()
+        for row in (baseline_workbook_snapshot or workbook_snapshot).rows
+    }
     next_row_index = _resolve_next_export_row_index(
         workbook_snapshot=workbook_snapshot,
         buyer_name_column_index=header_mapping["buyer_name"],
@@ -91,8 +96,15 @@ def stage_export_append_operations(
         if match.canonical_row is None:
             continue
         if match.file_number.upper() in existing_file_numbers:
+            duplicate_reason = (
+                f"Skipped workbook append for {match.file_number} because the file number already exists in the workbook."
+                if match.file_number.upper() in baseline_existing_file_numbers
+                else (
+                    f"Skipped workbook append for {match.file_number} because the file number was already staged earlier in this run."
+                )
+            )
             decision_reasons.append(
-                f"Skipped workbook append for {match.file_number} because the file number already exists."
+                duplicate_reason
             )
             continue
 

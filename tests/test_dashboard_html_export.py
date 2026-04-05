@@ -58,6 +58,9 @@ class DashboardHtmlExportTests(unittest.TestCase):
                     "mail_count": 1,
                     "discrepancy_count": 2,
                     "manual_verification_pending_count": 1,
+                    "duplicate_file_skip_count": 3,
+                    "duplicate_only_mail_count": 1,
+                    "mixed_duplicate_and_new_mail_count": 1,
                     "print_marker_count": 1,
                     "mail_move_marker_count": 1
                   }
@@ -101,7 +104,7 @@ class DashboardHtmlExportTests(unittest.TestCase):
         self.assertIn("<h2>Workflow Handoffs</h2>", html)
         self.assertIn("<h2>Recent Run Handoffs</h2>", html)
         self.assertIn("<td>1</td><td>1</td><td>1</td>", html)
-        self.assertIn("<td>2</td><td>1</td><td>1</td>", html)
+        self.assertIn("<td>2</td><td>3</td><td>1</td><td>1</td><td>1</td><td>1</td>", html)
         self.assertIn("<code>run-123</code>", html)
 
 

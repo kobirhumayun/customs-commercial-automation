@@ -46,6 +46,9 @@ class SummaryCatalogTests(unittest.TestCase):
                             "mail_count": 1,
                             "discrepancy_count": 2,
                             "manual_verification_pending_count": 1,
+                            "duplicate_file_skip_count": 3,
+                            "duplicate_only_mail_count": 1,
+                            "mixed_duplicate_and_new_mail_count": 1,
                             "print_marker_count": 1,
                             "mail_move_marker_count": 1,
                         },
@@ -71,6 +74,7 @@ class SummaryCatalogTests(unittest.TestCase):
         self.assertEqual(payload["run_summaries"][0]["run_id"], "run-123")
         self.assertEqual(payload["run_handoffs"][0]["run_id"], "run-123")
         self.assertEqual(payload["run_handoffs"][0]["artifact_metadata"]["discrepancy_count"], 2)
+        self.assertEqual(payload["run_handoffs"][0]["artifact_metadata"]["duplicate_file_skip_count"], 3)
         self.assertEqual(payload["recovery_packets"][0]["artifact_type"], "recovery_packet")
         self.assertEqual(payload["retention_summaries"][0]["artifact_type"], "retention_summary")
 

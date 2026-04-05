@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from project.models import MailOutcomeRecord, MailProcessingStatus, RunReport, WriteOperation
 from project.storage import RunArtifactPaths
 from project.workflows.document_verification import summarize_manual_document_verification
+
+
+DUPLICATE_IN_WORKBOOK_REASON_PATTERN = re.compile(
+    r"^Skipped workbook append for (?P<file_number>P/\d{2}/\d{4}) because the file number already exists in the workbook\.$"
+)
+DUPLICATE_IN_RUN_REASON_PATTERN = re.compile(
+    r"^Skipped workbook append for (?P<file_number>P/\d{2}/\d{4}) because the file number was already staged earlier in this run\.$"
+)
 
 
 def summarize_run_status(
@@ -16,6 +25,7 @@ def summarize_run_status(
     artifact_paths: RunArtifactPaths,
 ) -> dict[str, Any]:
     mail_status_counts = _mail_processing_status_counts(mail_outcomes)
+    duplicate_summary = summarize_duplicate_file_handling(mail_outcomes)
     return {
         "run_id": run_report.run_id,
         "workflow_id": run_report.workflow_id.value,
@@ -23,6 +33,7 @@ def summarize_run_status(
         "completed_at_utc": run_report.completed_at_utc,
         "decision_summary": dict(run_report.summary),
         "mail_processing_status_counts": mail_status_counts,
+        "duplicate_summary": duplicate_summary,
         "phases": {
             "write": {
                 "status": run_report.write_phase_status.value,
@@ -66,6 +77,44 @@ def summarize_run_status(
         "artifact_counts": {
             "discrepancy_count": _count_jsonl_records(artifact_paths.discrepancies_path),
         },
+    }
+
+
+def summarize_duplicate_file_handling(mail_outcomes: list[MailOutcomeRecord]) -> dict[str, int]:
+    duplicate_in_workbook_file_count = 0
+    duplicate_in_run_file_count = 0
+    duplicate_affected_mail_count = 0
+    duplicate_only_mail_count = 0
+    mixed_duplicate_and_new_mail_count = 0
+
+    for outcome in mail_outcomes:
+        duplicate_in_workbook_for_mail = 0
+        duplicate_in_run_for_mail = 0
+        for reason in outcome.decision_reasons:
+            if DUPLICATE_IN_WORKBOOK_REASON_PATTERN.match(reason):
+                duplicate_in_workbook_for_mail += 1
+            elif DUPLICATE_IN_RUN_REASON_PATTERN.match(reason):
+                duplicate_in_run_for_mail += 1
+
+        duplicate_count_for_mail = duplicate_in_workbook_for_mail + duplicate_in_run_for_mail
+        if duplicate_count_for_mail == 0:
+            continue
+
+        duplicate_in_workbook_file_count += duplicate_in_workbook_for_mail
+        duplicate_in_run_file_count += duplicate_in_run_for_mail
+        duplicate_affected_mail_count += 1
+        if outcome.staged_write_operations:
+            mixed_duplicate_and_new_mail_count += 1
+        else:
+            duplicate_only_mail_count += 1
+
+    return {
+        "duplicate_file_skip_count": duplicate_in_workbook_file_count + duplicate_in_run_file_count,
+        "duplicate_in_workbook_file_count": duplicate_in_workbook_file_count,
+        "duplicate_in_run_file_count": duplicate_in_run_file_count,
+        "duplicate_affected_mail_count": duplicate_affected_mail_count,
+        "duplicate_only_mail_count": duplicate_only_mail_count,
+        "mixed_duplicate_and_new_mail_count": mixed_duplicate_and_new_mail_count,
     }
 
 

@@ -140,6 +140,11 @@ def _extract_artifact_metadata(path: Path, artifact_type: str) -> dict[str, Any]
         "manual_verification_pending_count": handoff_counts.get(
             "manual_verification_pending_count"
         ),
+        "duplicate_file_skip_count": handoff_counts.get("duplicate_file_skip_count"),
+        "duplicate_only_mail_count": handoff_counts.get("duplicate_only_mail_count"),
+        "mixed_duplicate_and_new_mail_count": handoff_counts.get(
+            "mixed_duplicate_and_new_mail_count"
+        ),
         "print_marker_count": handoff_counts.get("print_marker_count"),
         "mail_move_marker_count": handoff_counts.get("mail_move_marker_count"),
     }
