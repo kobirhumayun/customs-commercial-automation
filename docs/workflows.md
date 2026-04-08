@@ -87,7 +87,8 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
   2. `planned` → `printing`
   3. `printing` → `completed`
   4. `planned` or `printing` → `uncertain_incomplete` (runtime interruption)
-  5. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
+  5. `uncertain_incomplete` → `printing` (resume from persisted partial print progress)
+  6. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
 
 #### `mail_move_phase_status` enum
 - Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
@@ -278,8 +279,12 @@ Recovery must produce exactly one outcome:
 When recovery outcome is `safe resume`, perform these idempotency gates before resuming:
 1. **Print idempotency**
    - each print group has a stable id derived from `(run_id, mail_id, print_group_index, document_path_hash)`
+   - each print group marker may be either `completed` or `partial_incomplete`
+   - a `partial_incomplete` marker must persist `printed_document_path_hashes` as a deterministic prefix of the planned `document_path_hashes`
+   - if Acrobat timed out after physical paper output, operators may advance that deterministic prefix manually with `acknowledge-partial-print`
    - resume must skip any group whose completion marker exists and is hash-consistent
-   - resume may print only groups without completion markers
+   - resume may continue a `partial_incomplete` print group only from the remaining suffix of `document_path_hashes`
+   - if operators confirm that all planned PDFs physically printed, `acknowledge-partial-print --printed-count <total>` may finalize the marker as `completed`; one final `execute-print` pass must then be used to close the run metadata without sending more print commands
    - if marker exists but hash/metadata differs from persisted plan, hard-block
 2. **Mail-move idempotency**
    - each mail move has a stable operation id derived from `(run_id, entry_id, destination_folder)`
@@ -718,6 +723,19 @@ Rows where:
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
 - any print failure must be reported with retry/review metadata
+
+### Operator recovery for partial Acrobat timeouts
+- If `execute-print` returns `uncertain_incomplete`, operators must first confirm whether any planned PDFs physically printed.
+- If no paper output occurred, rerunning `execute-print` is allowed because no print progress was acknowledged.
+- If one or more leading PDFs physically printed, operators must record that progress before retrying:
+
+```powershell
+uv run python -m project acknowledge-partial-print <workflow_id> --config "<config.toml>" --run-id "<RUN_ID>" --printed-count <N>
+```
+
+- After acknowledgment, rerun `execute-print`; the workflow must resume only from the remaining suffix of the planned print group.
+- If all planned PDFs physically printed across one or more timed-out attempts, operators may acknowledge the full planned count. The marker becomes `completed`, and one final `execute-print` invocation closes the print phase without sending additional Acrobat print commands.
+- Post-run email moves remain blocked until print phase reaches terminal `completed`.
 
 ## Rule-pack loading contract (shared, normative)
 To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.

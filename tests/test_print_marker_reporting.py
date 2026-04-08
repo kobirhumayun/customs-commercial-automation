@@ -18,13 +18,17 @@ class PrintMarkerReportingTests(unittest.TestCase):
                   "print_group_id": "group-1",
                   "mail_id": "mail-1",
                   "completion_marker_id": "completion-1",
+                  "print_status": "partial_incomplete",
+                  "document_path_hashes": ["hash-1", "hash-2"],
+                  "printed_document_path_hashes": ["hash-1"],
+                  "blank_separator_printed": false,
                   "printed_at_utc": "2026-03-30T00:00:00Z",
                   "manual_verification_summary": {"verified_count": 1},
                   "print_execution_receipt": {
                     "adapter_name": "acrobat",
                     "acknowledgment_mode": "process_exit_zero",
                     "executed_command_count": 2,
-                    "blank_separator_printed": true
+                    "blank_separator_printed": false
                   }
                 }
                 """,
@@ -39,7 +43,10 @@ class PrintMarkerReportingTests(unittest.TestCase):
         self.assertEqual(marker["adapter_name"], "acrobat")
         self.assertEqual(marker["acknowledgment_mode"], "process_exit_zero")
         self.assertEqual(marker["executed_command_count"], 2)
-        self.assertEqual(marker["blank_separator_printed"], True)
+        self.assertEqual(marker["print_status"], "partial_incomplete")
+        self.assertEqual(marker["printed_document_count"], 1)
+        self.assertEqual(marker["total_document_count"], 2)
+        self.assertEqual(marker["blank_separator_printed"], False)
 
 
 if __name__ == "__main__":

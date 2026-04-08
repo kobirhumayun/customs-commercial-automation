@@ -45,6 +45,21 @@ class PrintAdapterUnavailableError(RuntimeError):
     """Raised when the configured live print adapter is unavailable."""
 
 
+class PartialPrintExecutionError(RuntimeError):
+    """Raised when a print group only partially completed before failing."""
+
+    def __init__(
+        self,
+        *,
+        message: str,
+        completed_command_receipts: list[PrintCommandReceipt],
+        blank_separator_printed: bool,
+    ) -> None:
+        super().__init__(message)
+        self.completed_command_receipts = list(completed_command_receipts)
+        self.blank_separator_printed = blank_separator_printed
+
+
 @dataclass(slots=True, frozen=True)
 class SimulatedPrintProvider:
     def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
@@ -72,35 +87,44 @@ class AcrobatPrintProvider:
     def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
         executable_path = _resolve_acrobat_executable(self.acrobat_executable_path)
         command_receipts: list[PrintCommandReceipt] = []
-        for document_path in batch.document_paths:
-            resolved_path = Path(document_path)
-            if not resolved_path.exists():
-                raise FileNotFoundError(document_path)
-            command_receipts.append(
-                _print_pdf_with_acrobat(
-                    executable_path=executable_path,
-                    document_path=resolved_path,
-                    printer_name=self.printer_name,
-                    printer_driver=self.printer_driver,
-                    printer_port=self.printer_port,
-                    timeout_seconds=self.timeout_seconds,
+        try:
+            for document_path in batch.document_paths:
+                resolved_path = Path(document_path)
+                if not resolved_path.exists():
+                    raise FileNotFoundError(document_path)
+                command_receipts.append(
+                    _print_pdf_with_acrobat(
+                        executable_path=executable_path,
+                        document_path=resolved_path,
+                        printer_name=self.printer_name,
+                        printer_driver=self.printer_driver,
+                        printer_port=self.printer_port,
+                        timeout_seconds=self.timeout_seconds,
+                    )
                 )
-            )
-        blank_separator_printed = False
-        if blank_page_after_group:
-            blank_page_path = _ensure_blank_separator_pdf()
-            command_receipts.append(
-                _print_pdf_with_acrobat(
-                    executable_path=executable_path,
-                    document_path=blank_page_path,
-                    printer_name=self.printer_name,
-                    printer_driver=self.printer_driver,
-                    printer_port=self.printer_port,
-                    timeout_seconds=self.timeout_seconds,
-                    blank_separator=True,
+            blank_separator_printed = False
+            if blank_page_after_group:
+                blank_page_path = _ensure_blank_separator_pdf()
+                command_receipts.append(
+                    _print_pdf_with_acrobat(
+                        executable_path=executable_path,
+                        document_path=blank_page_path,
+                        printer_name=self.printer_name,
+                        printer_driver=self.printer_driver,
+                        printer_port=self.printer_port,
+                        timeout_seconds=self.timeout_seconds,
+                        blank_separator=True,
+                    )
                 )
-            )
-            blank_separator_printed = True
+                blank_separator_printed = True
+        except Exception as exc:
+            raise PartialPrintExecutionError(
+                message=str(exc),
+                completed_command_receipts=command_receipts,
+                blank_separator_printed=(
+                    bool(command_receipts) and bool(command_receipts[-1].blank_separator)
+                ),
+            ) from exc
         return PrintGroupReceipt(
             adapter_name="acrobat",
             acknowledgment_mode="process_exit_zero",

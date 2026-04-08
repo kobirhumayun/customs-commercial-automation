@@ -1,6 +1,7 @@
 from project.printing.providers import (
     AcrobatPrintProvider,
     inspect_acrobat_print_adapter,
+    PartialPrintExecutionError,
     PrintAdapterUnavailableError,
     PrintCommandReceipt,
     PrintGroupReceipt,
@@ -11,6 +12,7 @@ from project.printing.providers import (
 __all__ = [
     "AcrobatPrintProvider",
     "inspect_acrobat_print_adapter",
+    "PartialPrintExecutionError",
     "PrintAdapterUnavailableError",
     "PrintCommandReceipt",
     "PrintGroupReceipt",

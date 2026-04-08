@@ -21,6 +21,7 @@ For normal phase-1 operation, the primary operator commands are:
 - `validate-run`
 - `plan-print`
 - `execute-print`
+- `acknowledge-partial-print` when Acrobat times out after physical paper output
 - `execute-mail-moves`
 - `recover-run` when a prior run is uncertain or interrupted
 
@@ -29,6 +30,23 @@ The expected terminal paths are:
   `validate-run` stages and commits workbook rows, `plan-print`/`execute-print` handle newly saved PDFs, then `execute-mail-moves` moves the mail
 - `duplicate-only`:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
+
+## Partial print recovery
+If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already produced paper output, do not rerun print blindly.
+
+Use the operator acknowledgment command to record how many leading PDFs in the planned print group physically printed:
+
+```powershell
+uv run python -m project acknowledge-partial-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --printed-count <N>
+```
+
+Then rerun:
+
+```powershell
+uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --live-print
+```
+
+If all planned PDFs physically printed during timeout/retry attempts, acknowledge the full count. The marker will be finalized as `completed`, and one final `execute-print` pass will close the print phase without sending any additional Acrobat commands.
 
 Duplicate suppression is file-number-based. A file already present in `Commercial File No.` must not be written again, even if the incoming mail is otherwise valid.
 

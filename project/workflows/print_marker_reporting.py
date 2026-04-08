@@ -23,7 +23,19 @@ def summarize_print_markers(*, print_markers_dir: Path) -> dict[str, Any]:
                 "print_group_id": payload.get("print_group_id"),
                 "mail_id": payload.get("mail_id"),
                 "completion_marker_id": payload.get("completion_marker_id"),
+                "print_status": payload.get("print_status") or "completed",
                 "printed_at_utc": payload.get("printed_at_utc"),
+                "printed_document_count": (
+                    len(payload.get("printed_document_path_hashes", []))
+                    if isinstance(payload.get("printed_document_path_hashes"), list)
+                    else 0
+                ),
+                "total_document_count": (
+                    len(payload.get("document_path_hashes", []))
+                    if isinstance(payload.get("document_path_hashes"), list)
+                    else 0
+                ),
+                "blank_separator_printed": bool(payload.get("blank_separator_printed", False)),
                 "manual_verification_summary": payload.get("manual_verification_summary"),
                 "adapter_name": receipt.get("adapter_name") if isinstance(receipt, dict) else None,
                 "acknowledgment_mode": (
@@ -31,11 +43,6 @@ def summarize_print_markers(*, print_markers_dir: Path) -> dict[str, Any]:
                 ),
                 "executed_command_count": (
                     int(receipt.get("executed_command_count", 0)) if isinstance(receipt, dict) else 0
-                ),
-                "blank_separator_printed": (
-                    bool(receipt.get("blank_separator_printed", False))
-                    if isinstance(receipt, dict)
-                    else False
                 ),
                 "receipt": receipt,
             }

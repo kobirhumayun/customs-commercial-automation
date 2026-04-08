@@ -16,9 +16,13 @@ from project.models import (
     WritePhaseStatus,
 )
 from project.storage import create_run_artifact_layout
-from project.printing import PrintAdapterUnavailableError
+from project.printing import PartialPrintExecutionError, PrintAdapterUnavailableError
 from project.printing.providers import PrintCommandReceipt, PrintGroupReceipt
-from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
+from project.workflows.print_execution import (
+    acknowledge_partial_print_progress,
+    execute_print_batches,
+    summarize_print_batch_manual_verification,
+)
 
 
 class PrintExecutionTests(unittest.TestCase):
@@ -74,12 +78,74 @@ class PrintExecutionTests(unittest.TestCase):
         self.assertEqual(phase_updates, ["printing", "completed"])
         self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.COMPLETED)
         self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.PRINTED)
+        self.assertTrue(executed_outcomes[0].eligible_for_mail_move)
         self.assertIn("Manual PDF verification status at print time", executed_outcomes[0].decision_reasons[-1])
         self.assertTrue(marker_exists)
         self.assertEqual(marker_payload["manual_verification_summary"]["verified_count"], 1)
         self.assertEqual(marker_payload["print_execution_receipt"]["adapter_name"], "simulated")
         self.assertEqual(marker_payload["print_execution_receipt"]["executed_command_count"], 1)
+        self.assertEqual(marker_payload["print_status"], "completed")
         self.assertEqual(discrepancies, [])
+
+    def test_execute_print_batches_persists_partial_marker_and_can_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            first_document = root / "a.pdf"
+            second_document = root / "b.pdf"
+            first_document.write_text("fake pdf a", encoding="utf-8")
+            second_document.write_text("fake pdf b", encoding="utf-8")
+            run_report = _build_run_report(print_phase_status=PrintPhaseStatus.PLANNED)
+            mail_outcomes = [_build_mail_outcome(document_path=str(first_document))]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(first_document), str(second_document)],
+                    document_path_hashes=["hash-a", "hash-b"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            uncertain_report, uncertain_outcomes, first_discrepancies = execute_print_batches(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                artifact_paths=artifact_paths,
+                provider=PartialPrintProvider(),
+            )
+            marker_path = artifact_paths.print_markers_dir / "group-1.json"
+            partial_payload = __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+
+            resumed_report, resumed_outcomes, second_discrepancies = execute_print_batches(
+                run_report=uncertain_report,
+                mail_outcomes=uncertain_outcomes,
+                print_batches=print_batches,
+                artifact_paths=artifact_paths,
+                provider=ResumePrintProvider(),
+            )
+            completed_payload = __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(uncertain_report.print_phase_status, PrintPhaseStatus.UNCERTAIN_INCOMPLETE)
+        self.assertEqual(first_discrepancies[0].code, "print_group_runtime_error")
+        self.assertEqual(partial_payload["print_status"], "partial_incomplete")
+        self.assertEqual(partial_payload["printed_document_path_hashes"], ["hash-a"])
+        self.assertEqual(partial_payload["print_execution_receipt"]["executed_command_count"], 1)
+        self.assertEqual(resumed_report.print_phase_status, PrintPhaseStatus.COMPLETED)
+        self.assertEqual(resumed_outcomes[0].processing_status, MailProcessingStatus.PRINTED)
+        self.assertTrue(resumed_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(second_discrepancies, [])
+        self.assertEqual(completed_payload["print_status"], "completed")
+        self.assertEqual(completed_payload["printed_document_path_hashes"], ["hash-a", "hash-b"])
+        self.assertEqual(completed_payload["print_execution_receipt"]["executed_command_count"], 2)
 
     def test_execute_print_batches_marks_uncertain_when_document_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -200,6 +266,142 @@ class PrintExecutionTests(unittest.TestCase):
         self.assertFalse(executed_outcomes[0].eligible_for_print)
         self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
 
+    def test_acknowledge_partial_print_progress_updates_resumable_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            first_document = root / "a.pdf"
+            second_document = root / "b.pdf"
+            third_document = root / "c.pdf"
+            for document in (first_document, second_document, third_document):
+                document.write_text("fake pdf", encoding="utf-8")
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(first_document), str(second_document), str(third_document)],
+                    document_path_hashes=["hash-a", "hash-b", "hash-c"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            marker_path = artifact_paths.print_markers_dir / "group-1.json"
+            marker_path.write_text(
+                '{"print_group_id":"group-1","completion_marker_id":"completion-1","printed_document_path_hashes":[],"print_status":"partial_incomplete"}',
+                encoding="utf-8",
+            )
+
+            payload = acknowledge_partial_print_progress(
+                artifact_paths=artifact_paths,
+                print_batches=print_batches,
+                print_group_id="group-1",
+                printed_count=1,
+            )
+            updated_marker = __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["acknowledged_printed_document_count"], 1)
+        self.assertEqual(payload["remaining_document_count"], 2)
+        self.assertEqual(updated_marker["printed_document_path_hashes"], ["hash-a"])
+        self.assertTrue(updated_marker["operator_acknowledged_partial_print"])
+
+    def test_acknowledge_partial_print_progress_can_finalize_completed_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            first_document = root / "a.pdf"
+            second_document = root / "b.pdf"
+            for document in (first_document, second_document):
+                document.write_text("fake pdf", encoding="utf-8")
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(first_document), str(second_document)],
+                    document_path_hashes=["hash-a", "hash-b"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            marker_path = artifact_paths.print_markers_dir / "group-1.json"
+            marker_path.write_text(
+                '{"print_group_id":"group-1","completion_marker_id":"completion-1","printed_document_path_hashes":["hash-a"],"print_status":"partial_incomplete"}',
+                encoding="utf-8",
+            )
+
+            payload = acknowledge_partial_print_progress(
+                artifact_paths=artifact_paths,
+                print_batches=print_batches,
+                print_group_id="group-1",
+                printed_count=2,
+            )
+            updated_marker = __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["print_status"], "completed")
+        self.assertEqual(payload["remaining_document_count"], 0)
+        self.assertEqual(updated_marker["print_status"], "completed")
+        self.assertEqual(updated_marker["printed_document_path_hashes"], ["hash-a", "hash-b"])
+
+    def test_execute_print_batches_preserves_acknowledged_progress_on_repeat_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            first_document = root / "a.pdf"
+            second_document = root / "b.pdf"
+            third_document = root / "c.pdf"
+            for document in (first_document, second_document, third_document):
+                document.write_text("fake pdf", encoding="utf-8")
+            run_report = _build_run_report(print_phase_status=PrintPhaseStatus.UNCERTAIN_INCOMPLETE)
+            mail_outcomes = [_build_mail_outcome(document_path=str(first_document))]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(first_document), str(second_document), str(third_document)],
+                    document_path_hashes=["hash-a", "hash-b", "hash-c"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            marker_path = artifact_paths.print_markers_dir / "group-1.json"
+            marker_path.write_text(
+                '{"print_group_id":"group-1","completion_marker_id":"completion-1","printed_document_path_hashes":["hash-a"],"print_status":"partial_incomplete","print_execution_receipt":{"command_receipts":[]}}',
+                encoding="utf-8",
+            )
+
+            uncertain_report, _outcomes, discrepancies = execute_print_batches(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                artifact_paths=artifact_paths,
+                provider=PartialPrintProvider(),
+            )
+            updated_marker = __import__("json").loads(marker_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(uncertain_report.print_phase_status, PrintPhaseStatus.UNCERTAIN_INCOMPLETE)
+        self.assertEqual(discrepancies[0].code, "print_group_runtime_error")
+        self.assertEqual(updated_marker["printed_document_path_hashes"], ["hash-a", "hash-b"])
+
     def test_summarize_print_batch_manual_verification_aggregates_counts(self) -> None:
         summary = summarize_print_batch_manual_verification(
             [
@@ -275,6 +477,55 @@ class UnavailablePrintProvider:
     def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> None:
         del batch, blank_page_after_group
         raise PrintAdapterUnavailableError("Acrobat is not configured")
+
+
+class PartialPrintProvider:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
+        del blank_page_after_group
+        receipt = PrintCommandReceipt(
+            adapter_name="acrobat",
+            document_path=batch.document_paths[0],
+            command=["acrobat", batch.document_paths[0]],
+            started_at_utc="2026-03-28T00:00:00Z",
+            completed_at_utc="2026-03-28T00:00:01Z",
+            elapsed_ms=1000,
+            returncode=0,
+            stdout_excerpt=None,
+            stderr_excerpt=None,
+            acknowledgment_mode="process_exit_zero",
+            blank_separator=False,
+        )
+        raise PartialPrintExecutionError(
+            message=f"Acrobat print command timed out for {batch.document_paths[1]}",
+            completed_command_receipts=[receipt],
+            blank_separator_printed=False,
+        )
+
+
+class ResumePrintProvider:
+    def print_group(self, batch: PrintBatch, *, blank_page_after_group: bool) -> PrintGroupReceipt:
+        return PrintGroupReceipt(
+            adapter_name="acrobat",
+            acknowledgment_mode="process_exit_zero",
+            executed_command_count=len(batch.document_paths),
+            blank_separator_printed=blank_page_after_group,
+            command_receipts=[
+                PrintCommandReceipt(
+                    adapter_name="acrobat",
+                    document_path=document_path,
+                    command=["acrobat", document_path],
+                    started_at_utc="2026-03-28T00:00:02Z",
+                    completed_at_utc="2026-03-28T00:00:03Z",
+                    elapsed_ms=1000,
+                    returncode=0,
+                    stdout_excerpt=None,
+                    stderr_excerpt=None,
+                    acknowledgment_mode="process_exit_zero",
+                    blank_separator=False,
+                )
+                for document_path in batch.document_paths
+            ],
+        )
 
 
 def _build_run_report(*, print_phase_status: PrintPhaseStatus) -> RunReport:

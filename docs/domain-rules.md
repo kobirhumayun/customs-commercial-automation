@@ -368,6 +368,11 @@ The dashboard column is verification-only and should not be used to drive other 
 - The workbook write stage must commit as an all-or-nothing batch from the approved staged write plan.
 - If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
 - Rerun entry must perform recovery validation using the backup artifact plus recorded staged write plan before allowing new writes.
+- Print execution must persist deterministic per-group progress markers.
+- If a print group is interrupted after some PDFs are printed, recovery/resume may continue only from the remaining document suffix recorded by the partial print marker.
+- If physical paper output occurred during an Acrobat timeout, operators may advance the recorded print prefix with `acknowledge-partial-print` before resuming.
+- If operators confirm that all PDFs in the planned print group physically printed, `acknowledge-partial-print` may finalize the marker as `completed`; one final `execute-print` pass is still required to close run metadata without sending more print commands.
+- If physical print output occurred but no partial/completed print marker was persisted, the run remains a manual recovery boundary and mail moves must stay blocked.
 
 ## Rerun/recovery hash invariants
 - Recovery hash algorithm is fixed to **SHA-256** for:

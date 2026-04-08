@@ -78,7 +78,11 @@ from project.workflows.document_verification import (
 from project.workflows.dashboard_export import build_workflow_dashboard_markdown
 from project.workflows.dashboard_html_export import build_workflow_dashboard_html
 from project.workflows.erp_inspection import inspect_erp_rows
-from project.workflows.print_execution import execute_print_batches, summarize_print_batch_manual_verification
+from project.workflows.print_execution import (
+    acknowledge_partial_print_progress,
+    execute_print_batches,
+    summarize_print_batch_manual_verification,
+)
 from project.workflows.print_marker_reporting import summarize_print_markers
 from project.workflows.print_planning import (
     build_print_plan_payload,
@@ -190,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_plan_print(args)
     if args.command == "execute-print":
         return _handle_execute_print(args)
+    if args.command == "acknowledge-partial-print":
+        return _handle_acknowledge_partial_print(args)
     if args.command == "inspect-print-adapter":
         return _handle_inspect_print_adapter(args)
     if args.command == "report-live-readiness":
@@ -1352,6 +1358,43 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    acknowledge_partial_print_parser = subparsers.add_parser(
+        "acknowledge-partial-print",
+        help="Record operator-confirmed partial print progress for a resumable print group.",
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose partial print marker should be acknowledged.",
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "--printed-count",
+        type=int,
+        required=True,
+        help="How many leading documents in the print group physically printed successfully.",
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "--print-group-id",
+        help="Optional print group id when the run has more than one partial print group.",
+    )
+    acknowledge_partial_print_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     inspect_print_adapter_parser = subparsers.add_parser(
         "inspect-print-adapter",
         help="Inspect Acrobat print-adapter discovery and blank-separator readiness without printing.",
@@ -1943,6 +1986,43 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
         "manual_verification_summary": summarize_print_batch_manual_verification(print_batches),
         "discrepancy_count": len(discrepancies),
     }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_acknowledge_partial_print(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        if not descriptor.supports_print:
+            raise ValueError("Partial print acknowledgment is not supported for this workflow")
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        print_batches = load_print_batches(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = acknowledge_partial_print_progress(
+            artifact_paths=artifact_paths,
+            print_batches=print_batches,
+            print_group_id=args.print_group_id,
+            printed_count=args.printed_count,
+        )
+        payload["run_id"] = args.run_id
+        payload["workflow_id"] = descriptor.workflow_id.value
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(payload), end="")
     return 0
 

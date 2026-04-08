@@ -3432,6 +3432,160 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["print_phase_status"], "completed")
         provider_mock.assert_called_once()
 
+    def test_acknowledge_partial_print_command_reports_updated_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/a.pdf", "C:/docs/b.pdf"],
+                    document_path_hashes=["hash-a", "hash-b"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch("project.cli.load_print_batches", return_value=print_batches):
+                with patch(
+                    "project.cli.acknowledge_partial_print_progress",
+                    return_value={
+                        "print_group_id": "group-1",
+                        "mail_id": "mail-1",
+                        "marker_path": "C:/tmp/group-1.json",
+                        "print_status": "partial_incomplete",
+                        "acknowledged_printed_document_count": 1,
+                        "previous_recorded_printed_document_count": 0,
+                        "remaining_document_count": 1,
+                        "acknowledged_document_paths": ["C:/docs/a.pdf"],
+                        "remaining_document_paths": ["C:/docs/b.pdf"],
+                    },
+                ) as acknowledge_mock:
+                    with redirect_stdout(buffer):
+                        exit_code = main(
+                            [
+                                "acknowledge-partial-print",
+                                "export_lc_sc",
+                                "--config",
+                                str(config_path),
+                                "--run-id",
+                                "run-123",
+                                "--printed-count",
+                                "1",
+                            ]
+                        )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "export_lc_sc")
+        self.assertEqual(payload["run_id"], "run-123")
+        self.assertEqual(payload["acknowledged_printed_document_count"], 1)
+        acknowledge_mock.assert_called_once()
+
+    def test_acknowledge_partial_print_command_can_report_completed_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/a.pdf", "C:/docs/b.pdf"],
+                    document_path_hashes=["hash-a", "hash-b"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch("project.cli.load_print_batches", return_value=print_batches):
+                with patch(
+                    "project.cli.acknowledge_partial_print_progress",
+                    return_value={
+                        "print_group_id": "group-1",
+                        "mail_id": "mail-1",
+                        "marker_path": "C:/tmp/group-1.json",
+                        "print_status": "completed",
+                        "acknowledged_printed_document_count": 2,
+                        "previous_recorded_printed_document_count": 1,
+                        "remaining_document_count": 0,
+                        "acknowledged_document_paths": ["C:/docs/a.pdf", "C:/docs/b.pdf"],
+                        "remaining_document_paths": [],
+                    },
+                ):
+                    with redirect_stdout(buffer):
+                        exit_code = main(
+                            [
+                                "acknowledge-partial-print",
+                                "export_lc_sc",
+                                "--config",
+                                str(config_path),
+                                "--run-id",
+                                "run-123",
+                                "--printed-count",
+                                "2",
+                            ]
+                        )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["print_status"], "completed")
+        self.assertEqual(payload["remaining_document_count"], 0)
+
     def test_inspect_print_adapter_command_reports_acrobat_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

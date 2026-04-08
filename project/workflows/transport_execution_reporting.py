@@ -33,6 +33,11 @@ def build_transport_execution_report(
         for marker in mail_move_markers
         if str(marker.get("write_disposition", "")).strip() == "duplicate_only_noop"
     )
+    partial_print_marker_count = sum(
+        1
+        for marker in print_markers
+        if str(marker.get("print_status", "")).strip() == "partial_incomplete"
+    )
 
     return {
         "summary_counts": {
@@ -42,6 +47,7 @@ def build_transport_execution_report(
             "mail_move_adapter_count": len(mail_move_adapter_names),
             "manual_verification_visible_count": manual_verification_visible_count,
             "duplicate_only_mail_move_count": duplicate_only_move_count,
+            "partial_print_marker_count": partial_print_marker_count,
         },
         "print_execution": print_marker_summary,
         "mail_move_execution": mail_move_marker_summary,
