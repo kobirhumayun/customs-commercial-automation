@@ -124,10 +124,15 @@ def execute_mail_moves(
         run_report=run_report,
         mail_outcomes=mail_outcomes,
     )
-    gate_discrepancy = _build_gate_discrepancy(
-        run_report=run_report,
+    effective_require_write_committed, effective_require_print_completed = _effective_gate_requirements(
+        mail_outcomes=updated_mail_outcomes,
         require_write_committed=require_write_committed,
         require_print_completed=require_print_completed,
+    )
+    gate_discrepancy = _build_gate_discrepancy(
+        run_report=run_report,
+        require_write_committed=effective_require_write_committed,
+        require_print_completed=effective_require_print_completed,
     )
     if gate_discrepancy is not None:
         hard_blocked_report = replace(run_report, mail_move_phase_status=MailMovePhaseStatus.HARD_BLOCKED)
@@ -274,6 +279,25 @@ def _build_gate_discrepancy(
         },
         mail_id=None,
     )
+
+
+def _effective_gate_requirements(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    require_write_committed: bool,
+    require_print_completed: bool,
+) -> tuple[bool, bool]:
+    candidate_outcomes = [
+        outcome
+        for outcome in mail_outcomes
+        if outcome.eligible_for_mail_move and _mail_move_policy_allows(outcome)
+    ]
+    if candidate_outcomes and all(
+        str(outcome.write_disposition or "").strip() == "duplicate_only_noop"
+        for outcome in candidate_outcomes
+    ):
+        return False, False
+    return require_write_committed, require_print_completed
 
 
 def _check_existing_marker(path: Path, operation: MailMoveOperation) -> str:

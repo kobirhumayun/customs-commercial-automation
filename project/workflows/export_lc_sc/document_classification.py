@@ -71,66 +71,12 @@ def classify_saved_export_documents(
     ]
 
     decision_reasons: list[str] = []
-    discrepancies: list[DocumentClassificationDiscrepancy] = []
-    selected_document_ids: set[str] = set()
-
-    for document in classified_documents:
-        if document.document_type == "ambiguous_export_pdf":
-            discrepancies.append(
-                DocumentClassificationDiscrepancy(
-                    code="attachment_classification_ambiguous",
-                    severity=FinalDecision.HARD_BLOCK,
-                    message="A saved export PDF matched multiple required document classes equally.",
-                    details={
-                        "saved_document_id": document.saved_document_id,
-                        "normalized_filename": document.normalized_filename,
-                    },
-                )
-            )
-
-    lc_selected, lc_discrepancy = _select_best_candidate(
-        _rank_candidates(payload=payload, saved_documents=classified_documents, document_class="lc_sc"),
-        target_document_type="export_lc_sc_document",
-    )
-    pi_selected, pi_discrepancy = _select_best_candidate(
-        _rank_candidates(payload=payload, saved_documents=classified_documents, document_class="pi"),
-        target_document_type="export_pi_document",
-    )
-
-    if lc_discrepancy is not None:
-        discrepancies.append(lc_discrepancy)
-    if pi_discrepancy is not None:
-        discrepancies.append(pi_discrepancy)
-    if lc_selected is not None:
-        selected_document_ids.add(lc_selected.saved_document_id)
-        decision_reasons.append(
-            f"Selected {lc_selected.normalized_filename} as the export LC/SC print document."
-        )
-    if pi_selected is not None:
-        selected_document_ids.add(pi_selected.saved_document_id)
-        decision_reasons.append(
-            f"Selected {pi_selected.normalized_filename} as the export PI print document."
-        )
-
-    discrepancies.extend(
-        _build_ocr_quality_discrepancies(
-            finalized_candidates=classified_documents,
-            selected_document_ids=selected_document_ids,
-        )
-    )
 
     finalized_documents = [
         replace(
             document,
-            print_eligible=(
-                document.saved_document_id in selected_document_ids
-                and document.save_decision == "saved_new"
-                and not discrepancies
-            ),
-            classification_reason=_final_classification_reason(
-                document=document,
-                selected_document_ids=selected_document_ids,
-            ),
+            print_eligible=document.save_decision == "saved_new",
+            classification_reason=_final_classification_reason(document=document),
         )
         for document in classified_documents
     ]
@@ -143,7 +89,7 @@ def classify_saved_export_documents(
     return ClassifiedDocumentSet(
         saved_documents=finalized_documents,
         decision_reasons=decision_reasons,
-        discrepancies=discrepancies,
+        discrepancies=[],
     )
 
 
@@ -355,109 +301,9 @@ def _is_family_lc_sc_match(candidate_lc_sc_number: str, payload: ExportMailPaylo
 def _final_classification_reason(
     *,
     document: SavedDocument,
-    selected_document_ids: set[str],
 ) -> str:
     base_reason = document.classification_reason or "Document classification completed."
-    if document.saved_document_id in selected_document_ids:
-        return f"{base_reason} Selected for export print planning."
-    if document.document_type in {"export_lc_sc_document", "export_pi_document"}:
-        return f"{base_reason} Not selected as the primary document for this export class."
-    return base_reason
-
-
-def _build_ocr_quality_discrepancies(
-    *,
-    finalized_candidates: list[SavedDocument],
-    selected_document_ids: set[str],
-) -> list[DocumentClassificationDiscrepancy]:
-    discrepancies: list[DocumentClassificationDiscrepancy] = []
-    for document in finalized_candidates:
-        if document.saved_document_id not in selected_document_ids:
-            continue
-        if not _analysis_includes_ocr(document.analysis_basis):
-            continue
-        if document.document_type == "export_lc_sc_document":
-            if not document.extracted_lc_sc_number:
-                discrepancies.append(
-                    _build_ocr_discrepancy(
-                        code="ocr_required_field_missing",
-                        message="OCR-selected export LC/SC document did not yield an LC/SC number.",
-                        details={
-                            "saved_document_id": document.saved_document_id,
-                            "normalized_filename": document.normalized_filename,
-                            "required_field": "lc_sc_number",
-                            "document_type": document.document_type,
-                            "field_provenance": dict(document.extracted_lc_sc_provenance or {}),
-                        },
-                    )
-                )
-            elif (
-                document.extracted_lc_sc_confidence is None
-                or document.extracted_lc_sc_confidence < EXPORT_LC_SC_OCR_MIN_CONFIDENCE
-            ):
-                discrepancies.append(
-                    _build_ocr_discrepancy(
-                        code="ocr_required_field_below_threshold",
-                        message="OCR-selected export LC/SC document did not meet the LC/SC confidence threshold.",
-                        details={
-                            "saved_document_id": document.saved_document_id,
-                            "normalized_filename": document.normalized_filename,
-                            "required_field": "lc_sc_number",
-                            "document_type": document.document_type,
-                            "observed_confidence": document.extracted_lc_sc_confidence,
-                            "minimum_confidence": EXPORT_LC_SC_OCR_MIN_CONFIDENCE,
-                            "field_provenance": dict(document.extracted_lc_sc_provenance or {}),
-                        },
-                    )
-                )
-        if document.document_type == "export_pi_document":
-            if not document.extracted_pi_number:
-                discrepancies.append(
-                    _build_ocr_discrepancy(
-                        code="ocr_required_field_missing",
-                        message="OCR-selected export PI document did not yield a PI reference.",
-                        details={
-                            "saved_document_id": document.saved_document_id,
-                            "normalized_filename": document.normalized_filename,
-                            "required_field": "pi_reference",
-                            "document_type": document.document_type,
-                            "field_provenance": dict(document.extracted_pi_provenance or {}),
-                        },
-                    )
-                )
-            elif (
-                document.extracted_pi_confidence is None
-                or document.extracted_pi_confidence < EXPORT_PI_OCR_MIN_CONFIDENCE
-            ):
-                discrepancies.append(
-                    _build_ocr_discrepancy(
-                        code="ocr_required_field_below_threshold",
-                        message="OCR-selected export PI document did not meet the PI confidence threshold.",
-                        details={
-                            "saved_document_id": document.saved_document_id,
-                            "normalized_filename": document.normalized_filename,
-                            "required_field": "pi_reference",
-                            "document_type": document.document_type,
-                            "observed_confidence": document.extracted_pi_confidence,
-                            "minimum_confidence": EXPORT_PI_OCR_MIN_CONFIDENCE,
-                            "field_provenance": dict(document.extracted_pi_provenance or {}),
-                        },
-                    )
-                )
-    return discrepancies
-
-
-def _build_ocr_discrepancy(*, code: str, message: str, details: dict[str, object]) -> DocumentClassificationDiscrepancy:
-    return DocumentClassificationDiscrepancy(
-        code=code,
-        severity=FinalDecision.HARD_BLOCK,
-        message=message,
-        details=details,
-    )
-
-
-def _analysis_includes_ocr(analysis_basis: str | None) -> bool:
-    return bool(analysis_basis and "ocr_text" in analysis_basis)
+    return f"{base_reason} Saved PDF remains eligible for export print planning."
 
 
 def _compact_alnum(value: str) -> str:

@@ -72,7 +72,7 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         )
         self.assertEqual(
             [document.print_eligible for document in classified.saved_documents],
-            [True, True, False],
+            [True, True, True],
         )
         self.assertEqual(classified.discrepancies, [])
 
@@ -187,10 +187,10 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         )
 
         self.assertEqual(classified.saved_documents[0].document_type, "ambiguous_export_pdf")
-        self.assertFalse(classified.saved_documents[0].print_eligible)
-        self.assertEqual([item.code for item in classified.discrepancies], ["attachment_classification_ambiguous"])
+        self.assertTrue(classified.saved_documents[0].print_eligible)
+        self.assertEqual(classified.discrepancies, [])
 
-    def test_classify_saved_export_documents_hard_blocks_selected_ocr_pi_below_threshold(self) -> None:
+    def test_classify_saved_export_documents_keeps_ocr_selected_pi_printable_below_threshold(self) -> None:
         mail = build_email_snapshot(
             [
                 SourceEmailRecord(
@@ -254,9 +254,8 @@ class ExportDocumentClassificationTests(unittest.TestCase):
             analysis_provider=OCRLikeProvider(),
         )
 
-        self.assertIn("ocr_required_field_below_threshold", [item.code for item in classified.discrepancies])
-        self.assertEqual(classified.discrepancies[0].details["field_provenance"]["page_number"], 4)
-        self.assertFalse(any(document.print_eligible for document in classified.saved_documents))
+        self.assertEqual(classified.discrepancies, [])
+        self.assertTrue(all(document.print_eligible for document in classified.saved_documents))
 
     def test_classify_saved_export_documents_prefers_amendment_match_from_analysis_context(self) -> None:
         mail = build_email_snapshot(
@@ -321,7 +320,7 @@ class ExportDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(classified.discrepancies, [])
         self.assertEqual(
             [document.print_eligible for document in classified.saved_documents],
-            [False, True],
+            [True, True],
         )
         self.assertEqual(classified.saved_documents[1].extracted_amendment_number, "5")
 

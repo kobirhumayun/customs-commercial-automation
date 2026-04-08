@@ -515,7 +515,7 @@ Mail-level:
 ### Inputs
 - Outlook folder: `working` after operator triage from `temp-export`; snapshot all messages in the folder when the CLI is triggered
 - ERP report: `RptCommercialExport/DateWiseLCRegisterForDocuments`
-- Attachments: LC/SC PDFs and PI PDFs
+- Attachments: all PDF attachments are saved; LC/SC and PI extraction/classification is informational only
 
 ### Deterministic checks
 - parse subject into document type, LC/SC end sequence, buyer, and optional suffix
@@ -530,7 +530,7 @@ Mail-level:
 - hard-block if the extracted file numbers do not resolve to the same LC/SC family; any partial family match is a hard block
 - normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
 - subject parsing and subject-to-ERP comparison remain optional/advisory only; ERP rows selected from body file numbers are final
-- identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
+- attachment naming and OCR-derived signals may be recorded for reporting, but they do not block processing
 
 Example (canonical selection): if two ERP rows are true-equivalent for `P/26/0042` and appear as row 118 then row 241, row 118 remains canonical and its fields are used for folder pathing, workbook mapping, and reporting metadata.
 
@@ -558,13 +558,20 @@ Note: the master workbook intentionally contains duplicate `Amount` headers. The
 - any partial family match across LC/SC number, normalized buyer, and LC/SC date
 - duplicate file number already present when workflow expects skip
 - duplicate file number already staged earlier in the same run when workflow expects skip
-- ambiguous document identity not resolved by rules
 - any incomplete validation needed for append/skip decision
+
+### Duplicate-only terminal behavior
+- If every canonical file number in a mail is already present in the workbook, the mail outcome is `duplicate_only_noop`.
+- A `duplicate_only_noop` mail stages no workbook writes and requires no print planning or print execution.
+- Subject parsing and subject-to-ERP comparison remain advisory only in this path as well; body file numbers plus ERP rows remain final.
+- A `duplicate_only_noop` mail may still complete the workflow through post-run mail movement once validation succeeds.
+- Duplicate-only handling must be visible in run reports, workflow summaries, dashboards, and mail-move receipts.
 
 ### Batch execution behavior
 - blocked emails remain in `working`
-- successfully processed export-team emails move to `UD and LC` only after the batch workbook-write and batch print phases finish
-- print batches are built from successful mails in the active run snapshot, using only newly saved PDFs
+- successfully processed export-team emails with new writes move to `UD and LC` only after the batch workbook-write and batch print phases finish
+- duplicate-only successful emails may move to `UD and LC` without workbook-write or print completion because no new write or print obligation exists
+- print batches are built from successful mails in the active run snapshot, using all newly saved PDFs
 - duplicate prevention is enforced by canonical file number, not by identical mail subject/body detection
 - if multiple mails in one run contain the same canonical file number, deterministic `mail_iteration_order` decides which mail is evaluated first and later mails must not create an additional workbook row for that file
 

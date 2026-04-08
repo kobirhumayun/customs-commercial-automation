@@ -178,8 +178,7 @@ Extraction order is mandatory:
 3. table extraction fallback for required tabular fields
 
 Decision rules:
-- Any required field below threshold emits `ocr_required_field_below_threshold` and hard-blocks.
-- Any missing required field emits `ocr_required_field_missing` and hard-blocks.
+- OCR- or parser-derived LC/SC and PI fields are informational only in phase 1 and never hard-block export processing.
 - Non-required low-confidence fields may emit `ocr_non_required_field_low_confidence` warning if all required fields pass.
 
 ## ERP normalization rules
@@ -214,6 +213,12 @@ Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` a
 - A file already present in `Commercial File No.` must never be written again as a new workbook row.
 - If required, first attempt to locate an existing row for the same file/amendment to avoid duplicate insertion.
 - Operational ordering is row sequence and drives staged write ordering, reporting, and print ordering.
+- If a mail resolves only to file numbers already present in `Commercial File No.`, the workflow outcome is `duplicate_only_noop`.
+- `duplicate_only_noop` means:
+  - no workbook writes
+  - no print requirement
+  - mail remains eligible for deterministic post-run movement when validation otherwise passes
+- This duplicate-only terminal path is valid only because workbook uniqueness by canonical file number is the final contract for export processing.
 
 ### Workbook mapping contract (normative)
 Implementations must resolve workbook targets from exact row-2 header text on sheet 1 and then stage writes using canonical `column_key` names. Header aliases are allowed only where explicitly listed.

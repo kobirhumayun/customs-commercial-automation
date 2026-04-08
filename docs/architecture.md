@@ -189,7 +189,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Every extracted file number is used for ERP lookup and folder-path verification to confirm they all belong to the same ERP family.
 - ERP downloader retrieves `RptCommercialExport/DateWiseLCRegisterForDocuments`, normalizes row-2 headers, and validates family consistency using ERP `LC No.`, normalized buyer, and canonicalized `LC DT.`. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
 - Mail subject parsing is optional and advisory only. ERP rows selected by extracted body file numbers are the final source for family data, workbook values, and storage path construction.
-- Attachment classifier identifies LC/SC and PI PDFs using naming conventions, clauses, amendment context, and ERP PI references.
+- Attachment saving persists all new PDF attachments into the export folder hierarchy; LC/SC and PI extraction/classification signals are informational only and do not gate run success.
 - Storage manager saves only new PDFs into export folder hierarchy:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`.
 - Excel adapter appends or skips based on file number existence and amendment matching rules.
@@ -225,7 +225,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### Printing CLI/service
 - Triggered automatically after the batch workbook-write phase succeeds for at least one mail in a write-capable workflow.
-- Prints only newly saved PDFs from successful mails in the active run snapshot.
+- Prints all newly saved PDFs from successful mails in the active run snapshot.
 - Batches are grouped by originating mail and ordered by master-workbook row sequence captured from the staged write outcomes.
 - Within each mail group, all newly saved PDFs are printed in saved/staged order with no extra intra-group sorting.
 - Inserts exactly one blank page between consecutive mail groups.

@@ -2075,7 +2075,7 @@ class ValidationTests(unittest.TestCase):
                 2,
             )
 
-    def test_validate_run_snapshot_hard_blocks_low_confidence_ocr_selected_pi(self) -> None:
+    def test_validate_run_snapshot_keeps_low_confidence_ocr_documents_non_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workflow_year = __import__("datetime").datetime.now(
@@ -2198,17 +2198,11 @@ class ValidationTests(unittest.TestCase):
                 document_analysis_provider=OCRLikeProvider(),
             )
 
-            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
-            self.assertIn(
-                "ocr_required_field_below_threshold",
-                [report.code for report in validation_result.discrepancy_reports],
+            self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+            self.assertEqual(validation_result.discrepancy_reports, [])
+            self.assertTrue(
+                all(document["print_eligible"] for document in validation_result.mail_outcomes[0].saved_documents)
             )
-            ocr_report = next(
-                report
-                for report in validation_result.discrepancy_reports
-                if report.code == "ocr_required_field_below_threshold"
-            )
-            self.assertEqual(ocr_report.details["field_provenance"]["page_number"], 3)
 
 
 if __name__ == "__main__":

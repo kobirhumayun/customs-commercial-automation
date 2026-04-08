@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from project.models import (
@@ -75,6 +76,36 @@ class MailMoveExecutionTests(unittest.TestCase):
             marker_payload["move_execution_receipt"]["acknowledged_destination_folder"],
             "dst-folder",
         )
+        self.assertEqual(discrepancies, [])
+
+    def test_execute_mail_moves_allows_duplicate_only_run_without_write_or_print_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = replace(
+                _build_run_report(
+                    print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                    mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                ),
+                write_phase_status=WritePhaseStatus.NOT_STARTED,
+            )
+
+            executed_report, executed_outcomes, move_operations, discrepancies = execute_mail_moves(
+                run_report=run_report,
+                mail_outcomes=[_build_mail_outcome(write_disposition="duplicate_only_noop")],
+                artifact_paths=artifact_paths,
+                provider=SimulatedMailMoveProvider(),
+            )
+
+        self.assertEqual(executed_report.mail_move_phase_status, MailMovePhaseStatus.COMPLETED)
+        self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.MOVED)
+        self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(len(move_operations), 1)
         self.assertEqual(discrepancies, [])
 
     def test_execute_mail_moves_hard_blocks_when_print_gate_is_unsatisfied(self) -> None:

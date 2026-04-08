@@ -15,6 +15,23 @@ Repository for the durable architecture, planning guidance, and eventual impleme
 - Windows desktop integrations with Outlook, Excel, Acrobat, Playwright, local storage, and JSON reporting.
 - Deterministic rule-based automation first; AI later as an extension point.
 
+## Released operator flow
+For normal phase-1 operation, the primary operator commands are:
+- `report-live-readiness`
+- `validate-run`
+- `plan-print`
+- `execute-print`
+- `execute-mail-moves`
+- `recover-run` when a prior run is uncertain or interrupted
+
+The expected terminal paths are:
+- `new writes`:
+  `validate-run` stages and commits workbook rows, `plan-print`/`execute-print` handle newly saved PDFs, then `execute-mail-moves` moves the mail
+- `duplicate-only`:
+  the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
+
+Duplicate suppression is file-number-based. A file already present in `Commercial File No.` must not be written again, even if the incoming mail is otherwise valid.
+
 ## Operator setup helpers
 When preparing a local config for live Outlook workflows, use the Outlook folder inspection command to discover the real folder `EntryID` values for:
 - `source_working_folder_entry_id`

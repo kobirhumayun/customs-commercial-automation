@@ -134,7 +134,7 @@ class PrintPlanningTests(unittest.TestCase):
         self.assertEqual(payload["print_group_order"], result.run_report.print_group_order)
         self.assertEqual(len(payload["print_groups"][1]["document_path_hashes"]), 2)
 
-    def test_plan_print_batches_ignores_saved_documents_that_are_not_print_eligible(self) -> None:
+    def test_plan_print_batches_includes_saved_documents_without_print_eligible_field(self) -> None:
         run_report = RunReport(
             run_id="run-1",
             workflow_id=WorkflowId.EXPORT_LC_SC,
@@ -174,7 +174,6 @@ class PrintPlanningTests(unittest.TestCase):
                     {
                         "destination_path": "C:/docs/not-printable.pdf",
                         "save_decision": "saved_new",
-                        "print_eligible": False,
                     },
                     {
                         "destination_path": "C:/docs/printable.pdf",
@@ -206,7 +205,10 @@ class PrintPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(len(result.print_batches), 1)
-        self.assertEqual(result.print_batches[0].document_paths, ["C:/docs/printable.pdf"])
+        self.assertEqual(
+            result.print_batches[0].document_paths,
+            ["C:/docs/not-printable.pdf", "C:/docs/printable.pdf"],
+        )
 
     def test_plan_print_batches_carries_manual_verification_summary_without_gating(self) -> None:
         run_report = RunReport(
