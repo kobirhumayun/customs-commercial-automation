@@ -8,7 +8,6 @@ from pathlib import Path
 
 from project.erp import ERPFamily
 from project.models import EmailMessage, FinalDecision, SavedDocument
-from project.storage.planning import plan_attachment_saves
 from project.storage.providers import AttachmentContentProvider
 from project.utils.hashing import sha256_file
 from project.utils.ids import build_saved_document_id
@@ -68,45 +67,39 @@ def save_export_mail_documents(
         )
 
     destination_directory.mkdir(parents=True, exist_ok=True)
-    existing_filenames = {
-        path.name
-        for path in destination_directory.iterdir()
-        if path.is_file()
-    }
-    save_plans = [
-        plan
-        for plan in plan_attachment_saves(
-            mail=mail,
-            destination_directory=destination_directory,
-            existing_filenames=existing_filenames,
-        )
-        if plan.normalized_filename.lower().endswith(".pdf")
-    ]
-
     saved_documents: list[SavedDocument] = []
     decision_reasons: list[str] = []
-    for plan in save_plans:
-        destination_path = Path(plan.destination_path)
+    seen_normalized_filenames: set[str] = set()
+    pdf_attachments = [
+        attachment
+        for attachment in sorted(mail.attachments, key=lambda item: item.attachment_index)
+        if attachment.normalized_filename.lower().endswith(".pdf")
+    ]
+
+    for attachment in pdf_attachments:
+        destination_path = destination_directory / attachment.normalized_filename
+        duplicate_in_mail = attachment.normalized_filename in seen_normalized_filenames
+        existed_before = destination_path.exists()
         try:
-            if plan.save_decision == "planned_skip_duplicate_filename":
+            if duplicate_in_mail or existed_before:
                 if not destination_path.exists():
                     raise ValueError(f"Expected duplicate file was not present: {destination_path}")
                 file_sha256 = sha256_file(destination_path)
                 save_decision = "skipped_duplicate_filename"
                 decision_reasons.append(
-                    f"Skipped duplicate attachment filename {plan.normalized_filename}."
+                    f"Skipped duplicate attachment filename {attachment.normalized_filename}."
                 )
             else:
                 _save_attachment_atomically(
                     provider=provider,
                     mail=mail,
-                    attachment_index=plan.attachment_index,
+                    attachment_index=attachment.attachment_index,
                     destination_path=destination_path,
                 )
                 file_sha256 = sha256_file(destination_path)
                 save_decision = "saved_new"
                 decision_reasons.append(
-                    f"Saved new attachment {plan.normalized_filename}."
+                    f"Saved new attachment {attachment.normalized_filename}."
                 )
         except Exception as exc:
             return DocumentSaveResult(
@@ -118,8 +111,8 @@ def save_export_mail_documents(
                         message="Attachment saving failed before validation completed.",
                         details={
                             "mail_id": mail.mail_id,
-                            "attachment_index": plan.attachment_index,
-                            "attachment_name": plan.attachment_name,
+                            "attachment_index": attachment.attachment_index,
+                            "attachment_name": attachment.attachment_name,
                             "destination_path": str(destination_path),
                             "error": str(exc),
                         },
@@ -132,18 +125,19 @@ def save_export_mail_documents(
             SavedDocument(
                 saved_document_id=build_saved_document_id(
                     mail.mail_id,
-                    plan.normalized_filename,
+                    attachment.normalized_filename,
                     str(destination_path),
                 ),
                 mail_id=mail.mail_id,
-                attachment_name=plan.attachment_name,
-                normalized_filename=plan.normalized_filename,
+                attachment_name=attachment.attachment_name,
+                normalized_filename=attachment.normalized_filename,
                 destination_path=str(destination_path),
                 file_sha256=file_sha256,
                 save_decision=save_decision,
-                attachment_index=plan.attachment_index,
+                attachment_index=attachment.attachment_index,
             )
         )
+        seen_normalized_filenames.add(attachment.normalized_filename)
 
     if not decision_reasons:
         decision_reasons.append("No PDF attachments were available for saving.")

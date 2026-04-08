@@ -109,6 +109,63 @@ class DocumentSavingTests(unittest.TestCase):
             "C:/exports/2026/CUTTING EDGE INDUSTRIES LTD/DPCBD1175392/All Attachments",
         )
 
+    def test_save_export_mail_documents_skips_preexisting_pdf_and_saves_other_new_pdf(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD",
+                    sender_address="sender@example.com",
+                    attachments=[
+                        SourceAttachmentRecord(attachment_name="existing.pdf"),
+                        SourceAttachmentRecord(attachment_name="new.pdf"),
+                    ],
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document_root = Path(temp_dir)
+            destination_directory = build_export_attachment_directory(
+                document_root,
+                ERPFamily(
+                    lc_sc_number="LC-0038",
+                    buyer_name="ANANTA GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                ),
+            )
+            destination_directory.mkdir(parents=True, exist_ok=True)
+            (destination_directory / "existing.pdf").write_bytes(b"%PDF-1.4\nalready here\n")
+            provider = SimulatedAttachmentContentProvider(
+                content_by_key={
+                    (mail.entry_id, 0): b"%PDF-1.4\nshould not overwrite\n",
+                    (mail.entry_id, 1): b"%PDF-1.4\nbrand new\n",
+                }
+            )
+
+            result = save_export_mail_documents(
+                mail=mail,
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-0038",
+                    buyer_name="ANANTA GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                ),
+                document_root=document_root,
+                provider=provider,
+            )
+
+        self.assertEqual(result.issues, [])
+        self.assertEqual(
+            [document.save_decision for document in result.saved_documents],
+            ["skipped_duplicate_filename", "saved_new"],
+        )
+        self.assertEqual(
+            [document.normalized_filename for document in result.saved_documents],
+            ["existing.pdf", "new.pdf"],
+        )
+
     def test_save_export_mail_documents_hard_blocks_when_family_is_missing(self) -> None:
         mail = build_email_snapshot(
             [
