@@ -279,7 +279,7 @@ class _AcrobatOlePrintSession:
                     command = [
                         "AcroExch.App",
                         "AcroExch.AVDoc",
-                        "AVDoc.PrintPagesSilentEx",
+                        "AVDoc.PrintPagesSilent",
                         str(document_path),
                         "printer=<default>",
                     ]
@@ -297,7 +297,7 @@ class _AcrobatOlePrintSession:
                 command = [
                     "AcroExch.App",
                     "AcroExch.AVDoc",
-                    "AVDoc.PrintPagesSilentEx",
+                    "AVDoc.PrintPagesSilent",
                     str(document_path),
                     "printer=<default>",
                 ]
@@ -408,21 +408,17 @@ def _submit_print_via_avdoc(*, av_doc) -> None:
     if page_count < 1:
         raise RuntimeError("Acrobat AVDoc print submission requires at least one page")
     try:
-        result = av_doc.PrintPagesSilentEx(
+        result = av_doc.PrintPagesSilent(
             0,
             page_count - 1,
             2,
             1,
             1,
-            0,
-            0,
-            0,
-            0,
         )
     except Exception as exc:
-        raise RuntimeError(f"Acrobat AVDoc.PrintPagesSilentEx() failed: {exc}") from exc
+        raise RuntimeError(f"Acrobat AVDoc.PrintPagesSilent() failed: {exc}") from exc
     if not bool(result):
-        raise RuntimeError("Acrobat AVDoc.PrintPagesSilentEx() reported failure")
+        raise RuntimeError("Acrobat AVDoc.PrintPagesSilent() reported failure")
 
 
 def _hide_acrobat_application(app: object | None) -> None:

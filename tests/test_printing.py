@@ -98,6 +98,7 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertEqual(receipt.acknowledgment_mode, "ole_silent_submission")
         self.assertEqual(receipt.command_receipts[0].acknowledgment_mode, "ole_avdoc_silent_submission")
         self.assertEqual(ole_client.avdoc.print_calls, 1)
+        self.assertEqual(ole_client.avdoc.last_method_name, "PrintPagesSilent")
 
     def test_acrobat_print_provider_raises_when_executable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -261,6 +262,7 @@ class _FakeAVDoc:
     def __init__(self) -> None:
         self.document_path: str | None = None
         self.print_calls = 0
+        self.last_method_name: str | None = None
 
     def Open(self, document_path: str, title: str) -> bool:
         del title
@@ -270,7 +272,9 @@ class _FakeAVDoc:
     def GetPDDoc(self):
         return SimpleNamespace(GetNumPages=lambda: 2)
 
-    def PrintPagesSilentEx(self, *args) -> int:
+    def PrintPagesSilent(self, *args) -> int:
+        del args
+        self.last_method_name = "PrintPagesSilent"
         self.print_calls += 1
         return -1
 
