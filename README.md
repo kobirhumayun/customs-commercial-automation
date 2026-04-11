@@ -20,6 +20,7 @@ Repository for the durable architecture, planning guidance, and eventual impleme
 - The operator flow does not rely on the visible Acrobat GUI staying open.
 - Print execution is acknowledged when the print job is handed off to Acrobat/the target printer queue in deterministic document order.
 - Phase 1 does not wait for or verify physical paper completion. Printer conditions such as empty trays remain operator-managed.
+- On machines where the COM `JSObject` bridge cannot provide print parameters, the live adapter automatically falls back to hidden `AVDoc.PrintPagesSilent` submission on the default printer.
 
 ## Released operator flow
 For normal phase-1 operation, the primary operator commands are:

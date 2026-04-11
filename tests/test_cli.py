@@ -1307,9 +1307,12 @@ class CLITests(unittest.TestCase):
                   "manual_verification_summary": {"verified_count": 1},
                   "print_execution_receipt": {
                     "adapter_name": "acrobat",
-                    "acknowledgment_mode": "process_exit_zero",
+                    "acknowledgment_mode": "ole_silent_submission",
                     "executed_command_count": 2,
-                    "blank_separator_printed": true
+                    "blank_separator_printed": true,
+                    "command_receipts": [
+                      {"acknowledgment_mode": "ole_avdoc_silent_submission"}
+                    ]
                   }
                 }
                 """,
@@ -1337,7 +1340,15 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["print_markers"]["markers"][0]["adapter_name"], "acrobat")
         self.assertEqual(
             payload["print_markers"]["markers"][0]["acknowledgment_mode"],
-            "process_exit_zero",
+            "ole_silent_submission",
+        )
+        self.assertEqual(
+            payload["print_markers"]["markers"][0]["submission_modes"],
+            ["ole_avdoc_silent_submission"],
+        )
+        self.assertEqual(
+            payload["print_markers"]["submission_modes"],
+            ["ole_avdoc_silent_submission"],
         )
 
     def test_report_mail_move_markers_command_prints_receipts(self) -> None:

@@ -26,9 +26,17 @@ class PrintMarkerReportingTests(unittest.TestCase):
                   "manual_verification_summary": {"verified_count": 1},
                   "print_execution_receipt": {
                     "adapter_name": "acrobat",
-                    "acknowledgment_mode": "process_exit_zero",
+                    "acknowledgment_mode": "ole_silent_submission",
                     "executed_command_count": 2,
-                    "blank_separator_printed": false
+                    "blank_separator_printed": false,
+                    "command_receipts": [
+                      {
+                        "acknowledgment_mode": "ole_avdoc_silent_submission"
+                      },
+                      {
+                        "acknowledgment_mode": "ole_avdoc_silent_submission"
+                      }
+                    ]
                   }
                 }
                 """,
@@ -41,12 +49,14 @@ class PrintMarkerReportingTests(unittest.TestCase):
         marker = payload["markers"][0]
         self.assertEqual(marker["print_group_id"], "group-1")
         self.assertEqual(marker["adapter_name"], "acrobat")
-        self.assertEqual(marker["acknowledgment_mode"], "process_exit_zero")
+        self.assertEqual(marker["acknowledgment_mode"], "ole_silent_submission")
         self.assertEqual(marker["executed_command_count"], 2)
         self.assertEqual(marker["print_status"], "partial_incomplete")
         self.assertEqual(marker["printed_document_count"], 1)
         self.assertEqual(marker["total_document_count"], 2)
         self.assertEqual(marker["blank_separator_printed"], False)
+        self.assertEqual(marker["submission_modes"], ["ole_avdoc_silent_submission"])
+        self.assertEqual(payload["submission_modes"], ["ole_avdoc_silent_submission"])
 
 
 if __name__ == "__main__":

@@ -14,9 +14,23 @@ def summarize_print_markers(*, print_markers_dir: Path) -> dict[str, Any]:
         }
 
     markers = []
+    submission_modes: set[str] = set()
     for path in sorted(print_markers_dir.glob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
         receipt = payload.get("print_execution_receipt") if isinstance(payload, dict) else None
+        command_receipts = (
+            receipt.get("command_receipts", [])
+            if isinstance(receipt, dict) and isinstance(receipt.get("command_receipts"), list)
+            else []
+        )
+        marker_submission_modes = sorted(
+            {
+                str(item.get("acknowledgment_mode", "")).strip()
+                for item in command_receipts
+                if isinstance(item, dict) and str(item.get("acknowledgment_mode", "")).strip()
+            }
+        )
+        submission_modes.update(marker_submission_modes)
         markers.append(
             {
                 "path": str(path),
@@ -44,6 +58,7 @@ def summarize_print_markers(*, print_markers_dir: Path) -> dict[str, Any]:
                 "executed_command_count": (
                     int(receipt.get("executed_command_count", 0)) if isinstance(receipt, dict) else 0
                 ),
+                "submission_modes": marker_submission_modes,
                 "receipt": receipt,
             }
         )
@@ -51,5 +66,6 @@ def summarize_print_markers(*, print_markers_dir: Path) -> dict[str, Any]:
     return {
         "print_markers_dir": str(print_markers_dir),
         "marker_count": len(markers),
+        "submission_modes": sorted(submission_modes),
         "markers": markers,
     }

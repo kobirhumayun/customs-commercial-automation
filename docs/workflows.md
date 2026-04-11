@@ -723,6 +723,7 @@ Rows where:
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
+- when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission on the default printer
 - print success in phase 1 means deterministic job submission order only; the workflow does not wait for physical printer completion
 - any print submission failure must be reported with retry/review metadata
 

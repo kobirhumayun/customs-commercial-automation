@@ -139,6 +139,9 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
         self.assertEqual(payload["printer_name"], "Office Printer")
         self.assertEqual(payload["printer_selection_mode"], "jsobject_printer_name_or_default_printer_fallback")
+        self.assertEqual(payload["primary_submission_mode"], "ole_jsobject_submission")
+        self.assertEqual(payload["fallback_submission_mode"], "ole_avdoc_silent_submission")
+        self.assertEqual(payload["supports_printer_specific_submission"], True)
         self.assertEqual(payload["timeout_seconds"], 45)
         self.assertEqual(payload["blank_separator_exists"], True)
 
