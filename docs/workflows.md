@@ -722,10 +722,12 @@ Rows where:
 - within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
-- any print failure must be reported with retry/review metadata
+- live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
+- print success in phase 1 means deterministic job submission order only; the workflow does not wait for physical printer completion
+- any print submission failure must be reported with retry/review metadata
 
 ### Operator recovery for partial Acrobat timeouts
-- If `execute-print` returns `uncertain_incomplete`, operators must first confirm whether any planned PDFs physically printed.
+- If `execute-print` returns `uncertain_incomplete`, operators must first confirm whether any planned PDFs physically printed after silent submission.
 - If no paper output occurred, rerunning `execute-print` is allowed because no print progress was acknowledged.
 - If one or more leading PDFs physically printed, operators must record that progress before retrying:
 
@@ -734,7 +736,7 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 ```
 
 - After acknowledgment, rerun `execute-print`; the workflow must resume only from the remaining suffix of the planned print group.
-- If all planned PDFs physically printed across one or more timed-out attempts, operators may acknowledge the full planned count. The marker becomes `completed`, and one final `execute-print` invocation closes the print phase without sending additional Acrobat print commands.
+- If all planned PDFs physically printed across one or more timed-out attempts, operators may acknowledge the full planned count. The marker becomes `completed`, and one final `execute-print` invocation closes the print phase without sending additional Acrobat submission commands.
 - Post-run email moves remain blocked until print phase reaches terminal `completed`.
 
 ## Rule-pack loading contract (shared, normative)

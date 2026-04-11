@@ -15,6 +15,12 @@ Repository for the durable architecture, planning guidance, and eventual impleme
 - Windows desktop integrations with Outlook, Excel, Acrobat, Playwright, local storage, and JSON reporting.
 - Deterministic rule-based automation first; AI later as an extension point.
 
+## Live PDF printing mode
+- Live PDF printing uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent job submission.
+- The operator flow does not rely on the visible Acrobat GUI staying open.
+- Print execution is acknowledged when the print job is handed off to Acrobat/the target printer queue in deterministic document order.
+- Phase 1 does not wait for or verify physical paper completion. Printer conditions such as empty trays remain operator-managed.
+
 ## Released operator flow
 For normal phase-1 operation, the primary operator commands are:
 - `report-live-readiness`
@@ -32,7 +38,7 @@ The expected terminal paths are:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
 
 ## Partial print recovery
-If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already produced paper output, do not rerun print blindly.
+If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already submitted paper output, do not rerun print blindly.
 
 Use the operator acknowledgment command to record how many leading PDFs in the planned print group physically printed:
 
@@ -46,7 +52,7 @@ Then rerun:
 uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --live-print
 ```
 
-If all planned PDFs physically printed during timeout/retry attempts, acknowledge the full count. The marker will be finalized as `completed`, and one final `execute-print` pass will close the print phase without sending any additional Acrobat commands.
+If all planned PDFs physically printed during timeout/retry attempts, acknowledge the full count. The marker will be finalized as `completed`, and one final `execute-print` pass will close the print phase without sending any additional Acrobat submission commands.
 
 Duplicate suppression is file-number-based. A file already present in `Commercial File No.` must not be written again, even if the incoming mail is otherwise valid.
 

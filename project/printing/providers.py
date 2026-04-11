@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
@@ -88,35 +87,33 @@ class AcrobatPrintProvider:
         executable_path = _resolve_acrobat_executable(self.acrobat_executable_path)
         command_receipts: list[PrintCommandReceipt] = []
         try:
-            for document_path in batch.document_paths:
-                resolved_path = Path(document_path)
-                if not resolved_path.exists():
-                    raise FileNotFoundError(document_path)
-                command_receipts.append(
-                    _print_pdf_with_acrobat(
-                        executable_path=executable_path,
-                        document_path=resolved_path,
-                        printer_name=self.printer_name,
-                        printer_driver=self.printer_driver,
-                        printer_port=self.printer_port,
-                        timeout_seconds=self.timeout_seconds,
+            with _AcrobatOlePrintSession(
+                executable_path=executable_path,
+                printer_name=self.printer_name,
+                printer_driver=self.printer_driver,
+                printer_port=self.printer_port,
+                timeout_seconds=self.timeout_seconds,
+            ) as session:
+                for document_path in batch.document_paths:
+                    resolved_path = Path(document_path)
+                    if not resolved_path.exists():
+                        raise FileNotFoundError(document_path)
+                    command_receipts.append(
+                        session.submit_pdf(
+                            document_path=resolved_path,
+                            blank_separator=False,
+                        )
                     )
-                )
-            blank_separator_printed = False
-            if blank_page_after_group:
-                blank_page_path = _ensure_blank_separator_pdf()
-                command_receipts.append(
-                    _print_pdf_with_acrobat(
-                        executable_path=executable_path,
-                        document_path=blank_page_path,
-                        printer_name=self.printer_name,
-                        printer_driver=self.printer_driver,
-                        printer_port=self.printer_port,
-                        timeout_seconds=self.timeout_seconds,
-                        blank_separator=True,
+                blank_separator_printed = False
+                if blank_page_after_group:
+                    blank_page_path = _ensure_blank_separator_pdf()
+                    command_receipts.append(
+                        session.submit_pdf(
+                            document_path=blank_page_path,
+                            blank_separator=True,
+                        )
                     )
-                )
-                blank_separator_printed = True
+                    blank_separator_printed = True
         except Exception as exc:
             raise PartialPrintExecutionError(
                 message=str(exc),
@@ -127,7 +124,7 @@ class AcrobatPrintProvider:
             ) from exc
         return PrintGroupReceipt(
             adapter_name="acrobat",
-            acknowledgment_mode="process_exit_zero",
+            acknowledgment_mode="ole_jsobject_submission",
             executed_command_count=len(command_receipts),
             blank_separator_printed=blank_separator_printed,
             command_receipts=command_receipts,
@@ -148,11 +145,12 @@ def inspect_acrobat_print_adapter(
         return {
             "available": True,
             "adapter_name": "acrobat",
-            "acknowledgment_mode": "process_exit_zero",
+            "acknowledgment_mode": "ole_jsobject_submission",
             "resolved_executable_path": str(executable_path),
             "printer_name": printer_name,
             "printer_driver": printer_driver,
             "printer_port": printer_port,
+            "printer_selection_mode": "jsobject_printer_name_or_default",
             "timeout_seconds": max(1, timeout_seconds),
             "blank_separator_path": str(blank_separator_path),
             "blank_separator_exists": blank_separator_path.exists(),
@@ -161,11 +159,12 @@ def inspect_acrobat_print_adapter(
         return {
             "available": False,
             "adapter_name": "acrobat",
-            "acknowledgment_mode": "process_exit_zero",
+            "acknowledgment_mode": "ole_jsobject_submission",
             "resolved_executable_path": None,
             "printer_name": printer_name,
             "printer_driver": printer_driver,
             "printer_port": printer_port,
+            "printer_selection_mode": "jsobject_printer_name_or_default",
             "timeout_seconds": max(1, timeout_seconds),
             "blank_separator_path": None,
             "blank_separator_exists": False,
@@ -209,66 +208,185 @@ def _default_acrobat_candidates() -> list[Path]:
     return candidates
 
 
-def _print_pdf_with_acrobat(
-    *,
-    executable_path: Path,
-    document_path: Path,
-    printer_name: str | None,
-    printer_driver: str | None,
-    printer_port: str | None,
-    timeout_seconds: int,
-    blank_separator: bool = False,
-) -> PrintCommandReceipt:
-    command = [
-        str(executable_path),
-        "/n",
-        "/s",
-        "/o",
-        "/h",
-        "/t",
-        str(document_path),
-    ]
-    if printer_name:
-        command.append(printer_name)
-        if printer_driver:
-            command.append(printer_driver)
-            if printer_port:
-                command.append(printer_port)
-    started_monotonic = time.monotonic()
-    started_at_utc = utc_timestamp()
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=max(1, timeout_seconds),
-        )
-    except FileNotFoundError as exc:
-        raise PrintAdapterUnavailableError(f"Acrobat executable could not be started: {executable_path}") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Acrobat print command timed out for {document_path}") from exc
+@dataclass(slots=True)
+class _AcrobatOlePrintSession:
+    executable_path: Path
+    printer_name: str | None
+    printer_driver: str | None
+    printer_port: str | None
+    timeout_seconds: int
+    _app: object | None = None
+    _pythoncom: object | None = None
+    _client: object | None = None
 
-    completed_at_utc = utc_timestamp()
-    elapsed_ms = int((time.monotonic() - started_monotonic) * 1000)
-    if completed.returncode not in (0, None):
-        stderr = (completed.stderr or "").strip()
-        stdout = (completed.stdout or "").strip()
-        detail = stderr or stdout or f"exit_code={completed.returncode}"
-        raise RuntimeError(f"Acrobat print command failed for {document_path}: {detail}")
-    return PrintCommandReceipt(
-        adapter_name="acrobat",
-        document_path=str(document_path),
-        command=list(command),
-        started_at_utc=started_at_utc,
-        completed_at_utc=completed_at_utc,
-        elapsed_ms=max(0, elapsed_ms),
-        returncode=completed.returncode,
-        stdout_excerpt=_normalize_output_excerpt(completed.stdout),
-        stderr_excerpt=_normalize_output_excerpt(completed.stderr),
-        acknowledgment_mode="process_exit_zero",
-        blank_separator=blank_separator,
-    )
+    def __enter__(self) -> "_AcrobatOlePrintSession":
+        self._pythoncom = _load_pythoncom_module()
+        self._pythoncom.CoInitialize()
+        try:
+            self._client = _load_win32com_client_module()
+            self._app = self._client.Dispatch("AcroExch.App")
+        except Exception as exc:
+            self._close()
+            raise PrintAdapterUnavailableError(
+                f"Acrobat OLE automation could not be initialized from {self.executable_path}: {exc}"
+            ) from exc
+        _hide_acrobat_application(self._app)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        del exc_type, exc, tb
+        self._close()
+
+    def submit_pdf(self, *, document_path: Path, blank_separator: bool) -> PrintCommandReceipt:
+        if self._client is None:
+            raise PrintAdapterUnavailableError("Acrobat OLE automation session is not initialized.")
+
+        started_monotonic = time.monotonic()
+        started_at_utc = utc_timestamp()
+        pd_doc = None
+        try:
+            pd_doc = self._client.Dispatch("AcroExch.PDDoc")
+            if not bool(pd_doc.Open(str(document_path))):
+                raise RuntimeError(f"Acrobat could not open {document_path}")
+            _hide_acrobat_application(self._app)
+            js_object = pd_doc.GetJSObject()
+            if js_object is None:
+                raise RuntimeError("Acrobat JSObject bridge is unavailable for the opened document")
+            print_params = _build_jsobject_print_params(
+                js_object=js_object,
+                printer_name=self.printer_name,
+            )
+            _submit_print_via_jsobject(
+                js_object=js_object,
+                print_params=print_params,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Acrobat silent print submission failed for {document_path}: {exc}") from exc
+        finally:
+            _safe_close_pd_doc(pd_doc)
+
+        completed_at_utc = utc_timestamp()
+        elapsed_ms = int((time.monotonic() - started_monotonic) * 1000)
+        command = [
+            "AcroExch.App",
+            "AcroExch.PDDoc",
+            "JSObject.print",
+            str(document_path),
+        ]
+        if self.printer_name:
+            command.append(f"printer={self.printer_name}")
+        elif self.printer_driver or self.printer_port:
+            command.append("printer=<default>")
+        return PrintCommandReceipt(
+            adapter_name="acrobat",
+            document_path=str(document_path),
+            command=command,
+            started_at_utc=started_at_utc,
+            completed_at_utc=completed_at_utc,
+            elapsed_ms=max(0, elapsed_ms),
+            returncode=None,
+            stdout_excerpt=None,
+            stderr_excerpt=None,
+            acknowledgment_mode="ole_jsobject_submission",
+            blank_separator=blank_separator,
+        )
+
+    def _close(self) -> None:
+        _safe_exit_acrobat_application(self._app)
+        self._app = None
+        if self._pythoncom is not None:
+            try:
+                self._pythoncom.CoUninitialize()
+            except Exception:
+                pass
+        self._pythoncom = None
+        self._client = None
+
+
+def _build_jsobject_print_params(*, js_object, printer_name: str | None):
+    try:
+        print_params = js_object.getPrintParams()
+    except Exception as exc:
+        raise RuntimeError("Acrobat JSObject.getPrintParams() was unavailable") from exc
+
+    silent_level = _resolve_jsobject_silent_interaction_level(print_params=print_params, js_object=js_object)
+    if silent_level is None:
+        raise RuntimeError("Acrobat JSObject silent interaction level could not be resolved")
+    try:
+        print_params.interactive = silent_level
+    except Exception as exc:
+        raise RuntimeError("Acrobat JSObject print params could not be set to silent mode") from exc
+
+    if printer_name:
+        try:
+            print_params.printerName = printer_name
+        except Exception as exc:
+            raise RuntimeError(f"Acrobat JSObject could not target printer '{printer_name}'") from exc
+
+    return print_params
+
+
+def _resolve_jsobject_silent_interaction_level(*, print_params, js_object) -> object | None:
+    constants_candidates = [
+        getattr(print_params, "constants", None),
+        getattr(js_object, "constants", None),
+    ]
+    for constants in constants_candidates:
+        interaction_level = getattr(constants, "interactionLevel", None)
+        if interaction_level is None:
+            continue
+        silent = getattr(interaction_level, "silent", None)
+        if silent is not None:
+            return silent
+    return None
+
+
+def _submit_print_via_jsobject(*, js_object, print_params) -> None:
+    method_names = ("print", "printWithParams")
+    last_error: Exception | None = None
+    for method_name in method_names:
+        method = getattr(js_object, method_name, None)
+        if method is None:
+            continue
+        try:
+            method(print_params)
+            return
+        except Exception as exc:
+            last_error = exc
+    if last_error is not None:
+        raise RuntimeError(f"Acrobat JSObject print invocation failed: {last_error}") from last_error
+    raise RuntimeError("Acrobat JSObject print method was unavailable")
+
+
+def _hide_acrobat_application(app: object | None) -> None:
+    if app is None:
+        return
+    try:
+        app.Hide()
+    except Exception:
+        pass
+
+
+def _safe_close_pd_doc(pd_doc: object | None) -> None:
+    if pd_doc is None:
+        return
+    try:
+        pd_doc.Close()
+    except Exception:
+        pass
+
+
+def _safe_exit_acrobat_application(app: object | None) -> None:
+    if app is None:
+        return
+    try:
+        app.CloseAllDocs()
+    except Exception:
+        pass
+    try:
+        app.Exit()
+    except Exception:
+        pass
 
 
 def _ensure_blank_separator_pdf() -> Path:
@@ -303,3 +421,19 @@ def _normalize_output_excerpt(value: str | None, limit: int = 200) -> str | None
     if not text:
         return None
     return text[:limit]
+
+
+def _load_win32com_client_module():
+    try:
+        from win32com import client  # type: ignore
+    except ImportError as exc:
+        raise PrintAdapterUnavailableError("pywin32 is required for live Acrobat OLE printing.") from exc
+    return client
+
+
+def _load_pythoncom_module():
+    try:
+        import pythoncom  # type: ignore
+    except ImportError as exc:
+        raise PrintAdapterUnavailableError("pywin32 pythoncom is required for live Acrobat OLE printing.") from exc
+    return pythoncom
