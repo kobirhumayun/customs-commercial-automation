@@ -57,12 +57,47 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertTrue(second_call["document_path"].endswith("cca-blank-separator-page.pdf"))
         self.assertEqual(receipt.command_receipts[0].command[:3], ["AcroExch.App", "AcroExch.PDDoc", "JSObject.print"])
         self.assertEqual(receipt.adapter_name, "acrobat")
-        self.assertEqual(receipt.acknowledgment_mode, "ole_jsobject_submission")
+        self.assertEqual(receipt.acknowledgment_mode, "ole_silent_submission")
         self.assertEqual(receipt.executed_command_count, 2)
         self.assertTrue(receipt.blank_separator_printed)
         self.assertEqual(receipt.command_receipts[0].document_path, str(document_path))
+        self.assertEqual(receipt.command_receipts[0].acknowledgment_mode, "ole_jsobject_submission")
         self.assertFalse(receipt.command_receipts[0].blank_separator)
         self.assertTrue(receipt.command_receipts[1].blank_separator)
+
+    def test_acrobat_print_provider_falls_back_to_avdoc_silent_print_on_default_printer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            acrobat_path = root / "Acrobat.exe"
+            acrobat_path.write_text("fake", encoding="utf-8")
+            document_path = root / "doc.pdf"
+            document_path.write_text("fake pdf", encoding="utf-8")
+            batch = PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=[str(document_path)],
+                document_path_hashes=["hash-1"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+            )
+
+            provider = AcrobatPrintProvider(
+                acrobat_executable_path=acrobat_path,
+                timeout_seconds=30,
+            )
+            ole_client = _FallbackWin32Client()
+            pythoncom = _FakePythonCom()
+            with patch("project.printing.providers._load_win32com_client_module", return_value=ole_client), patch(
+                "project.printing.providers._load_pythoncom_module",
+                return_value=pythoncom,
+            ):
+                receipt = provider.print_group(batch, blank_page_after_group=False)
+
+        self.assertEqual(receipt.acknowledgment_mode, "ole_silent_submission")
+        self.assertEqual(receipt.command_receipts[0].acknowledgment_mode, "ole_avdoc_silent_submission")
+        self.assertEqual(ole_client.avdoc.print_calls, 1)
 
     def test_acrobat_print_provider_raises_when_executable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -99,10 +134,10 @@ class PrintingProviderTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["available"], True)
-        self.assertEqual(payload["acknowledgment_mode"], "ole_jsobject_submission")
+        self.assertEqual(payload["acknowledgment_mode"], "ole_silent_submission")
         self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
         self.assertEqual(payload["printer_name"], "Office Printer")
-        self.assertEqual(payload["printer_selection_mode"], "jsobject_printer_name_or_default")
+        self.assertEqual(payload["printer_selection_mode"], "jsobject_printer_name_or_default_printer_fallback")
         self.assertEqual(payload["timeout_seconds"], 45)
         self.assertEqual(payload["blank_separator_exists"], True)
 
@@ -190,6 +225,58 @@ class _FakeJSObject:
                 "printer_name": getattr(print_params, "printerName", None),
             }
         )
+
+
+class _FallbackWin32Client:
+    def __init__(self) -> None:
+        self.app = _FakeAcrobatApp()
+        self.avdoc = _FakeAVDoc()
+
+    def Dispatch(self, prog_id: str):
+        if prog_id == "AcroExch.App":
+            return self.app
+        if prog_id == "AcroExch.PDDoc":
+            return _FallbackPDDoc()
+        if prog_id == "AcroExch.AVDoc":
+            return self.avdoc
+        raise AssertionError(f"Unexpected prog id: {prog_id}")
+
+
+class _FallbackPDDoc:
+    def __init__(self) -> None:
+        self.document_path: str | None = None
+
+    def Open(self, document_path: str) -> bool:
+        self.document_path = document_path
+        return True
+
+    def GetJSObject(self):
+        return None
+
+    def Close(self) -> None:
+        return None
+
+
+class _FakeAVDoc:
+    def __init__(self) -> None:
+        self.document_path: str | None = None
+        self.print_calls = 0
+
+    def Open(self, document_path: str, title: str) -> bool:
+        del title
+        self.document_path = document_path
+        return True
+
+    def GetPDDoc(self):
+        return SimpleNamespace(GetNumPages=lambda: 2)
+
+    def PrintPagesSilentEx(self, *args) -> int:
+        self.print_calls += 1
+        return -1
+
+    def Close(self, save_changes: int = 0) -> None:
+        del save_changes
+        return None
 
 
 if __name__ == "__main__":
