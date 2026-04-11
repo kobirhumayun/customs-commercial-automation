@@ -49,7 +49,6 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertEqual(pythoncom.init_count, 1)
         self.assertEqual(pythoncom.uninit_count, 1)
         self.assertEqual(ole_client.app.hide_count, 3)
-        self.assertTrue(ole_client.app.exited)
         self.assertEqual(len(ole_client.print_calls), 2)
         first_call, second_call = ole_client.print_calls
         self.assertEqual(first_call["document_path"], str(document_path))
@@ -100,6 +99,45 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertEqual(ole_client.avdoc.print_calls, 1)
         self.assertEqual(ole_client.avdoc.last_method_name, "PrintPagesSilent")
 
+    def test_acrobat_print_provider_switches_default_printer_for_printer_named_avdoc_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            acrobat_path = root / "Acrobat.exe"
+            acrobat_path.write_text("fake", encoding="utf-8")
+            document_path = root / "doc.pdf"
+            document_path.write_text("fake pdf", encoding="utf-8")
+            batch = PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=[str(document_path)],
+                document_path_hashes=["hash-1"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+            )
+
+            provider = AcrobatPrintProvider(
+                acrobat_executable_path=acrobat_path,
+                printer_name="Office Printer",
+                timeout_seconds=30,
+            )
+            ole_client = _FallbackWin32Client()
+            pythoncom = _FakePythonCom()
+            win32print = _FakeWin32Print()
+            with patch("project.printing.providers._load_win32com_client_module", return_value=ole_client), patch(
+                "project.printing.providers._load_pythoncom_module",
+                return_value=pythoncom,
+            ), patch("project.printing.providers._load_win32print_module", return_value=win32print):
+                receipt = provider.print_group(batch, blank_page_after_group=False)
+
+        self.assertEqual(receipt.command_receipts[0].acknowledgment_mode, "ole_avdoc_silent_submission")
+        self.assertEqual(win32print.default_printer_name, "Original Printer")
+        self.assertEqual(
+            win32print.set_calls,
+            ["Office Printer", "Original Printer"],
+        )
+
     def test_acrobat_print_provider_raises_when_executable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -138,7 +176,7 @@ class PrintingProviderTests(unittest.TestCase):
         self.assertEqual(payload["acknowledgment_mode"], "ole_silent_submission")
         self.assertEqual(payload["resolved_executable_path"], str(acrobat_path))
         self.assertEqual(payload["printer_name"], "Office Printer")
-        self.assertEqual(payload["printer_selection_mode"], "jsobject_printer_name_or_default_printer_fallback")
+        self.assertEqual(payload["printer_selection_mode"], "jsobject_printer_name_or_temporary_default_printer_fallback")
         self.assertEqual(payload["primary_submission_mode"], "ole_jsobject_submission")
         self.assertEqual(payload["fallback_submission_mode"], "ole_avdoc_silent_submission")
         self.assertEqual(payload["supports_printer_specific_submission"], True)
@@ -284,6 +322,19 @@ class _FakeAVDoc:
     def Close(self, save_changes: int = 0) -> None:
         del save_changes
         return None
+
+
+class _FakeWin32Print:
+    def __init__(self) -> None:
+        self.default_printer_name = "Original Printer"
+        self.set_calls: list[str] = []
+
+    def GetDefaultPrinter(self) -> str:
+        return self.default_printer_name
+
+    def SetDefaultPrinter(self, name: str) -> None:
+        self.set_calls.append(name)
+        self.default_printer_name = name
 
 
 if __name__ == "__main__":

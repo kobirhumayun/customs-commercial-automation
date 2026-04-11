@@ -158,6 +158,32 @@ class MailMoveExecutionTests(unittest.TestCase):
         self.assertEqual(discrepancies[0].code, "mail_source_location_mismatch")
         self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
 
+    def test_execute_mail_moves_can_resume_from_hard_blocked_after_print_gate_is_satisfied(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = _build_run_report(
+                print_phase_status=PrintPhaseStatus.COMPLETED,
+                mail_move_phase_status=MailMovePhaseStatus.HARD_BLOCKED,
+            )
+
+            executed_report, executed_outcomes, move_operations, discrepancies = execute_mail_moves(
+                run_report=run_report,
+                mail_outcomes=[_build_mail_outcome()],
+                artifact_paths=artifact_paths,
+                provider=SimulatedMailMoveProvider(),
+            )
+
+        self.assertEqual(executed_report.mail_move_phase_status, MailMovePhaseStatus.COMPLETED)
+        self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.MOVED)
+        self.assertEqual(len(move_operations), 1)
+        self.assertEqual(discrepancies, [])
+
     def test_summarize_mail_move_manual_verification_aggregates_moved_outcomes(self) -> None:
         summary = summarize_mail_move_manual_verification(
             [

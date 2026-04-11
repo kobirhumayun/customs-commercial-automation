@@ -150,7 +150,7 @@ def inspect_acrobat_print_adapter(
             "printer_name": printer_name,
             "printer_driver": printer_driver,
             "printer_port": printer_port,
-            "printer_selection_mode": "jsobject_printer_name_or_default_printer_fallback",
+            "printer_selection_mode": "jsobject_printer_name_or_temporary_default_printer_fallback",
             "primary_submission_mode": "ole_jsobject_submission",
             "fallback_submission_mode": "ole_avdoc_silent_submission",
             "supports_printer_specific_submission": bool(printer_name),
@@ -167,7 +167,7 @@ def inspect_acrobat_print_adapter(
             "printer_name": printer_name,
             "printer_driver": printer_driver,
             "printer_port": printer_port,
-            "printer_selection_mode": "jsobject_printer_name_or_default_printer_fallback",
+            "printer_selection_mode": "jsobject_printer_name_or_temporary_default_printer_fallback",
             "primary_submission_mode": "ole_jsobject_submission",
             "fallback_submission_mode": "ole_avdoc_silent_submission",
             "supports_printer_specific_submission": bool(printer_name),
@@ -279,8 +279,39 @@ class _AcrobatOlePrintSession:
                         print_params=print_params,
                     )
                 except RuntimeError:
-                    if self.printer_name:
-                        raise
+                    submission_mode = "ole_avdoc_silent_submission"
+                    command = [
+                        "AcroExch.App",
+                        "AcroExch.AVDoc",
+                        "AVDoc.PrintPagesSilent",
+                        str(document_path),
+                        f"printer={self.printer_name}" if self.printer_name else "printer=<default>",
+                    ]
+                    _safe_close_pd_doc(pd_doc)
+                    pd_doc = None
+                    av_doc = self._client.Dispatch("AcroExch.AVDoc")
+                    if not bool(av_doc.Open(str(document_path), "")):
+                        raise RuntimeError(f"Acrobat could not open {document_path} through AVDoc")
+                    _hide_acrobat_application(self._app)
+                    _submit_print_via_avdoc(av_doc=av_doc, printer_name=self.printer_name)
+            else:
+                if self.printer_name:
+                    submission_mode = "ole_avdoc_silent_submission"
+                    command = [
+                        "AcroExch.App",
+                        "AcroExch.AVDoc",
+                        "AVDoc.PrintPagesSilent",
+                        str(document_path),
+                        f"printer={self.printer_name}",
+                    ]
+                    _safe_close_pd_doc(pd_doc)
+                    pd_doc = None
+                    av_doc = self._client.Dispatch("AcroExch.AVDoc")
+                    if not bool(av_doc.Open(str(document_path), "")):
+                        raise RuntimeError(f"Acrobat could not open {document_path} through AVDoc")
+                    _hide_acrobat_application(self._app)
+                    _submit_print_via_avdoc(av_doc=av_doc, printer_name=self.printer_name)
+                else:
                     submission_mode = "ole_avdoc_silent_submission"
                     command = [
                         "AcroExch.App",
@@ -295,25 +326,7 @@ class _AcrobatOlePrintSession:
                     if not bool(av_doc.Open(str(document_path), "")):
                         raise RuntimeError(f"Acrobat could not open {document_path} through AVDoc")
                     _hide_acrobat_application(self._app)
-                    _submit_print_via_avdoc(av_doc=av_doc)
-            else:
-                if self.printer_name:
-                    raise RuntimeError("Acrobat JSObject bridge is unavailable for printer-specific silent printing")
-                submission_mode = "ole_avdoc_silent_submission"
-                command = [
-                    "AcroExch.App",
-                    "AcroExch.AVDoc",
-                    "AVDoc.PrintPagesSilent",
-                    str(document_path),
-                    "printer=<default>",
-                ]
-                _safe_close_pd_doc(pd_doc)
-                pd_doc = None
-                av_doc = self._client.Dispatch("AcroExch.AVDoc")
-                if not bool(av_doc.Open(str(document_path), "")):
-                    raise RuntimeError(f"Acrobat could not open {document_path} through AVDoc")
-                _hide_acrobat_application(self._app)
-                _submit_print_via_avdoc(av_doc=av_doc)
+                    _submit_print_via_avdoc(av_doc=av_doc, printer_name=None)
         except Exception as exc:
             raise RuntimeError(f"Acrobat silent print submission failed for {document_path}: {exc}") from exc
         finally:
@@ -403,7 +416,7 @@ def _submit_print_via_jsobject(*, js_object, print_params) -> None:
     raise RuntimeError("Acrobat JSObject print method was unavailable")
 
 
-def _submit_print_via_avdoc(*, av_doc) -> None:
+def _submit_print_via_avdoc(*, av_doc, printer_name: str | None) -> None:
     pd_doc = av_doc.GetPDDoc()
     if pd_doc is None:
         raise RuntimeError("Acrobat AVDoc.GetPDDoc() was unavailable")
@@ -414,13 +427,14 @@ def _submit_print_via_avdoc(*, av_doc) -> None:
     if page_count < 1:
         raise RuntimeError("Acrobat AVDoc print submission requires at least one page")
     try:
-        result = av_doc.PrintPagesSilent(
-            0,
-            page_count - 1,
-            2,
-            1,
-            1,
-        )
+        with _temporary_default_printer(printer_name):
+            result = av_doc.PrintPagesSilent(
+                0,
+                page_count - 1,
+                2,
+                1,
+                1,
+            )
     except Exception as exc:
         raise RuntimeError(f"Acrobat AVDoc.PrintPagesSilent() failed: {exc}") from exc
     if not bool(result):
@@ -464,6 +478,44 @@ def _safe_exit_acrobat_application(app: object | None) -> None:
         app.CloseAllDocs()
     except Exception:
         pass
+
+
+@dataclass(slots=True)
+class _temporary_default_printer:
+    target_printer_name: str | None
+    _win32print: object | None = None
+    _original_printer_name: str | None = None
+    _changed: bool = False
+
+    def __enter__(self):
+        target = (self.target_printer_name or "").strip()
+        if not target:
+            return self
+        self._win32print = _load_win32print_module()
+        try:
+            self._original_printer_name = str(self._win32print.GetDefaultPrinter()).strip()
+        except Exception as exc:
+            raise RuntimeError(f"Windows default printer could not be read before silent print submission: {exc}") from exc
+        if self._original_printer_name == target:
+            return self
+        try:
+            self._win32print.SetDefaultPrinter(target)
+        except Exception as exc:
+            raise RuntimeError(f"Windows default printer could not be switched to '{target}': {exc}") from exc
+        self._changed = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        del exc_type, exc, tb
+        if not self._changed or self._win32print is None:
+            return
+        try:
+            self._win32print.SetDefaultPrinter(self._original_printer_name)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "Windows default printer could not be restored after silent print submission: "
+                f"{restore_exc}"
+            ) from restore_exc
     try:
         app.Exit()
     except Exception:
@@ -518,3 +570,11 @@ def _load_pythoncom_module():
     except ImportError as exc:
         raise PrintAdapterUnavailableError("pywin32 pythoncom is required for live Acrobat OLE printing.") from exc
     return pythoncom
+
+
+def _load_win32print_module():
+    try:
+        import win32print  # type: ignore
+    except ImportError as exc:
+        raise PrintAdapterUnavailableError("pywin32 win32print is required for printer-specific silent Acrobat printing.") from exc
+    return win32print

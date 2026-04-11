@@ -370,7 +370,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - Rerun entry must perform recovery validation using the backup artifact plus recorded staged write plan before allowing new writes.
 - Print execution must persist deterministic per-group progress markers.
 - Live PDF printing is a silent submission flow through hidden Acrobat OLE automation plus the `JSObject` bridge; physical paper completion is not a decision gate in phase 1.
-- If the machine's Acrobat COM bridge does not expose the `JSObject` print-parameter path, the adapter may fall back to hidden `AVDoc.PrintPagesSilent` submission on the default printer while preserving deterministic document order.
+- If the machine's Acrobat COM bridge does not expose the `JSObject` print-parameter path, the adapter may fall back to hidden `AVDoc.PrintPagesSilent` submission while preserving deterministic document order.
+- If `print_printer_name` is configured in that fallback path, the adapter may temporarily switch the Windows default printer to the configured printer for the silent submission window and must restore the original default printer afterward.
 - If a print group is interrupted after some PDFs are printed, recovery/resume may continue only from the remaining document suffix recorded by the partial print marker.
 - If physical paper output occurred during an Acrobat timeout, operators may advance the recorded print prefix with `acknowledge-partial-print` before resuming.
 - If operators confirm that all PDFs in the planned print group physically printed, `acknowledge-partial-print` may finalize the marker as `completed`; one final `execute-print` pass is still required to close run metadata without sending more print commands.

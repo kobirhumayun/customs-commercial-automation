@@ -117,8 +117,9 @@ def execute_mail_moves(
     if run_report.mail_move_phase_status not in {
         MailMovePhaseStatus.NOT_STARTED,
         MailMovePhaseStatus.MOVING,
+        MailMovePhaseStatus.HARD_BLOCKED,
     }:
-        raise ValueError("Mail-move execution requires mail_move_phase_status=not_started or moving.")
+        raise ValueError("Mail-move execution requires mail_move_phase_status=not_started, moving, or hard_blocked.")
 
     updated_mail_outcomes, move_operations = build_mail_move_operations(
         run_report=run_report,
