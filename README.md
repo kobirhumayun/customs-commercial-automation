@@ -85,6 +85,24 @@ In short:
 - mail moves are terminal-path commands
 - recovery commands are exception-only
 
+## One-Click Operator Launcher
+For daily use on Windows, operators can launch the full happy-path cycle with the bundled scripts:
+
+- reusable PowerShell runner:
+  `scripts/run_live_cycle.ps1`
+- one-click `export_lc_sc` launcher:
+  `scripts/run_export_lc_sc_live_cycle.cmd`
+
+The launcher performs:
+- `report-live-readiness`
+- `validate-run --apply-live-writes`
+- `plan-print`
+- `execute-print`
+- `execute-mail-moves`
+- `report-run-status`
+
+It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
+
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
 
