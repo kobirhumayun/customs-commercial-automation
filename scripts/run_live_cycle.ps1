@@ -35,6 +35,22 @@ function Normalize-LauncherText {
     return [string]$Value
 }
 
+function Format-ProcessArgument {
+    param([AllowNull()][string]$Argument)
+
+    $text = Normalize-LauncherText $Argument
+    if ($text -eq "") {
+        return '""'
+    }
+    if ($text -notmatch '[\s"]') {
+        return $text
+    }
+
+    $escaped = $text -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
 function Get-JsonFromCommandOutput {
     param([AllowNull()][string]$Text)
 
@@ -72,9 +88,7 @@ function Invoke-ProjectJsonCommand {
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "uv"
-    foreach ($argument in $Arguments) {
-        [void]$psi.ArgumentList.Add($argument)
-    }
+    $psi.Arguments = (($Arguments | ForEach-Object { Format-ProcessArgument $_ }) -join " ")
     $psi.WorkingDirectory = $RepoRoot
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
@@ -249,6 +263,8 @@ catch {
     Write-Host "Launcher error: $($_.Exception.Message)" -ForegroundColor Red
     Add-Content -Path $script:LauncherLogPath -Value ""
     Add-Content -Path $script:LauncherLogPath -Value "Launcher error: $($_.Exception.Message)"
+    Add-Content -Path $script:LauncherLogPath -Value "Script stack trace:"
+    Add-Content -Path $script:LauncherLogPath -Value ($_ | Out-String)
 
     if ($runId) {
         Write-Host "Latest run id: $runId" -ForegroundColor Yellow
