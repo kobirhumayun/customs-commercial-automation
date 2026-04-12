@@ -2,6 +2,7 @@ param(
     [string]$Workflow = "export_lc_sc",
     [string]$Config = "D:\customs-automation\export_lc_sc.toml",
     [string]$DocumentRootBase = "D:\customs-automation\documents-live-click",
+    [string]$LauncherLogRoot = "D:\customs-automation\reports\launcher_logs",
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [switch]$SkipReadiness,
     [switch]$PauseAtEnd
@@ -13,17 +14,41 @@ function Write-Section {
     param([string]$Text)
     Write-Host ""
     Write-Host "=== $Text ===" -ForegroundColor Cyan
+    Add-Content -Path $script:LauncherLogPath -Value ""
+    Add-Content -Path $script:LauncherLogPath -Value "=== $Text ==="
+}
+
+function Write-LauncherLine {
+    param(
+        [string]$Text,
+        [string]$Color = "Gray"
+    )
+    Write-Host $Text -ForegroundColor $Color
+    Add-Content -Path $script:LauncherLogPath -Value $Text
 }
 
 function Get-JsonFromCommandOutput {
     param([string]$Text)
 
-    $jsonStart = $Text.IndexOf("{")
-    if ($jsonStart -lt 0) {
-        throw "Command output did not contain JSON."
+    $candidateIndexes = @()
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        if ($Text[$i] -eq "{") {
+            $candidateIndexes += $i
+        }
     }
-    $jsonText = $Text.Substring($jsonStart)
-    return $jsonText | ConvertFrom-Json
+    [array]::Reverse($candidateIndexes)
+
+    foreach ($jsonStart in $candidateIndexes) {
+        $jsonText = $Text.Substring($jsonStart)
+        try {
+            return $jsonText | ConvertFrom-Json
+        }
+        catch {
+            continue
+        }
+    }
+
+    throw "Command output did not contain a parseable JSON payload."
 }
 
 function Invoke-ProjectJsonCommand {
@@ -38,6 +63,7 @@ function Invoke-ProjectJsonCommand {
 
     if ($outputText) {
         Write-Host $outputText
+        Add-Content -Path $script:LauncherLogPath -Value $outputText
     }
 
     if (-not $AllowFailure -and $exitCode -ne 0) {
@@ -63,10 +89,14 @@ function Finish-Script {
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $documentRoot = Join-Path $DocumentRootBase $timestamp
 New-Item -ItemType Directory -Force -Path $documentRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $LauncherLogRoot | Out-Null
+$script:LauncherLogPath = Join-Path $LauncherLogRoot ("{0}.{1}.log" -f $Workflow, $timestamp)
+New-Item -ItemType File -Force -Path $script:LauncherLogPath | Out-Null
 
-Write-Host "Workflow: $Workflow" -ForegroundColor Green
-Write-Host "Config: $Config" -ForegroundColor Green
-Write-Host "Document root: $documentRoot" -ForegroundColor Green
+Write-LauncherLine "Workflow: $Workflow" "Green"
+Write-LauncherLine "Config: $Config" "Green"
+Write-LauncherLine "Document root: $documentRoot" "Green"
+Write-LauncherLine "Launcher log: $script:LauncherLogPath" "Green"
 
 Push-Location $RepoRoot
 try {
@@ -173,6 +203,22 @@ try {
     Write-Host "Write: $($status.Json.manual_verification.write_phase_status)" -ForegroundColor Green
     Write-Host "Print: $($status.Json.manual_verification.print_phase_status)" -ForegroundColor Green
     Write-Host "Mail move: $($status.Json.manual_verification.mail_move_phase_status)" -ForegroundColor Green
+}
+catch {
+    Write-Host ""
+    Write-Host "Launcher error: $($_.Exception.Message)" -ForegroundColor Red
+    Add-Content -Path $script:LauncherLogPath -Value ""
+    Add-Content -Path $script:LauncherLogPath -Value "Launcher error: $($_.Exception.Message)"
+
+    if ($runId) {
+        Write-Host "Latest run id: $runId" -ForegroundColor Yellow
+        Write-Host "Check status with:" -ForegroundColor Yellow
+        Write-Host "uv run python -m project report-run-status $Workflow --config `"$Config`" --run-id `"$runId`"" -ForegroundColor Yellow
+        Add-Content -Path $script:LauncherLogPath -Value "Latest run id: $runId"
+    }
+
+    Write-Host "Launcher log: $script:LauncherLogPath" -ForegroundColor Yellow
+    Finish-Script 1
 }
 finally {
     Pop-Location

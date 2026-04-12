@@ -102,6 +102,7 @@ The launcher performs:
 - `report-run-status`
 
 It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
+It also writes a timestamped launcher log under `D:\customs-automation\reports\launcher_logs` so wrapper-level failures can be inspected after the window closes.
 
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
