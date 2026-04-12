@@ -57,9 +57,33 @@ function Invoke-ProjectJsonCommand {
         [switch]$AllowFailure
     )
 
-    $outputLines = & uv @Arguments 2>&1 | ForEach-Object { $_.ToString() }
-    $exitCode = $LASTEXITCODE
-    $outputText = ($outputLines -join "`n").Trim()
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "uv"
+    foreach ($argument in $Arguments) {
+        [void]$psi.ArgumentList.Add($argument)
+    }
+    $psi.WorkingDirectory = $RepoRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    [void]$process.Start()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    $exitCode = $process.ExitCode
+    $outputSegments = @()
+    if ($stderr.Trim()) {
+        $outputSegments += $stderr.Trim()
+    }
+    if ($stdout.Trim()) {
+        $outputSegments += $stdout.Trim()
+    }
+    $outputText = ($outputSegments -join "`n").Trim()
 
     if ($outputText) {
         Write-Host $outputText
