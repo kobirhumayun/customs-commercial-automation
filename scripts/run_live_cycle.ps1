@@ -27,8 +27,21 @@ function Write-LauncherLine {
     Add-Content -Path $script:LauncherLogPath -Value $Text
 }
 
+function Normalize-LauncherText {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) {
+        return ""
+    }
+    return [string]$Value
+}
+
 function Get-JsonFromCommandOutput {
-    param([string]$Text)
+    param([AllowNull()][string]$Text)
+
+    $Text = Normalize-LauncherText $Text
+    if (-not $Text) {
+        throw "Command output did not contain a parseable JSON payload."
+    }
 
     $candidateIndexes = @()
     for ($i = 0; $i -lt $Text.Length; $i++) {
@@ -77,15 +90,16 @@ function Invoke-ProjectJsonCommand {
 
     $exitCode = $process.ExitCode
     $outputSegments = @()
-    $stdoutText = if ($null -eq $stdout) { "" } else { [string]$stdout }
-    $stderrText = if ($null -eq $stderr) { "" } else { [string]$stderr }
+    $stdoutText = Normalize-LauncherText $stdout
+    $stderrText = Normalize-LauncherText $stderr
     if ($stderrText.Trim()) {
         $outputSegments += $stderrText.Trim()
     }
     if ($stdoutText.Trim()) {
         $outputSegments += $stdoutText.Trim()
     }
-    $outputText = ($outputSegments -join "`n").Trim()
+    $joinedOutput = Normalize-LauncherText ($outputSegments -join "`n")
+    $outputText = $joinedOutput.Trim()
 
     if ($outputText) {
         Write-Host $outputText
