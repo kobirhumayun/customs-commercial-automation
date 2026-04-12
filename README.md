@@ -68,6 +68,23 @@ Operational notes:
 - When `print_printer_name` is configured and printer-specific JSObject submission is unavailable, the silent fallback may temporarily switch the Windows default printer, submit the job, and then restore the original default printer automatically.
 - Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
 
+## Daily Operator Decision Tree
+Use this as the normal day-to-day workflow guide after release:
+
+1. Start with `validate-run`.
+2. Use `report-live-readiness` at session start, after environment/config changes, or whenever something looks off.
+3. If `validate-run` commits new writes and printable documents exist, run `plan-print` and `execute-print`.
+4. If `execute-print` completes, run `execute-mail-moves`.
+5. If the mail is duplicate-only and no print is required, move directly to `execute-mail-moves` when the run is move-eligible.
+6. If any phase is uncertain or interrupted, stop and use the recovery path:
+   `recover-run` or `acknowledge-partial-print`
+
+In short:
+- every cycle centers on `validate-run`
+- print commands are conditional
+- mail moves are terminal-path commands
+- recovery commands are exception-only
+
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
 
