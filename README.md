@@ -2,6 +2,8 @@
 
 Repository for the durable architecture, planning guidance, and eventual implementation of a Windows-first customs/commercial automation platform for export and import document workflows.
 
+For the shipped phase-1 operator summary, see `docs/release-notes.md`.
+
 ## Current repository contents
 - `AGENTS.md` — repository-level operating instructions for agents and contributors.
 - `PLANS.md` — phased roadmap for turning the architecture into implementation.
