@@ -751,6 +751,13 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 - before release signoff, at least one full live cycle must reach:
   `write = committed`, `print = completed`, `mail move = completed`
 
+### Phase 1 released operator note
+- The standard released sequence is:
+  `report-live-readiness` -> `validate-run` -> `plan-print` -> `execute-print` -> `execute-mail-moves`
+- `acknowledge-partial-print` is an exception-path recovery command, not part of the normal happy-path operator flow.
+- Print completion in phase 1 means deterministic silent submission order has completed and the workflow state reached `completed`; it does not mean the system waited for physical paper completion.
+- A run may end in terminal `completed` state while still retaining discrepancy records from earlier failed attempts in the same audit trail. Operators should treat terminal phase statuses as the authoritative state and use discrepancies as historical evidence.
+
 ## Rule-pack loading contract (shared, normative)
 To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.
 

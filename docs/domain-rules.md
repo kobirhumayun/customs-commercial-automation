@@ -376,6 +376,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - If physical paper output occurred during an Acrobat timeout, operators may advance the recorded print prefix with `acknowledge-partial-print` before resuming.
 - If operators confirm that all PDFs in the planned print group physically printed, `acknowledge-partial-print` may finalize the marker as `completed`; one final `execute-print` pass is still required to close run metadata without sending more print commands.
 - If physical print output occurred but no partial/completed print marker was persisted, the run remains a manual recovery boundary and mail moves must stay blocked.
+- Terminal run state is determined by phase-status completion markers, not by the absence of older discrepancy records. Historical failed attempts may remain preserved in the run audit trail after a later successful completion.
 
 ## Rerun/recovery hash invariants
 - Recovery hash algorithm is fixed to **SHA-256** for:

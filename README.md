@@ -53,6 +53,19 @@ Before treating a workstation/configuration as release-ready for daily use, conf
 - operators know the partial-print recovery command:
   `acknowledge-partial-print`
 
+## Phase 1 Released Behavior
+The released operator sequence is:
+1. `report-live-readiness`
+2. `validate-run`
+3. `plan-print`
+4. `execute-print`
+5. `execute-mail-moves`
+
+Operational notes:
+- `acknowledge-partial-print` is the only supported recovery step when Acrobat times out after physical paper output.
+- When `print_printer_name` is configured and printer-specific JSObject submission is unavailable, the silent fallback may temporarily switch the Windows default printer, submit the job, and then restore the original default printer automatically.
+- Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
+
 ## Partial print recovery
 If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already submitted paper output, do not rerun print blindly.
 
