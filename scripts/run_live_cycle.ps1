@@ -77,11 +77,13 @@ function Invoke-ProjectJsonCommand {
 
     $exitCode = $process.ExitCode
     $outputSegments = @()
-    if ($stderr.Trim()) {
-        $outputSegments += $stderr.Trim()
+    $stdoutText = if ($null -eq $stdout) { "" } else { [string]$stdout }
+    $stderrText = if ($null -eq $stderr) { "" } else { [string]$stderr }
+    if ($stderrText.Trim()) {
+        $outputSegments += $stderrText.Trim()
     }
-    if ($stdout.Trim()) {
-        $outputSegments += $stdout.Trim()
+    if ($stdoutText.Trim()) {
+        $outputSegments += $stdoutText.Trim()
     }
     $outputText = ($outputSegments -join "`n").Trim()
 
