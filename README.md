@@ -68,6 +68,35 @@ Operational notes:
 - When `print_printer_name` is configured and printer-specific JSObject submission is unavailable, the silent fallback may temporarily switch the Windows default printer, submit the job, and then restore the original default printer automatically.
 - Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
 
+## Final E2E Test Commands
+Use this sequence for the final end-to-end release check on a fresh live mail:
+
+```powershell
+$WORKFLOW = "export_lc_sc"
+$CONFIG = "D:\customs-automation\export_lc_sc.toml"
+$DOCROOT = "D:\customs-automation\documents-live-final"
+```
+
+```powershell
+uv run python -m project report-live-readiness $WORKFLOW --config $CONFIG
+uv run python -m project validate-run $WORKFLOW --config $CONFIG --live-outlook-snapshot --live-erp --live-workbook --document-root $DOCROOT --apply-live-writes
+```
+
+Copy the returned `run_id`, then run:
+
+```powershell
+$RUN_ID = "<RUN_ID>"
+uv run python -m project plan-print $WORKFLOW --config $CONFIG --run-id $RUN_ID
+uv run python -m project execute-print $WORKFLOW --config $CONFIG --run-id $RUN_ID --live-print
+uv run python -m project execute-mail-moves $WORKFLOW --config $CONFIG --run-id $RUN_ID --live-outlook
+uv run python -m project report-run-status $WORKFLOW --config $CONFIG --run-id $RUN_ID
+```
+
+Expected final state:
+- `write_phase_status = committed`
+- `print_phase_status = completed`
+- `mail_move_phase_status = completed`
+
 ## Partial print recovery
 If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already submitted paper output, do not rerun print blindly.
 
