@@ -199,6 +199,150 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertIn("Layered page LC-0038", report["combined_text"])
         self.assertIn("Scanned PDL-26-0042", report["combined_text"])
 
+    def test_layered_raw_report_degrades_gracefully_when_img2table_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "hybrid-img2table-error.pdf"
+            pdf_path.write_bytes(b"fake hybrid pdf")
+
+            class FakePixmap:
+                @staticmethod
+                def tobytes(image_format: str) -> bytes:
+                    self.assertEqual(image_format, "png")
+                    return b"png-bytes"
+
+            class FakeTextPage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return [
+                            (10, 10, 80, 20, "Layered", 0, 0, 0),
+                            (90, 10, 140, 20, "page", 0, 0, 1),
+                            (150, 10, 220, 20, "LC-0038", 0, 0, 2),
+                        ]
+                    if mode == "text":
+                        return "Layered page LC-0038"
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+                @staticmethod
+                def get_pixmap():
+                    raise AssertionError("OCR should not run for a page with sufficient layered text.")
+
+            class FakeScannedPage:
+                @staticmethod
+                def get_text(mode: str):
+                    if mode == "words":
+                        return []
+                    if mode == "text":
+                        return ""
+                    raise AssertionError(f"Unexpected mode: {mode}")
+
+                @staticmethod
+                def get_pixmap():
+                    return FakePixmap()
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakeTextPage(), FakeScannedPage()])
+
+                def __len__(self):
+                    return 2
+
+                def __getitem__(self, index: int):
+                    return [FakeTextPage(), FakeScannedPage()][index]
+
+                def close(self) -> None:
+                    return None
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakeDocument()
+
+            class FakePDFPage:
+                @staticmethod
+                def extract_tables():
+                    return []
+
+            class FakePDF:
+                pages = [FakePDFPage(), FakePDFPage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    del stream
+                    return {"opened": True}
+
+            class FakeTesseract:
+                call_count = 0
+
+                class Output:
+                    DICT = "DICT"
+
+                @classmethod
+                def image_to_data(cls, image, output_type=None):
+                    del image, output_type
+                    cls.call_count += 1
+                    return {
+                        "text": ["Scanned", "PDL-26-0042"],
+                        "conf": ["92", "97"],
+                    }
+
+            class FakeImg2TablePDF:
+                def __init__(self, src: str):
+                    self.src = src
+
+                @staticmethod
+                def extract_tables(**kwargs):
+                    del kwargs
+                    raise RuntimeError("img2table exploded")
+
+            class FakeImg2TableOCR:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                    with patch("project.documents.providers._load_img2table_pdf_class", return_value=FakeImg2TablePDF):
+                        with patch(
+                            "project.documents.providers._load_img2table_tesseract_ocr_class",
+                            return_value=FakeImg2TableOCR,
+                        ):
+                            with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                                with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                                    report = extract_saved_document_raw_report(
+                                        saved_document=SavedDocument(
+                                            saved_document_id="doc-raw-2b",
+                                            mail_id="mail-1",
+                                            attachment_name="hybrid-img2table-error.pdf",
+                                            normalized_filename="hybrid-img2table-error.pdf",
+                                            destination_path=str(pdf_path),
+                                            file_sha256="b" * 64,
+                                            save_decision="saved_new",
+                                        ),
+                                        mode="layered",
+                                    )
+
+        self.assertEqual(report["page_count"], 2)
+        self.assertEqual(report["pages"][0]["selected_source"], "text")
+        self.assertEqual(report["pages"][1]["selected_source"], "ocr")
+        self.assertEqual(report["categories"]["img2table"]["status"], "error")
+        self.assertIn("img2table exploded", report["categories"]["img2table"]["error"])
+        self.assertEqual(FakeTesseract.call_count, 1)
+        self.assertIn("Scanned PDL-26-0042", report["combined_text"])
+
     def test_layered_raw_report_surfaces_img2table_category_before_ocr(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "scanned-table-layered.pdf"

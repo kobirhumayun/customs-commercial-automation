@@ -500,11 +500,22 @@ def _build_layered_extraction_report(
     text_report = _build_text_extraction_report(document_path, fitz_module)
     table_report = _build_table_extraction_report(document_path, pdfplumber_module)
     if img2table_pdf_class is not None and img2table_ocr_class is not None:
-        img2table_report = _build_img2table_extraction_report(
-            document_path=document_path,
-            pdf_class=img2table_pdf_class,
-            ocr_class=img2table_ocr_class,
-        )
+        try:
+            img2table_report = _build_img2table_extraction_report(
+                document_path=document_path,
+                pdf_class=img2table_pdf_class,
+                ocr_class=img2table_ocr_class,
+            )
+        except Exception as exc:
+            img2table_report = {
+                "mode": "img2table",
+                "document_path": str(document_path),
+                "page_count": 0,
+                "combined_text": "",
+                "pages": [],
+                "status": "error",
+                "error": str(exc),
+            }
     else:
         img2table_report = {
             "mode": "img2table",

@@ -39,6 +39,20 @@ The expected terminal paths are:
 - `duplicate-only`:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
 
+## Release Checklist
+Before treating a workstation/configuration as release-ready for daily use, confirm:
+- `report-live-readiness` returns `overall_status = "ready"`
+- Outlook source and destination folder `EntryID` values are configured and verified
+- ERP live download succeeds against the real report form
+- the yearly workbook path and sheet mapping are verified for the active year
+- `print_printer_name`, if configured, has been tested with a real silent print run
+- the silent print path is understood:
+  JSObject printer submission is preferred, and hidden `AVDoc.PrintPagesSilent` fallback may temporarily switch the Windows default printer before restoring it
+- a full live cycle has been completed successfully:
+  write committed, print completed, and mail move completed
+- operators know the partial-print recovery command:
+  `acknowledge-partial-print`
+
 ## Partial print recovery
 If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrobat already submitted paper output, do not rerun print blindly.
 

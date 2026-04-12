@@ -741,6 +741,16 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 - If all planned PDFs physically printed across one or more timed-out attempts, operators may acknowledge the full planned count. The marker becomes `completed`, and one final `execute-print` invocation closes the print phase without sending additional Acrobat submission commands.
 - Post-run email moves remain blocked until print phase reaches terminal `completed`.
 
+### Release readiness checklist
+- `report-live-readiness` must return `overall_status = "ready"` before first live use on a workstation/profile
+- Outlook folder `EntryID` values must be copied from `inspect-outlook-folders` into the active TOML
+- ERP download selectors/settings must be validated against the live report form
+- the workbook year, sheet, and header mapping must be confirmed for the active filing cycle
+- if `print_printer_name` is configured, the operator must validate one real silent print cycle on that named printer
+- operators must know that named-printer fallback may temporarily switch the Windows default printer and then restore it automatically
+- before release signoff, at least one full live cycle must reach:
+  `write = committed`, `print = completed`, `mail move = completed`
+
 ## Rule-pack loading contract (shared, normative)
 To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.
 
