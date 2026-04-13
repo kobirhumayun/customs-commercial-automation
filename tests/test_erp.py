@@ -225,6 +225,51 @@ class ERPProviderTests(unittest.TestCase):
         )
         self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
 
+    def test_playwright_provider_caches_download_rows_across_multiple_lookups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "report.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "rptDateWiseLCRegister",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value",
+                        "P/26/709,DPCBD1176747,Sterling Creations Ltd.,2026-04-09,172702.40",
+                        "P/26/710,1475260403666,Tusuka Trousers Ltd.,2026-04-08,150595.50",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.providers.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(export_path),
+                    "field_readbacks": [],
+                    "download_receipt": {
+                        "exists": True,
+                        "is_empty": False,
+                        "looks_like_html": False,
+                        "has_required_erp_headers": True,
+                    },
+                },
+            ) as inspect_mock:
+                provider = PlaywrightERPRowProvider(
+                    base_url="https://erp.local",
+                    field_values=(("#fromDate", "01-Apr-2025"), ("#toDate", "31-Mar-2026")),
+                    submit_selector="#show",
+                    post_submit_wait_selector="#downloadDropdown",
+                    download_menu_selector="#downloadDropdown",
+                    download_format_selector="text=CSV",
+                )
+
+                first_rows = provider.lookup_rows(file_numbers=["P/26/0709"])
+                second_rows = provider.lookup_rows(file_numbers=["P/26/0710"])
+
+        self.assertEqual(inspect_mock.call_count, 1)
+        self.assertEqual(first_rows["P/26/0709"][0].lc_sc_number, "DPCBD1176747")
+        self.assertEqual(second_rows["P/26/0710"][0].lc_sc_number, "1475260403666")
+
     def test_json_manifest_provider_normalizes_and_sorts_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "erp.json"

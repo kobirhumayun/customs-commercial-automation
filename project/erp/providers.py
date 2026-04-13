@@ -5,7 +5,7 @@ import json
 import hashlib
 import io
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urljoin
@@ -83,8 +83,16 @@ class PlaywrightERPRowProvider:
     table_selector: str = "table"
     timeout_ms: int = 120_000
     headless: bool = True
+    _cached_rows: tuple[ERPRegisterRow, ...] | None = field(default=None, init=False, repr=False, compare=False)
 
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
+        rows = self._get_cached_rows()
+        return _index_rows(file_numbers=file_numbers, rows=list(rows))
+
+    def _get_cached_rows(self) -> tuple[ERPRegisterRow, ...]:
+        if self._cached_rows is not None:
+            return self._cached_rows
+
         if self._uses_download_flow:
             rows = _load_rows_from_playwright_download(
                 base_url=self.base_url,
@@ -99,7 +107,9 @@ class PlaywrightERPRowProvider:
                 download_menu_selector=self.download_menu_selector,
                 download_format_selector=self.download_format_selector,
             )
-            return _index_rows(file_numbers=file_numbers, rows=rows)
+            cached = tuple(rows)
+            object.__setattr__(self, "_cached_rows", cached)
+            return cached
 
         tables = _fetch_playwright_report_tables(
             base_url=self.base_url,
@@ -120,7 +130,9 @@ class PlaywrightERPRowProvider:
             except ValueError as exc:
                 last_error = exc
                 continue
-            return _index_rows(file_numbers=file_numbers, rows=rows)
+            cached = tuple(rows)
+            object.__setattr__(self, "_cached_rows", cached)
+            return cached
         if last_error is not None:
             raise ValueError(f"Live ERP report did not expose a parseable register table: {last_error}") from last_error
         raise ValueError("Live ERP report did not expose any table content")

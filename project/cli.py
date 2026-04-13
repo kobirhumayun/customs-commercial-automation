@@ -1707,11 +1707,7 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             document_analysis_provider=(
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
-                else (
-                    LayeredSavedDocumentAnalysisProvider()
-                    if args.document_root is not None
-                    else NullSavedDocumentAnalysisProvider()
-                )
+                else NullSavedDocumentAnalysisProvider()
             ),
         )
         if args.apply_live_writes and not args.live_workbook:
