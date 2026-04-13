@@ -2731,6 +2731,52 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["sheet_name"], "Sheet1")
         self.assertEqual(payload["header_count"], 1)
 
+    def test_inspect_workbook_command_reports_expected_yearly_workbook_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                exit_code = main(
+                    [
+                        "inspect-workbook",
+                        "export_lc_sc",
+                        "--config",
+                        str(config_path),
+                        "--live-workbook",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(stdout_buffer.getvalue(), "")
+        self.assertIn(str(root / "workbooks" / f"{workflow_year}-master.xlsx"), stderr_buffer.getvalue())
+        self.assertIn("Place the real yearly workbook", stderr_buffer.getvalue())
+
     def test_inspect_workbook_readiness_command_reports_mapping_and_prevalidation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -62,6 +62,21 @@ class ResolvedWorkflowConfig:
             ) from exc
         return Path(resolved)
 
+    def resolve_existing_master_workbook_path(self, year: int) -> Path:
+        resolved = self.resolve_master_workbook_path(year)
+        if not resolved.exists():
+            raise ConfigError(
+                "Expected master workbook for workflow year "
+                f"{year} was not found: {resolved}. "
+                "Place the real yearly workbook in the configured workbooks folder before running live workbook commands."
+            )
+        if not resolved.is_file():
+            raise ConfigError(
+                "Expected master workbook path for workflow year "
+                f"{year} is not a file: {resolved}"
+            )
+        return resolved
+
 
 def load_workflow_config(
     descriptor: WorkflowDescriptor,

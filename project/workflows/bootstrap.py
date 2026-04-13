@@ -72,7 +72,7 @@ def initialize_workflow_run(
         workflow_id=descriptor.workflow_id.value,
         run_id=run_id,
     )
-    master_workbook_path = config.resolve_master_workbook_path(workflow_year)
+    master_workbook_path = config.resolve_existing_master_workbook_path(workflow_year)
     current_workbook_hash = sha256_file(master_workbook_path)
     backup_hash = copy_workbook_backup(master_workbook_path, artifact_paths.backup_workbook_path)
     staged_write_plan_hash = canonical_json_hash([])

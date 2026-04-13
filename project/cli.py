@@ -3576,7 +3576,7 @@ def _load_workbook_snapshot(
         provider = JsonManifestWorkbookSnapshotProvider(workbook_json)
     elif live_workbook:
         workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
-        provider = XLWingsWorkbookSnapshotProvider(config.resolve_master_workbook_path(workflow_year))
+        provider = XLWingsWorkbookSnapshotProvider(config.resolve_existing_master_workbook_path(workflow_year))
     else:
         provider = EmptyWorkbookSnapshotProvider()
     return provider.load_snapshot()
@@ -3584,7 +3584,7 @@ def _load_workbook_snapshot(
 
 def _resolve_live_workbook_path(config):
     workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
-    return config.resolve_master_workbook_path(workflow_year)
+    return config.resolve_existing_master_workbook_path(workflow_year)
 
 
 def _resolve_run_artifact_paths(*, run_artifact_root: Path, backup_root: Path, workflow_id: str, run_id: str):

@@ -55,6 +55,16 @@ Before treating a workstation/configuration as release-ready for daily use, conf
 - operators know the partial-print recovery command:
   `acknowledge-partial-print`
 
+## New Year Setup
+At the start of a new workbook year, place the real yearly master workbook into the configured `workbooks` folder before running live workbook commands.
+
+Example:
+- if `master_workbook_path_template = "D:/customs-automation/workbooks/{year}.xlsx"`
+- then the 2027 workbook must exist at:
+  `D:\customs-automation\workbooks\2027.xlsx`
+
+If it is missing, live workbook commands now fail with a clear startup message showing the exact expected path.
+
 ## Phase 1 Released Behavior
 The released operator sequence is:
 1. `report-live-readiness`
