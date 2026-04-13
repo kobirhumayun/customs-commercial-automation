@@ -67,6 +67,7 @@ Operational notes:
 - `acknowledge-partial-print` is the only supported recovery step when Acrobat times out after physical paper output.
 - When `print_printer_name` is configured and printer-specific JSObject submission is unavailable, the silent fallback may temporarily switch the Windows default printer, submit the job, and then restore the original default printer automatically.
 - Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
+- Daily `validate-run` saves PDF attachments when `--document-root` is used, but it no longer performs OCR-based saved-document analysis by default in the released export workflow path.
 
 ## Daily Operator Decision Tree
 Use this as the normal day-to-day workflow guide after release:
