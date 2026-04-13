@@ -16,6 +16,9 @@ Every CLI workflow should follow the same control shape:
 10. batch print only after the workbook-write phase completes successfully for the eligible mails
 11. perform post-run mail moves for successful mails only
 
+For production export attachment storage, the configured `document_root` must be a stable base path, not a per-run timestamped directory. The canonical family hierarchy beneath that base path is what determines where later amendments and related documents are stored:
+`Year / Buyer Name / LC-or-SC Number / All Attachments`.
+
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
 
 ### Operator setup helper: Outlook folder EntryIDs

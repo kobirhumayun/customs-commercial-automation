@@ -20,6 +20,8 @@
 ### Export path
 `Year (LC/SC opening year) / Buyer Name / LC Number or Sales Contract Number / All Attachments`
 
+The configured export `document_root` is a stable storage base, not a per-run container. New emails, amendments, and later-arriving related PDFs for the same canonical LC/SC family must resolve back into the same attachment directory under that base path, even when they arrive on different days or reference different file numbers from the same family.
+
 ### Import path
 Designated import root organized by year.
 

@@ -141,7 +141,7 @@ function Finish-Script {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$documentRoot = Join-Path $DocumentRootBase $timestamp
+$documentRoot = $DocumentRootBase
 New-Item -ItemType Directory -Force -Path $documentRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $LauncherLogRoot | Out-Null
 $script:LauncherLogPath = Join-Path $LauncherLogRoot ("{0}.{1}.log" -f $Workflow, $timestamp)

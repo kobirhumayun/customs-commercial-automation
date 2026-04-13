@@ -104,6 +104,8 @@ The launcher performs:
 
 It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
 It also writes a timestamped launcher log under `D:\customs-automation\reports\launcher_logs` so wrapper-level failures can be inspected after the window closes.
+For normal live use, the launcher now uses a stable document root such as `D:\customs-automation\documents-live-click` directly rather than creating a timestamped document-root subfolder per run. That keeps all documents for the same LC/SC under the same canonical family folder:
+`Year / Buyer Name / LC-or-SC Number / All Attachments`.
 
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
