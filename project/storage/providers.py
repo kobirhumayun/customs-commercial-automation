@@ -39,6 +39,7 @@ class SimulatedAttachmentContentProvider:
 class Win32ComAttachmentContentProvider:
     outlook_profile: str | None = None
     _namespace: object | None = field(default=None, init=False, repr=False)
+    _mail_items_by_entry_id: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
     def save_attachment(
         self,
@@ -49,7 +50,7 @@ class Win32ComAttachmentContentProvider:
     ) -> None:
         namespace = self._get_namespace()
         try:
-            mail_item = namespace.GetItemFromID(mail.entry_id)
+            mail_item = self._get_mail_item(namespace, mail.entry_id)
             attachments = mail_item.Attachments
             attachment = attachments.Item(attachment_index + 1)
             attachment.SaveAsFile(str(destination_path))
@@ -72,6 +73,14 @@ class Win32ComAttachmentContentProvider:
             raise ValueError(f"Outlook session initialization failed: {exc}") from exc
         self._namespace = namespace
         return namespace
+
+    def _get_mail_item(self, namespace, entry_id: str):
+        mail_item = self._mail_items_by_entry_id.get(entry_id)
+        if mail_item is not None:
+            return mail_item
+        mail_item = namespace.GetItemFromID(entry_id)
+        self._mail_items_by_entry_id[entry_id] = mail_item
+        return mail_item
 
 
 def _load_win32com_client_module():

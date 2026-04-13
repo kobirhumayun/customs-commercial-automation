@@ -294,6 +294,90 @@ class DocumentSavingTests(unittest.TestCase):
             "C:\\exports\\LC.pdf",
         )
 
+    def test_win32com_attachment_content_provider_reuses_mail_item_for_same_mail(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD",
+                    sender_address="sender@example.com",
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+
+        class FakeAttachment:
+            def __init__(self) -> None:
+                self.saved_paths: list[str] = []
+
+            def SaveAsFile(self, path: str) -> None:
+                self.saved_paths.append(path)
+
+        class FakeAttachments:
+            def __init__(self) -> None:
+                self.items = {1: FakeAttachment(), 2: FakeAttachment()}
+
+            def Item(self, index: int) -> FakeAttachment:
+                return self.items[index]
+
+        class FakeMailItem:
+            def __init__(self) -> None:
+                self.Attachments = FakeAttachments()
+
+        class FakeNamespace:
+            def __init__(self) -> None:
+                self.mail_item = FakeMailItem()
+                self.get_item_calls = 0
+
+            def GetItemFromID(self, entry_id: str) -> FakeMailItem:
+                if entry_id != "entry-1":
+                    raise ValueError("unexpected entry id")
+                self.get_item_calls += 1
+                return self.mail_item
+
+        class FakeApplication:
+            def __init__(self, namespace: FakeNamespace) -> None:
+                self.namespace = namespace
+
+            def GetNamespace(self, name: str) -> FakeNamespace:
+                if name != "MAPI":
+                    raise ValueError("unexpected namespace")
+                return self.namespace
+
+        class FakeClient:
+            def __init__(self, namespace: FakeNamespace) -> None:
+                self.namespace = namespace
+
+            def Dispatch(self, name: str) -> FakeApplication:
+                if name != "Outlook.Application":
+                    raise ValueError("unexpected application")
+                return FakeApplication(self.namespace)
+
+        fake_namespace = FakeNamespace()
+        provider = Win32ComAttachmentContentProvider(outlook_profile=None)
+        with patch("project.storage.providers._load_win32com_client_module", return_value=FakeClient(fake_namespace)):
+            provider.save_attachment(
+                mail=mail,
+                attachment_index=0,
+                destination_path=Path("C:/exports/first.pdf"),
+            )
+            provider.save_attachment(
+                mail=mail,
+                attachment_index=1,
+                destination_path=Path("C:/exports/second.pdf"),
+            )
+
+        self.assertEqual(fake_namespace.get_item_calls, 1)
+        self.assertEqual(
+            fake_namespace.mail_item.Attachments.items[1].saved_paths,
+            ["C:\\exports\\first.pdf"],
+        )
+        self.assertEqual(
+            fake_namespace.mail_item.Attachments.items[2].saved_paths,
+            ["C:\\exports\\second.pdf"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
