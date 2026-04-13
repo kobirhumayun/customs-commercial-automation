@@ -582,6 +582,10 @@ Write-capable workflows must also provide:
 - `excel_lock_timeout_seconds`
 - `print_enabled`
 
+`master_workbook_path_template` controls the expected yearly workbook filename and may include:
+- `{year}`
+- `{workflow_id}`
+
 ### Workflow-specific required keys
 Workflow modules must declare their own required key list (for example import keyword controls, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
 

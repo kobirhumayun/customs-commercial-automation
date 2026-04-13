@@ -63,6 +63,16 @@ Example:
 - then the 2027 workbook must exist at:
   `D:\customs-automation\workbooks\2027.xlsx`
 
+The workbook filename itself is configurable through `master_workbook_path_template`.
+Supported placeholders are:
+- `{year}`
+- `{workflow_id}`
+
+Examples:
+- `D:/customs-automation/workbooks/{year}.xlsx`
+- `D:/customs-automation/workbooks/UP Issuing Status #{year}.xlsx`
+- `D:/customs-automation/workbooks/{workflow_id}-{year}.xlsx`
+
 If it is missing, live workbook commands now fail with a clear startup message showing the exact expected path.
 
 ## Phase 1 Released Behavior

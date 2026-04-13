@@ -33,6 +33,14 @@ playwright_browser_channel = "msedge"
 # erp_report_download_format_selector = "text=CSV"
 
 # Write-capable workflow settings.
+# The workbook filename is configurable through this template.
+# Supported placeholders:
+# - {year}
+# - {workflow_id}
+# Examples:
+# master_workbook_path_template = "C:/customs-automation/workbooks/{year}.xlsx"
+# master_workbook_path_template = "C:/customs-automation/workbooks/UP Issuing Status #{year}.xlsx"
+# master_workbook_path_template = "C:/customs-automation/workbooks/{workflow_id}-{year}.xlsx"
 master_workbook_path_template = "C:/customs-automation/workbooks/{year}.xlsx"
 excel_lock_timeout_seconds = 120
 print_enabled = true
