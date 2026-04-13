@@ -582,7 +582,10 @@ Write-capable workflows must also provide:
 - `excel_lock_timeout_seconds`
 - `print_enabled`
 
-`master_workbook_path_template` controls the expected yearly workbook filename and may include:
+`master_workbook_path_template` controls the expected yearly workbook filename.
+The normal production pattern is to store the exact real workbook filename in config and update it manually when the yearly workbook changes.
+
+Optional placeholders may be used if a deployment intentionally wants generated naming:
 - `{year}`
 - `{workflow_id}`
 

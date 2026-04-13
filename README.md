@@ -59,18 +59,18 @@ Before treating a workstation/configuration as release-ready for daily use, conf
 At the start of a new workbook year, place the real yearly master workbook into the configured `workbooks` folder before running live workbook commands.
 
 Example:
-- if `master_workbook_path_template = "D:/customs-automation/workbooks/{year}.xlsx"`
+- if `master_workbook_path_template = "D:/customs-automation/workbooks/UP Issuing Status for the Period # 01-03-2026 to 28-02-2027.xlsx"`
 - then the 2027 workbook must exist at:
-  `D:\customs-automation\workbooks\2027.xlsx`
+  `D:\customs-automation\workbooks\UP Issuing Status for the Period # 01-03-2026 to 28-02-2027.xlsx`
 
-The workbook filename itself is configurable through `master_workbook_path_template`.
-Supported placeholders are:
+The normal production pattern is to put the exact real workbook filename into `master_workbook_path_template` and update it manually when the yearly workbook changes.
+
+Optional placeholders are supported if you intentionally want a generated pattern:
 - `{year}`
 - `{workflow_id}`
 
-Examples:
+Optional examples:
 - `D:/customs-automation/workbooks/{year}.xlsx`
-- `D:/customs-automation/workbooks/UP Issuing Status #{year}.xlsx`
 - `D:/customs-automation/workbooks/{workflow_id}-{year}.xlsx`
 
 If it is missing, live workbook commands now fail with a clear startup message showing the exact expected path.
