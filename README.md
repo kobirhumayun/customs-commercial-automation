@@ -113,7 +113,7 @@ Use this sequence for the final end-to-end release check on a fresh live mail:
 ```powershell
 $WORKFLOW = "export_lc_sc"
 $CONFIG = "D:\customs-automation\export_lc_sc.toml"
-$DOCROOT = "D:\customs-automation\documents-live-final"
+$DOCROOT = "D:\customs-automation\documents-live-click"
 ```
 
 ```powershell

@@ -21,6 +21,8 @@
 - silent Acrobat printing without relying on the visible GUI window remaining open
 - configured-printer support through fallback temporary default-printer switching and automatic restore
 - duplicate-only mail handling with no workbook write and no print requirement
+- stable document storage under one canonical family path per LC/SC:
+  `Year / Buyer Name / LC-or-SC Number / All Attachments`
 
 ### Printing behavior
 - phase 1 print completion means deterministic silent submission order completed
