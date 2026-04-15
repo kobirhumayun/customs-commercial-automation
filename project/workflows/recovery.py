@@ -20,7 +20,7 @@ from project.models import (
 )
 from project.utils.hashing import HASH_ALGORITHM, HEX_DIGEST_LENGTH, canonical_json_hash, sha256_file
 from project.utils.time import utc_timestamp
-from project.workbook import EXPORT_HEADER_SPECS, WorkbookSnapshot, resolve_header_mapping
+from project.workbook import WorkbookSnapshot, resolve_export_header_mapping
 
 
 @dataclass(slots=True, frozen=True)
@@ -502,7 +502,7 @@ def _resolve_workflow_header_mapping(
     workbook_snapshot: WorkbookSnapshot,
 ) -> dict[str, int] | None:
     if workflow_id == WorkflowId.EXPORT_LC_SC:
-        return resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+        return resolve_export_header_mapping(workbook_snapshot)
     return {}
 
 

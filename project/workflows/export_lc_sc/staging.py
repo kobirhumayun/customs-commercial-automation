@@ -5,7 +5,7 @@ import re
 
 from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
-from project.workbook import EXPORT_HEADER_SPECS, WorkbookHeader, WorkbookSnapshot, resolve_header_mapping
+from project.workbook import WorkbookSnapshot, resolve_export_header_mapping
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
 
 
@@ -63,7 +63,7 @@ def stage_export_append_operations(
             decision_reasons=["Workbook snapshot not supplied; write staging deferred."],
         )
 
-    header_mapping = resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+    header_mapping = resolve_export_header_mapping(workbook_snapshot)
     if header_mapping is None:
         return ExportWriteStagingResult(
             staged_write_operations=[],
@@ -163,7 +163,7 @@ def stage_export_append_operations(
             )
             operation_index += 1
         for column_key, value_getter in OPTIONAL_EXPORT_FIELD_VALUE_MAP:
-            if not _resolve_optional_header_column_index(workbook_snapshot.headers, column_key):
+            if column_key not in header_mapping:
                 continue
             staged_write_operations.append(
                 WriteOperation(
@@ -234,16 +234,3 @@ def _title_case_words(value: str) -> str:
     normalized = re.sub(r"\s+", " ", value.strip())
     normalized = re.sub(r"\s*,\s*", ", ", normalized)
     return normalized.title()
-
-
-def _resolve_optional_header_column_index(headers: list[WorkbookHeader], column_key: str) -> int | None:
-    if column_key != "bangladesh_bank_ref":
-        return None
-    matches = [
-        header.column_index
-        for header in headers
-        if header.text.strip() in {"Bangladesh Bank Ref.", "Bangladesh Bank Ref"}
-    ]
-    if len(matches) != 1:
-        return None
-    return matches[0]

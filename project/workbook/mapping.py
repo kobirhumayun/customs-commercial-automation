@@ -42,6 +42,14 @@ EXPORT_HEADER_SPECS = (
     HeaderMappingSpec("master_lc_issue_date", "Master L/C Issue Dt."),
 )
 
+EXPORT_OPTIONAL_HEADER_SPECS = (
+    HeaderMappingSpec(
+        "bangladesh_bank_ref",
+        "Bangladesh Bank Ref.",
+        ("Bangladesh Bank Ref",),
+    ),
+)
+
 
 def resolve_header_mapping(
     snapshot: WorkbookSnapshot,
@@ -59,6 +67,39 @@ def resolve_header_mapping(
         if len(matches) != 1:
             return None
         mapping[spec.column_key] = matches[0]
+    return mapping
+
+
+def resolve_export_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, int] | None:
+    required_mapping = resolve_header_mapping(snapshot, EXPORT_HEADER_SPECS)
+    if required_mapping is None:
+        return None
+    optional_mapping = _resolve_present_header_mapping(snapshot, EXPORT_OPTIONAL_HEADER_SPECS)
+    if optional_mapping is None:
+        return None
+    return {
+        **required_mapping,
+        **optional_mapping,
+    }
+
+
+def _resolve_present_header_mapping(
+    snapshot: WorkbookSnapshot,
+    specs: tuple[HeaderMappingSpec, ...],
+) -> dict[str, int] | None:
+    mapping: dict[str, int] = {}
+    for spec in specs:
+        matches = [
+            header.column_index
+            for header in snapshot.headers
+            if _matches_header_text(header.text, spec)
+        ]
+        if spec.required_column_index is not None:
+            matches = [column for column in matches if column == spec.required_column_index]
+        if len(matches) > 1:
+            return None
+        if len(matches) == 1:
+            mapping[spec.column_key] = matches[0]
     return mapping
 
 

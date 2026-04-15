@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from project.models import WorkflowId, WorkbookSessionPreflight, WriteOperation
 from project.utils.json import to_jsonable
-from project.workbook import EXPORT_HEADER_SPECS, WorkbookSnapshot, prevalidate_staged_write_plan, resolve_header_mapping
+from project.workbook import WorkbookSnapshot, prevalidate_staged_write_plan, resolve_export_header_mapping
 
 
 def summarize_workbook_readiness(
@@ -77,7 +77,7 @@ def _resolve_workflow_mapping(
     workbook_snapshot: WorkbookSnapshot,
 ) -> dict[str, int] | None:
     if workflow_id == WorkflowId.EXPORT_LC_SC:
-        return resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+        return resolve_export_header_mapping(workbook_snapshot)
     return {}
 
 

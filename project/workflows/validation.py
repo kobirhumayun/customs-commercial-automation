@@ -24,7 +24,7 @@ from project.storage import AttachmentContentProvider, DocumentSaveIssue, Docume
 from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
-from project.workbook import EXPORT_HEADER_SPECS, WorkbookRow, WorkbookSnapshot, resolve_header_mapping
+from project.workbook import WorkbookRow, WorkbookSnapshot, resolve_export_header_mapping
 from project.workflows.export_lc_sc.document_classification import (
     ClassifiedDocumentSet,
     DocumentClassificationDiscrepancy,
@@ -467,7 +467,7 @@ def _advance_workbook_snapshot_for_staged_writes(
     if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
         return workbook_snapshot
 
-    header_mapping = resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+    header_mapping = resolve_export_header_mapping(workbook_snapshot)
     if header_mapping is None:
         return workbook_snapshot
 

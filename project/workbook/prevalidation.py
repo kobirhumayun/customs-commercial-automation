@@ -13,7 +13,7 @@ from project.models import (
     WriteOperation,
 )
 from project.utils.time import utc_timestamp
-from project.workbook.mapping import EXPORT_HEADER_SPECS, resolve_header_mapping
+from project.workbook.mapping import resolve_export_header_mapping
 from project.workbook.models import WorkbookRow, WorkbookSnapshot
 
 
@@ -149,7 +149,7 @@ def _resolve_workflow_header_mapping(
     workbook_snapshot: WorkbookSnapshot,
 ) -> dict[str, int] | None:
     if workflow_id == WorkflowId.EXPORT_LC_SC:
-        return resolve_header_mapping(workbook_snapshot, EXPORT_HEADER_SPECS)
+        return resolve_export_header_mapping(workbook_snapshot)
     return {}
 
 
