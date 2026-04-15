@@ -40,15 +40,14 @@ EXPORT_HEADER_SPECS = (
     HeaderMappingSpec("lien_bank", "Lien Bank"),
     HeaderMappingSpec("master_lc_no", "Master L/C No."),
     HeaderMappingSpec("master_lc_issue_date", "Master L/C Issue Dt."),
-)
-
-EXPORT_OPTIONAL_HEADER_SPECS = (
     HeaderMappingSpec(
         "bangladesh_bank_ref",
         "Bangladesh Bank Ref.",
         ("Bangladesh Bank Ref",),
     ),
 )
+
+EXPORT_OPTIONAL_HEADER_SPECS = ()
 
 
 def resolve_header_mapping(

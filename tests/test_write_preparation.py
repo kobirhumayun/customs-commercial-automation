@@ -51,7 +51,7 @@ class WritePreparationTests(unittest.TestCase):
         self.assertEqual(prepared.run_report.write_phase_status, WritePhaseStatus.PREVALIDATED)
         self.assertEqual(prepared.run_report.workbook_session_preflight.status, "ready")
         self.assertEqual(prepared.run_report.target_prevalidation_summary.status, "passed")
-        self.assertEqual(len(prepared.target_probes), 14)
+        self.assertEqual(len(prepared.target_probes), 15)
         self.assertTrue(all(probe.classification == "matches_pre_write" for probe in prepared.target_probes))
 
     def test_prepare_live_write_batch_hard_blocks_on_lock_conflict(self) -> None:
@@ -159,6 +159,7 @@ class WritePreparationTests(unittest.TestCase):
                         "nego_bank": "XYZ BANK",
                         "master_lc_no": "MLC-001",
                         "master_lc_date": "2025-12-20",
+                        "ship_remarks": "BB-REF-2026-0042",
                     }
                 ]
             ),
@@ -185,6 +186,7 @@ class WritePreparationTests(unittest.TestCase):
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
                         {"column_index": 22, "text": "Amount"},
+                        {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],
                     "rows": [],
                 }

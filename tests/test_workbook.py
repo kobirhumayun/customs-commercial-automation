@@ -102,6 +102,7 @@ class WorkbookTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [
                             {"row_index": 3, "values": {"1": "P/26/0042"}},
@@ -187,6 +188,7 @@ class WorkbookTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[],
         )
@@ -248,6 +250,7 @@ class WorkbookTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[WorkbookRow(row_index=3, values={1: "P/26/0042"})],
         )
@@ -296,6 +299,7 @@ class WorkbookTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[
                 WorkbookRow(row_index=3, values={1: "P/26/0001", 3: "FILLED BUYER"}),
@@ -365,6 +369,7 @@ class WorkbookTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[WorkbookRow(row_index=3, values={3: "", 10: "", 11: ""})],
         )

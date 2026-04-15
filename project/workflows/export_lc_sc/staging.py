@@ -39,12 +39,11 @@ EXPORT_FIELD_VALUE_MAP = (
     ("lien_bank", lambda match: _format_lien_bank_for_sheet(match.canonical_row.nego_bank)),
     ("master_lc_no", lambda match: match.canonical_row.master_lc_no),
     ("master_lc_issue_date", lambda match: match.canonical_row.master_lc_date),
-)
-OPTIONAL_EXPORT_FIELD_VALUE_MAP = (
     ("bangladesh_bank_ref", lambda match: match.canonical_row.ship_remarks),
 )
+OPTIONAL_EXPORT_FIELD_VALUE_MAP = ()
 
-REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty")
+REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty", "ship_remarks")
 MTR_QUANTITY_NUMBER_FORMAT = '#,###.00 "Mtr"'
 
 

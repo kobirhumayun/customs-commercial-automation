@@ -612,6 +612,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),
@@ -638,6 +639,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [],
                     }
@@ -669,7 +671,7 @@ class ValidationTests(unittest.TestCase):
 
             self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
-            self.assertEqual(len(validation_result.staged_write_plan), 14)
+            self.assertEqual(len(validation_result.staged_write_plan), 15)
             self.assertEqual(validation_result.staged_write_plan[0].row_index, 3)
             self.assertEqual(
                 [operation.column_key for operation in validation_result.staged_write_plan[:3]],
@@ -747,6 +749,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),
@@ -773,6 +776,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [
                             {"row_index": 3, "values": {"1": "P/26/0001", "3": "FILLED BUYER"}},
@@ -806,7 +810,7 @@ class ValidationTests(unittest.TestCase):
             )
 
             self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
-            self.assertEqual(len(validation_result.staged_write_plan), 14)
+            self.assertEqual(len(validation_result.staged_write_plan), 15)
             self.assertTrue(all(operation.row_index == 4 for operation in validation_result.staged_write_plan))
 
     def test_validate_run_snapshot_sets_mtr_quantity_number_format(self) -> None:
@@ -880,6 +884,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),
@@ -906,6 +911,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [],
                     }
@@ -1013,6 +1019,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK\\DHAKA BRANCH",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),
@@ -1039,6 +1046,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [],
                     }
@@ -1302,6 +1310,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "MUTUAL TRUST BANK PLC\\BANANI",
                             "master_lc_no": "AGL/H&M/98/2025",
                             "master_lc_date": "18-Dec-25",
+                            "ship_remarks": "BB-REF-2026-0634",
                         },
                         {
                             "file_number": "P/26/0635",
@@ -1320,6 +1329,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "BRAC BANK PLC\\GULSHAN",
                             "master_lc_no": "CWF/SEAVIEW/AW-26-001",
                             "master_lc_date": "08-Feb-26",
+                            "ship_remarks": "BB-REF-2026-0635",
                         },
                     ]
                 ),
@@ -1345,6 +1355,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 14, "text": "Master L/C No."},
                             {"column_index": 15, "text": "Master L/C Issue Dt."},
                             {"column_index": 29, "text": "Commercial File No."},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [
                             {"row_index": 3, "values": {"2": "Cutting Edge Industries Ltd, 1612", "29": "P/26/0624"}},
@@ -1378,7 +1389,7 @@ class ValidationTests(unittest.TestCase):
             )
 
             self.assertEqual(validation_result.run_report.summary, {"pass": 3, "warning": 0, "hard_block": 0})
-            self.assertEqual(len(validation_result.staged_write_plan), 28)
+            self.assertEqual(len(validation_result.staged_write_plan), 30)
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "duplicate_only_noop")
             self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
             staged_dispositions = {
@@ -1494,6 +1505,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [{"row_index": 3, "values": {"1": "P/26/0042"}}],
                     }
@@ -1611,6 +1623,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),
@@ -1637,6 +1650,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [{"row_index": 3, "values": {}}],
                     }
@@ -1666,7 +1680,7 @@ class ValidationTests(unittest.TestCase):
                 workbook_snapshot=JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot(),
             )
 
-            self.assertEqual(len(validation_result.staged_write_plan), 14)
+            self.assertEqual(len(validation_result.staged_write_plan), 15)
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
             self.assertFalse(validation_result.mail_outcomes[1].eligible_for_write)
@@ -1749,6 +1763,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         },
                         {
                             "file_number": "P/26/0043",
@@ -1767,6 +1782,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0043",
                         },
                     ]
                 ),
@@ -1793,6 +1809,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
                             {"column_index": 22, "text": "Amount"},
+                            {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [{"row_index": 3, "values": {"1": "P/26/0042"}}],
                     }
@@ -1825,7 +1842,7 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "mixed_duplicate_and_new_writes")
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
             self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
-            self.assertEqual(len(validation_result.staged_write_plan), 14)
+            self.assertEqual(len(validation_result.staged_write_plan), 15)
 
     def test_validate_run_snapshot_hard_blocks_invalid_workbook_header_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1898,6 +1915,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
+                            "ship_remarks": "BB-REF-2026-0042",
                         }
                     ]
                 ),

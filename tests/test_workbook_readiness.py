@@ -28,6 +28,7 @@ class WorkbookReadinessTests(unittest.TestCase):
                 WorkbookHeader(column_index=15, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
                 WorkbookHeader(column_index=29, text="Commercial File No."),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[WorkbookRow(row_index=3, values={29: "P/26/0042"})],
         )
@@ -62,6 +63,7 @@ class WorkbookReadinessTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[WorkbookRow(row_index=3, values={1: "P/26/0042"})],
         )
@@ -95,6 +97,7 @@ class WorkbookReadinessTests(unittest.TestCase):
                 WorkbookHeader(column_index=13, text="Master L/C No."),
                 WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                 WorkbookHeader(column_index=22, text="Amount"),
+                WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
             ],
             rows=[],
         )

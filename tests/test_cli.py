@@ -2827,6 +2827,7 @@ class CLITests(unittest.TestCase):
                         WorkbookHeader(column_index=13, text="Master L/C No."),
                         WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
                         WorkbookHeader(column_index=22, text="Amount"),
+                        WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
                     ],
                     "rows": [],
                 },

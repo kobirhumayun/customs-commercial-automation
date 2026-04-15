@@ -66,10 +66,10 @@ class WriteExecutionTests(unittest.TestCase):
             status_transitions,
             ["prevalidating_targets", "prevalidated", "applying", "committed"],
         )
-        self.assertEqual(persisted_probe_counts, [14, 28])
+        self.assertEqual(persisted_probe_counts, [15, 30])
         self.assertEqual(executed.run_report.write_phase_status, WritePhaseStatus.COMMITTED)
         self.assertIsNotNone(executed.commit_marker)
-        self.assertEqual(executed.commit_marker.operation_count, 14)
+        self.assertEqual(executed.commit_marker.operation_count, 15)
         self.assertEqual(
             [probe.probe_stage for probe in executed.target_probes[:2]],
             ["prevalidation", "prevalidation"],
@@ -292,6 +292,7 @@ class WriteExecutionTests(unittest.TestCase):
                         "nego_bank": "XYZ BANK",
                         "master_lc_no": "MLC-001",
                         "master_lc_date": "2025-12-20",
+                        "ship_remarks": "BB-REF-2026-0042",
                     }
                 ]
             ),
@@ -318,6 +319,7 @@ class WriteExecutionTests(unittest.TestCase):
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
                         {"column_index": 22, "text": "Amount"},
+                        {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],
                     "rows": [],
                 }

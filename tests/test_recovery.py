@@ -163,6 +163,7 @@ class RecoveryTests(unittest.TestCase):
                         "nego_bank": "XYZ BANK",
                         "master_lc_no": "MLC-001",
                         "master_lc_date": "2025-12-20",
+                        "ship_remarks": "BB-REF-2026-0042",
                     }
                 ]
             ),
@@ -189,6 +190,7 @@ class RecoveryTests(unittest.TestCase):
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
                         {"column_index": 22, "text": "Amount"},
+                        {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],
                     "rows": [],
                 }
@@ -236,6 +238,7 @@ class RecoveryTests(unittest.TestCase):
             "lien_bank": 12,
             "master_lc_no": 13,
             "master_lc_issue_date": 14,
+            "bangladesh_bank_ref": 33,
         }
         for operation in staged_write_plan:
             row_values = rows_by_index.setdefault(operation.row_index, {})
@@ -263,6 +266,7 @@ class RecoveryTests(unittest.TestCase):
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
                         {"column_index": 22, "text": "Amount"},
+                        {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],
                     "rows": [
                         {"row_index": row_index, "values": values}
