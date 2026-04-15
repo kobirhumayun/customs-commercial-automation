@@ -186,18 +186,16 @@ try {
     Write-Host ""
     Write-Host "Run ID: $runId" -ForegroundColor Green
 
-    if ($hardBlockCount -gt 0) {
-        Write-Host "Validation produced hard blocks. Stopping." -ForegroundColor Yellow
-        Write-Host "Check status with:" -ForegroundColor Yellow
-        Write-Host "uv run python -m project report-run-status $Workflow --config `"$Config`" --run-id `"$runId`"" -ForegroundColor Yellow
-        Finish-Script 1
-    }
-
     if ($writePhaseStatus -notin @("committed", "not_started")) {
         Write-Host "Write phase stopped at '$writePhaseStatus'. Stopping before print." -ForegroundColor Yellow
         Write-Host "Check status with:" -ForegroundColor Yellow
         Write-Host "uv run python -m project report-run-status $Workflow --config `"$Config`" --run-id `"$runId`"" -ForegroundColor Yellow
         Finish-Script 1
+    }
+
+    if ($hardBlockCount -gt 0) {
+        Write-Host "Validation produced $hardBlockCount hard block(s), but eligible mails will continue through the live cycle." -ForegroundColor Yellow
+        Write-Host "Blocked mails will stay out of downstream print/mail-move handling for this run." -ForegroundColor Yellow
     }
 
     Write-Section "Plan Print"
