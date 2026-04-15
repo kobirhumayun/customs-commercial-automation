@@ -36,6 +36,7 @@ ERP_EXPORT_HEADER_ALIASES = {
     "nego_bank": ("NEGO BANK", "NEGOTIATING BANK"),
     "master_lc_no": ("MASTER LC NO",),
     "master_lc_date": ("M L C DATE", "MASTER LC DATE"),
+    "ship_remarks": ("SHIP REMARKS",),
 }
 
 
@@ -510,6 +511,7 @@ def _build_erp_row(item: dict[str, object], *, source_row_index: int, row_label:
         nego_bank=_optional_string(item.get("nego_bank")),
         master_lc_no=_optional_string(item.get("master_lc_no")),
         master_lc_date=_optional_string(item.get("master_lc_date")),
+        ship_remarks=_optional_string(item.get("ship_remarks")),
     )
 
 

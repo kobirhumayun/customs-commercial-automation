@@ -34,6 +34,7 @@ class ERPRegisterRow:
     nego_bank: str = ""
     master_lc_no: str = ""
     master_lc_date: str = ""
+    ship_remarks: str = ""
 
     @property
     def family(self) -> ERPFamily:

@@ -5,7 +5,7 @@ import re
 
 from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
-from project.workbook import EXPORT_HEADER_SPECS, WorkbookSnapshot, resolve_header_mapping
+from project.workbook import EXPORT_HEADER_SPECS, WorkbookHeader, WorkbookSnapshot, resolve_header_mapping
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
 
 
@@ -39,6 +39,9 @@ EXPORT_FIELD_VALUE_MAP = (
     ("lien_bank", lambda match: _format_lien_bank_for_sheet(match.canonical_row.nego_bank)),
     ("master_lc_no", lambda match: match.canonical_row.master_lc_no),
     ("master_lc_issue_date", lambda match: match.canonical_row.master_lc_date),
+)
+OPTIONAL_EXPORT_FIELD_VALUE_MAP = (
+    ("bangladesh_bank_ref", lambda match: match.canonical_row.ship_remarks),
 )
 
 REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty")
@@ -159,6 +162,35 @@ def stage_export_append_operations(
                 )
             )
             operation_index += 1
+        for column_key, value_getter in OPTIONAL_EXPORT_FIELD_VALUE_MAP:
+            if not _resolve_optional_header_column_index(workbook_snapshot.headers, column_key):
+                continue
+            staged_write_operations.append(
+                WriteOperation(
+                    write_operation_id=build_write_operation_id(
+                        run_id=run_id,
+                        mail_id=mail_id,
+                        operation_index_within_mail=operation_index,
+                        sheet_name=workbook_snapshot.sheet_name,
+                        row_index=next_row_index,
+                        column_key=column_key,
+                    ),
+                    run_id=run_id,
+                    mail_id=mail_id,
+                    operation_index_within_mail=operation_index,
+                    sheet_name=workbook_snapshot.sheet_name,
+                    row_index=next_row_index,
+                    column_key=column_key,
+                    expected_pre_write_value=None,
+                    expected_post_write_value=value_getter(match),
+                    row_eligibility_checks=[
+                        "append_target_row_has_blank_buyer_name_or_is_new",
+                        "target_cell_blank_by_construction",
+                    ],
+                    number_format=None,
+                )
+            )
+            operation_index += 1
         decision_reasons.append(f"Staged workbook append for {match.file_number} at row {next_row_index}.")
         existing_file_numbers.add(match.file_number.upper())
         next_row_index += 1
@@ -202,3 +234,16 @@ def _title_case_words(value: str) -> str:
     normalized = re.sub(r"\s+", " ", value.strip())
     normalized = re.sub(r"\s*,\s*", ", ", normalized)
     return normalized.title()
+
+
+def _resolve_optional_header_column_index(headers: list[WorkbookHeader], column_key: str) -> int | None:
+    if column_key != "bangladesh_bank_ref":
+        return None
+    matches = [
+        header.column_index
+        for header in headers
+        if header.text.strip() in {"Bangladesh Bank Ref.", "Bangladesh Bank Ref"}
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
