@@ -43,7 +43,7 @@ EXPORT_FIELD_VALUE_MAP = (
 )
 OPTIONAL_EXPORT_FIELD_VALUE_MAP = ()
 
-REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty", "ship_remarks")
+REQUIRED_ERP_STAGE_FIELDS = ("current_lc_value", "lc_qty")
 MTR_QUANTITY_NUMBER_FORMAT = '#,###.00 "Mtr"'
 
 
