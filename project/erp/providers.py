@@ -19,7 +19,13 @@ from project.erp.normalization import (
 )
 from project.workflows.export_lc_sc.parsing import normalize_file_number
 
-REQUIRED_ERP_EXPORT_HEADERS = ("file_number", "lc_sc_number", "buyer_name", "lc_sc_date")
+REQUIRED_ERP_EXPORT_HEADERS = (
+    "file_number",
+    "lc_sc_number",
+    "buyer_name",
+    "lc_sc_date",
+    "ship_remarks",
+)
 ERP_EXPORT_HEADER_ALIASES = {
     "file_number": ("FILE NO", "FILE NUMBER"),
     "lc_sc_number": ("L C NO", "LC NO", "LC SC NO"),

@@ -1544,7 +1544,7 @@ class ValidationTests(unittest.TestCase):
                 validation_result.mail_outcomes[0].decision_reasons,
             )
 
-    def test_validate_run_snapshot_skips_duplicate_file_number_in_workbook(self) -> None:
+    def test_validate_run_snapshot_skips_duplicate_file_number_in_workbook_when_format_differs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workflow_year = __import__("datetime").datetime.now(
@@ -1643,7 +1643,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
-                        "rows": [{"row_index": 3, "values": {"1": "P/26/0042"}}],
+                        "rows": [{"row_index": 3, "values": {"1": "P/26/42"}}],
                     }
                 ),
                 encoding="utf-8",
@@ -1947,7 +1947,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
-                        "rows": [{"row_index": 3, "values": {"1": "P/26/0042"}}],
+                        "rows": [{"row_index": 3, "values": {"1": "P/26/42"}}],
                     }
                 ),
                 encoding="utf-8",

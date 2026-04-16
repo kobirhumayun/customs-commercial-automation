@@ -160,8 +160,8 @@ class ERPProviderTests(unittest.TestCase):
         tables = [
             [
                 ["DateWiseLCRegisterForDocuments"],
-                ["File No.", "L/C No.", "Buyer Name", "LC DT."],
-                ["P/26/42", "LC-0038", "Ananta Garments Ltd.\\Dhaka.", "2026-01-10"],
+                ["File No.", "L/C No.", "Buyer Name", "LC DT.", "Ship. Remarks"],
+                ["P/26/42", "LC-0038", "Ananta Garments Ltd.\\Dhaka.", "2026-01-10", "BB-REF-42"],
             ],
         ]
 
@@ -181,8 +181,8 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "rptDateWiseLCRegister",
-                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value",
-                        "P/26/42,LC-0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,12345.00",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value,Ship. Remarks",
+                        "P/26/42,LC-0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,12345.00,BB-REF-42",
                     ]
                 ),
                 encoding="utf-8",
@@ -232,9 +232,9 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "rptDateWiseLCRegister",
-                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value",
-                        "P/26/709,DPCBD1176747,Sterling Creations Ltd.,2026-04-09,172702.40",
-                        "P/26/710,1475260403666,Tusuka Trousers Ltd.,2026-04-08,150595.50",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value,Ship. Remarks",
+                        "P/26/709,DPCBD1176747,Sterling Creations Ltd.,2026-04-09,172702.40,BB-REF-709",
+                        "P/26/710,1475260403666,Tusuka Trousers Ltd.,2026-04-08,150595.50,BB-REF-710",
                     ]
                 ),
                 encoding="utf-8",
@@ -310,8 +310,8 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "rptDateWiseLCRegister",
-                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value,LC Qty,LC Unit,Amd No,Amd DT,Nego Bank",
-                        "P/26/42,LC  -0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,12345.00,4000,MTR,05,2026-01-15,ABC Bank",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Current LC Value,LC Qty,LC Unit,Amd No,Amd DT,Nego Bank,Ship. Remarks",
+                        "P/26/42,LC  -0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,12345.00,4000,MTR,05,2026-01-15,ABC Bank,BB-REF-42",
                     ]
                 ),
                 encoding="utf-8",
@@ -329,6 +329,39 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
         self.assertEqual(rows["P/26/0042"][0].amd_no, "05")
 
+    def test_delimited_export_provider_requires_ship_remarks_header_but_allows_blank_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_header_path = Path(temp_dir) / "missing_ship_remarks.csv"
+            missing_header_path.write_text(
+                "\n".join(
+                    [
+                        "rptDateWiseLCRegister",
+                        "File No.,L/C No.,Buyer Name,LC DT.",
+                        "P/26/42,LC-0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            blank_value_path = Path(temp_dir) / "blank_ship_remarks.csv"
+            blank_value_path.write_text(
+                "\n".join(
+                    [
+                        "rptDateWiseLCRegister",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Ship. Remarks",
+                        "P/26/42,LC-0038,Ananta Garments Ltd.\\Dhaka.,2026-01-10,",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "ship_remarks"):
+                DelimitedERPExportRowProvider(missing_header_path).lookup_rows(file_numbers=["P/26/0042"])
+
+            rows = DelimitedERPExportRowProvider(blank_value_path).lookup_rows(file_numbers=["P/26/0042"])
+
+        self.assertEqual(len(rows["P/26/0042"]), 1)
+        self.assertEqual(rows["P/26/0042"][0].ship_remarks, "")
+
     def test_delimited_export_provider_accepts_live_erp_style_lc_numbers_and_dates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             export_path = Path(temp_dir) / "erp.csv"
@@ -336,8 +369,8 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "L/C Register For Documents",
-                        "File No.,LC No.,Buyer Name,LC DT.,Current LC Value",
-                        "P/26/0624,DPCBD1175392,CUTTING EDGE INDUSTRIES LTD.\\1612,30-Mar-26,36467.20",
+                        "File No.,LC No.,Buyer Name,LC DT.,Current LC Value,Ship. Remarks",
+                        "P/26/0624,DPCBD1175392,CUTTING EDGE INDUSTRIES LTD.\\1612,30-Mar-26,36467.20,BB-REF-0624",
                     ]
                 ),
                 encoding="utf-8",
@@ -359,7 +392,7 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "rptDateWiseLCRegister",
-                        "File No.,L/C No.,Buyer Name,LC DT.",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Ship. Remarks",
                         "P/26/42,LC-0038,Ananta Garments “Test”,2026-01-10",
                     ]
                 ).encode("cp1252")
@@ -378,8 +411,8 @@ class ERPProviderTests(unittest.TestCase):
                 "\n".join(
                     [
                         "rptDateWiseLCRegister",
-                        "File No.,L/C No.,Buyer Name,LC DT.",
-                        "NOT-A-FILE,LC-0038,Ananta Garments Ltd,2026-01-10",
+                        "File No.,L/C No.,Buyer Name,LC DT.,Ship. Remarks",
+                        "NOT-A-FILE,LC-0038,Ananta Garments Ltd,2026-01-10,BB-REF-42",
                     ]
                 ),
                 encoding="utf-8",
@@ -394,8 +427,8 @@ class ERPProviderTests(unittest.TestCase):
             [["not", "a", "register"]],
             [
                 ["rptDateWiseLCRegister"],
-                ["File No.", "L/C No.", "Buyer Name", "LC DT.", "Current LC Value"],
-                ["P/26/42", "LC-0038", "Ananta Garments Ltd.\\Dhaka.", "2026-01-10", "12345.00"],
+                ["File No.", "L/C No.", "Buyer Name", "LC DT.", "Current LC Value", "Ship. Remarks"],
+                ["P/26/42", "LC-0038", "Ananta Garments Ltd.\\Dhaka.", "2026-01-10", "12345.00", "BB-REF-42"],
             ],
         ]
 

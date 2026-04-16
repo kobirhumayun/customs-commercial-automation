@@ -88,7 +88,7 @@ Operational notes:
 - When `print_printer_name` is configured and printer-specific JSObject submission is unavailable, the silent fallback may temporarily switch the Windows default printer, submit the job, and then restore the original default printer automatically.
 - Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
 - Daily `validate-run` saves PDF attachments when `--document-root` is used, but it no longer performs OCR-based saved-document analysis by default in the released export workflow path.
-- For export LC/SC workbook mapping, the `Bangladesh Bank Ref.` workbook header is required. Its value comes from ERP `Ship. Remarks`; if ERP leaves `Ship. Remarks` blank, the workflow writes a blank value rather than blocking the mail.
+- For export LC/SC workbook mapping, the `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are required. If ERP leaves the `Ship. Remarks` value blank for a row, the workflow writes a blank value rather than blocking the mail.
 
 ## Daily Operator Decision Tree
 Use this as the normal day-to-day workflow guide after release:

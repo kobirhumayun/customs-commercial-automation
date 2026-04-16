@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import re
 
@@ -7,6 +8,7 @@ from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
 from project.workbook import WorkbookSnapshot, resolve_export_header_mapping
 from project.workflows.export_lc_sc.payloads import ExportMailPayload
+from project.workflows.export_lc_sc.parsing import normalize_file_number
 
 
 @dataclass(slots=True, frozen=True)
@@ -77,14 +79,14 @@ def stage_export_append_operations(
             decision_reasons=["Workbook header mapping failed."],
         )
 
-    existing_file_numbers = {
-        row.values.get(header_mapping["file_no"], "").strip().upper()
+    existing_file_numbers = _workbook_file_number_keys(
+        row.values.get(header_mapping["file_no"], "")
         for row in workbook_snapshot.rows
-    }
-    baseline_existing_file_numbers = {
-        row.values.get(header_mapping["file_no"], "").strip().upper()
+    )
+    baseline_existing_file_numbers = _workbook_file_number_keys(
+        row.values.get(header_mapping["file_no"], "")
         for row in (baseline_workbook_snapshot or workbook_snapshot).rows
-    }
+    )
     next_row_index = _resolve_next_export_row_index(
         workbook_snapshot=workbook_snapshot,
         buyer_name_column_index=header_mapping["buyer_name"],
@@ -97,10 +99,11 @@ def stage_export_append_operations(
     for match in payload.erp_matches:
         if match.canonical_row is None:
             continue
-        if match.file_number.upper() in existing_file_numbers:
+        file_number_key = _workbook_file_number_key(match.file_number)
+        if file_number_key in existing_file_numbers:
             duplicate_reason = (
                 f"Skipped workbook append for {match.file_number} because the file number already exists in the workbook."
-                if match.file_number.upper() in baseline_existing_file_numbers
+                if file_number_key in baseline_existing_file_numbers
                 else (
                     f"Skipped workbook append for {match.file_number} because the file number was already staged earlier in this run."
                 )
@@ -191,7 +194,7 @@ def stage_export_append_operations(
             )
             operation_index += 1
         decision_reasons.append(f"Staged workbook append for {match.file_number} at row {next_row_index}.")
-        existing_file_numbers.add(match.file_number.upper())
+        existing_file_numbers.add(file_number_key)
         next_row_index += 1
 
     if not decision_reasons:
@@ -214,6 +217,21 @@ def _resolve_next_export_row_index(
         if not row.values.get(buyer_name_column_index, "").strip():
             return row.row_index
     return max((row.row_index for row in workbook_snapshot.rows), default=2) + 1
+
+
+def _workbook_file_number_keys(values: Iterable[str]) -> set[str]:
+    return {
+        key
+        for value in values
+        if (key := _workbook_file_number_key(value))
+    }
+
+
+def _workbook_file_number_key(value: str) -> str:
+    normalized = normalize_file_number(value)
+    if normalized is not None:
+        return normalized
+    return value.strip().upper()
 
 
 def _format_buyer_name_for_sheet(value: str) -> str:

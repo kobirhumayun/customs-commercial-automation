@@ -561,7 +561,7 @@ Use ERP fields to populate:
 - `Commercial File No.` ← `File No.`
 
 Note: the master workbook intentionally contains duplicate `Amount` headers. The export workflow must write only to column 6. Column 22 `Amount` is reserved for Import LC (Back-to-Back) workflow writes.
-The `Bangladesh Bank Ref.` header is mandatory for the export workbook mapping. The ERP `Ship. Remarks` value may be blank; in that case the workflow writes a blank workbook value and does not hard-block the mail for that field alone.
+The `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are mandatory for export mapping. The ERP `Ship. Remarks` row value may be blank; in that case the workflow writes a blank workbook value and does not hard-block the mail for that field alone.
 
 ### No-write rules
 - any extracted file number is missing its required ERP row
