@@ -461,6 +461,16 @@ def _load_rows_from_table_matrix(matrix: list[list[str]], *, source_name: str) -
 
 
 def _resolve_header_mapping(headers: list[str], *, source_name: str) -> dict[str, int]:
+    mapping = _build_header_mapping(headers)
+    missing = [header for header in REQUIRED_ERP_EXPORT_HEADERS if header not in mapping]
+    if missing:
+        raise ValueError(
+            f"{source_name} is missing required ERP headers: {', '.join(sorted(missing))}"
+        )
+    return mapping
+
+
+def _build_header_mapping(headers: list[str]) -> dict[str, int]:
     normalized_headers = [_normalize_header(header) for header in headers]
     mapping: dict[str, int] = {}
     for canonical_key, aliases in ERP_EXPORT_HEADER_ALIASES.items():
@@ -469,12 +479,12 @@ def _resolve_header_mapping(headers: list[str], *, source_name: str) -> dict[str
             if header in alias_set:
                 mapping[canonical_key] = index
                 break
-    missing = [header for header in REQUIRED_ERP_EXPORT_HEADERS if header not in mapping]
-    if missing:
-        raise ValueError(
-            f"{source_name} is missing required ERP headers: {', '.join(sorted(missing))}"
-        )
     return mapping
+
+
+def _missing_required_erp_headers(headers: list[str]) -> list[str]:
+    mapping = _build_header_mapping(headers)
+    return sorted(header for header in REQUIRED_ERP_EXPORT_HEADERS if header not in mapping)
 
 
 def _extract_canonical_row_values(row_values: list[str], header_mapping: dict[str, int]) -> dict[str, str]:
@@ -717,26 +727,30 @@ def _probe_downloaded_file(path: Path) -> dict[str, object]:
     header_sample = raw_bytes[:512].decode("utf-8", errors="ignore").lstrip()
     looks_like_html = header_sample.lower().startswith("<!doctype html") or header_sample.lower().startswith("<html")
 
-    text = raw_bytes.decode("utf-8-sig", errors="ignore")
-    lines = [line.strip() for line in text.splitlines()]
-    non_empty_lines = [line for line in lines if line]
-    header_preview = non_empty_lines[1] if len(non_empty_lines) >= 2 else (non_empty_lines[0] if non_empty_lines else None)
-    header_cells = [cell.strip() for cell in header_preview.split(",")] if header_preview else []
-    has_required_headers = False
-    missing_headers = list(REQUIRED_ERP_EXPORT_HEADERS)
-    if header_cells:
-        try:
-            mapping = _resolve_header_mapping(header_cells, source_name=str(path))
-            has_required_headers = all(key in mapping for key in REQUIRED_ERP_EXPORT_HEADERS)
-            missing_headers = []
-        except ValueError:
-            has_required_headers = False
+    header_cells: list[str] = []
+    line_count = 0
+    if not looks_like_html:
+        text = _decode_delimited_export_text(path)
+        handle = io.StringIO(text, newline="")
+        sample = handle.read(4096)
+        handle.seek(0)
+        reader = csv.reader(handle, delimiter=_resolve_delimiter(path, sample))
+        rows = [[cell.strip() for cell in row] for row in reader]
+        non_empty_rows = [row for row in rows if any(cell.strip() for cell in row)]
+        line_count = len(non_empty_rows)
+        if len(non_empty_rows) >= 2:
+            header_cells = non_empty_rows[1]
+        elif non_empty_rows:
+            header_cells = non_empty_rows[0]
+    header_preview = ",".join(header_cells) if header_cells else None
+    missing_headers = _missing_required_erp_headers(header_cells) if header_cells else list(REQUIRED_ERP_EXPORT_HEADERS)
+    has_required_headers = not missing_headers
 
     return {
         "content_kind": "html" if looks_like_html else "delimited_text",
         "looks_like_html": looks_like_html,
         "is_empty": False,
-        "line_count": len(non_empty_lines),
+        "line_count": line_count,
         "header_preview": header_preview,
         "has_required_erp_headers": has_required_headers,
         "erp_header_missing": missing_headers,

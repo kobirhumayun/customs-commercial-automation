@@ -12,6 +12,7 @@ from project.erp import (
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
+from project.erp.providers import _build_download_receipt
 from project.workflows.erp_inspection import inspect_erp_rows
 
 
@@ -361,6 +362,29 @@ class ERPProviderTests(unittest.TestCase):
 
         self.assertEqual(len(rows["P/26/0042"]), 1)
         self.assertEqual(rows["P/26/0042"][0].ship_remarks, "")
+
+    def test_download_receipt_detects_required_headers_when_csv_header_contains_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptDateWiseLCRegister.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "L/C Register For Documents Between 16-Apr-2025 To 16-Apr-2026,,,,,,",
+                        'SL,File No.,Buyer Name,LC No.,LC DT.,"UD R&C',
+                        'Sub DT.",Ship. Remarks',
+                        "1,P/26/42,Ananta Garments Ltd.,LC-0038,2026-01-10,2026-01-11,BB-REF-42",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            receipt = _build_download_receipt(
+                downloaded_path=export_path,
+                suggested_filename="rptDateWiseLCRegister.csv",
+            )
+
+        self.assertTrue(receipt["has_required_erp_headers"])
+        self.assertEqual(receipt["erp_header_missing"], [])
 
     def test_delimited_export_provider_accepts_live_erp_style_lc_numbers_and_dates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
