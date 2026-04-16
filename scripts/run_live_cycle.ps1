@@ -188,7 +188,9 @@ try {
 
     if ($writePhaseStatus -notin @("committed", "not_started")) {
         Write-Host "Write phase stopped at '$writePhaseStatus'. Stopping before print." -ForegroundColor Yellow
-        Write-Host "Check status with:" -ForegroundColor Yellow
+        Write-Host "Explain the exact cause with:" -ForegroundColor Yellow
+        Write-Host "uv run python -m project explain-run-failure $Workflow --config `"$Config`" --run-id `"$runId`"" -ForegroundColor Yellow
+        Write-Host "Check full status with:" -ForegroundColor Yellow
         Write-Host "uv run python -m project report-run-status $Workflow --config `"$Config`" --run-id `"$runId`"" -ForegroundColor Yellow
         Finish-Script 1
     }

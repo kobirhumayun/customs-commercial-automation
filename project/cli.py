@@ -95,6 +95,7 @@ from project.workflows.run_index import list_recovery_candidates, list_workflow_
 from project.workflows.run_handoff_index import list_run_handoffs
 from project.workflows.workflow_handoff_index import list_workflow_handoffs
 from project.workflows.operator_queue import build_operator_queue
+from project.workflows.run_failure_explanation import build_run_failure_explanation
 from project.workflows.run_recovery_precheck import build_recovery_precheck
 from project.workflows.recovery import assess_recovery
 from project.workflows.recovery_packet import build_workflow_recovery_packet
@@ -148,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_report_manual_verification(args)
     if args.command == "report-run-status":
         return _handle_report_run_status(args)
+    if args.command == "explain-run-failure":
+        return _handle_explain_run_failure(args)
     if args.command == "list-runs":
         return _handle_list_runs(args)
     if args.command == "list-run-handoffs":
@@ -621,6 +624,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run id whose current status should be summarized.",
     )
     report_run_status_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
+    explain_run_failure_parser = subparsers.add_parser(
+        "explain-run-failure",
+        help="Explain the primary causes behind a stopped or attention-required run.",
+    )
+    explain_run_failure_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    explain_run_failure_parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the local TOML config.",
+    )
+    explain_run_failure_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose failure causes should be explained.",
+    )
+    explain_run_failure_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2743,6 +2773,39 @@ def _handle_report_run_status(args: argparse.Namespace) -> int:
             run_id=args.run_id,
         )
         payload = summarize_run_status(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
+            artifact_paths=artifact_paths,
+        )
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_explain_run_failure(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        payload = build_run_failure_explanation(
             run_report=run_report,
             mail_outcomes=mail_outcomes,
             staged_write_plan=staged_write_plan,

@@ -128,6 +128,12 @@ It also writes a timestamped launcher log under `D:\customs-automation\reports\l
 For normal live use, the launcher now uses a stable document root such as `D:\customs-automation\documents-live-click` directly rather than creating a timestamped document-root subfolder per run. That keeps all documents for the same LC/SC under the same canonical family folder:
 `Year / Buyer Name / LC-or-SC Number / All Attachments`.
 
+If a run stops, use this read-only explanation command first. It shows the primary cause, related secondary causes, affected mail subjects, workbook row/column details, and suggested next steps:
+
+```powershell
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+```
+
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
 

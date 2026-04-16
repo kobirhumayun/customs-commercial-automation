@@ -1134,6 +1134,143 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["duplicate_summary"]["duplicate_in_workbook_file_count"], 1)
         self.assertEqual(payload["write_disposition_counts"]["mixed_duplicate_and_new_writes"], 1)
 
+    def test_explain_run_failure_command_prints_primary_causes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-123",
+            )
+            artifact_paths.discrepancies_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-123",
+                        "workflow_id": "export_lc_sc",
+                        "severity": "hard_block",
+                        "code": "workbook_target_prevalidation_failed",
+                        "message": "Staged workbook target failed prevalidation against the live workbook snapshot.",
+                        "mail_id": "mail-1",
+                        "details": {
+                            "row_index": 17,
+                            "column_key": "bangladesh_bank_ref",
+                            "column_index": 33,
+                            "observed_value": "2300050126270133",
+                            "expected_post_write_value": "2300050126270133",
+                            "failure_reason": "row_eligibility_failed",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            artifact_paths.target_probes_path.write_text("", encoding="utf-8")
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-29T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=[],
+                write_phase_status=WritePhaseStatus.HARD_BLOCKED_NO_WRITE,
+                print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.VALIDATED,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=False,
+                    eligible_for_mail_move=False,
+                    source_entry_id="entry-1",
+                    subject_raw="IP-LC-2925-L-KENPARK BANGLADESH APPAREL PRIVATE LTD",
+                    sender_address="a@example.com",
+                    write_disposition="new_writes_staged",
+                )
+            ]
+            staged_write_plan = [
+                WriteOperation(
+                    write_operation_id="op-file",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    operation_index_within_mail=0,
+                    sheet_name="Sheet1",
+                    row_index=17,
+                    column_key="file_no",
+                    expected_pre_write_value=None,
+                    expected_post_write_value="P/26/0669",
+                    row_eligibility_checks=[],
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, staged_write_plan),
+            ):
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "explain-run-failure",
+                            "export_lc_sc",
+                            "--config",
+                            str(config_path),
+                            "--run-id",
+                            "run-123",
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["overall_status"], "attention_required")
+        self.assertEqual(payload["primary_cause_count"], 1)
+        cause = payload["primary_causes"][0]
+        self.assertEqual(cause["category"], "workbook_prevalidation")
+        self.assertEqual(cause["workbook_target"]["row_index"], 17)
+        self.assertEqual(cause["workbook_target"]["file_number"], "P/26/0669")
+        self.assertIn("append row", cause["operator_hint"])
+
     def test_list_runs_command_prints_recent_run_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
