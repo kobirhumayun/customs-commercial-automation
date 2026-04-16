@@ -240,6 +240,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 |---|---|---|---|---|
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
+| `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header required; ERP `Ship. Remarks` may be blank; target blank |
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
