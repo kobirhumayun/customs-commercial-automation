@@ -33,6 +33,7 @@ For normal phase-1 operation, the primary operator commands are:
 - `execute-print`
 - `acknowledge-partial-print` when Acrobat times out after physical paper output
 - `execute-mail-moves`
+- `explain-run-failure` when a run stops and the operator needs the exact cause
 - `recover-run` when a prior run is uncertain or interrupted
 
 The expected terminal paths are:
@@ -54,6 +55,8 @@ Before treating a workstation/configuration as release-ready for daily use, conf
   write committed, print completed, and mail move completed
 - operators know the partial-print recovery command:
   `acknowledge-partial-print`
+- operators know the stopped-run diagnostic command:
+  `explain-run-failure`
 
 ## New Year Setup
 At the start of a new workbook year, place the real yearly master workbook into the configured `workbooks` folder before running live workbook commands.
@@ -98,13 +101,15 @@ Use this as the normal day-to-day workflow guide after release:
 3. If `validate-run` commits new writes and printable documents exist, run `plan-print` and `execute-print`.
 4. If `execute-print` completes, run `execute-mail-moves`.
 5. If the mail is duplicate-only and no print is required, move directly to `execute-mail-moves` when the run is move-eligible.
-6. If any phase is uncertain or interrupted, stop and use the recovery path:
+6. If a run stops with a hard block or no-write status, run `explain-run-failure` first to identify the exact cause.
+7. If any phase is uncertain or interrupted, stop and use the recovery path:
    `recover-run` or `acknowledge-partial-print`
 
 In short:
 - every cycle centers on `validate-run`
 - print commands are conditional
 - mail moves are terminal-path commands
+- `explain-run-failure` is the first diagnostic command for stopped runs
 - recovery commands are exception-only
 
 ## One-Click Operator Launcher
