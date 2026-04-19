@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from project.models import SavedDocument
+
+if TYPE_CHECKING:
+    from project.workflows.ud_ip_exp.matching import UDAllocationResult
 
 
 class UDIPEXPDocumentKind(StrEnum):
@@ -61,6 +64,7 @@ class EXPDocumentPayload(UDIPEXPDocumentPayload):
 class UDIPEXPWorkflowPayload:
     documents: list[UDIPEXPDocumentPayload]
     saved_documents: list[SavedDocument] = field(default_factory=list)
+    ud_allocation_result: UDAllocationResult | None = None
 
 
 def normalize_quantity_unit(unit: str) -> str:

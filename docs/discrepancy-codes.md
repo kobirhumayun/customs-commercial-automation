@@ -79,6 +79,8 @@ Every discrepancy payload should include:
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `ud_candidate_tie_after_full_tiebreak` | `hard_block` | ud_ip_exp | UD row-combination selection tied after all deterministic keys. |
+| `ud_required_document_missing` | `hard_block` | ud_ip_exp | No UD document payload was available for deterministic UD processing. |
+| `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
 | `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row already has a non-blank shared-column value and append/duplicate behavior is not yet business-confirmed. |
 
