@@ -130,6 +130,9 @@ def _build_payload(
             unit=saved_document.extracted_quantity_unit,
         )
 
+    lc_sc_number = normalize_lc_sc_number(saved_document.extracted_lc_sc_number or "") or _lc_sc_number_from_document_number(
+        saved_document.extracted_document_number
+    )
     return payload_class(
         document_number=DocumentExtractionField(
             value=saved_document.extracted_document_number,
@@ -146,10 +149,22 @@ def _build_payload(
             else None
         ),
         lc_sc_number=DocumentExtractionField(
-            value=normalize_lc_sc_number(saved_document.extracted_lc_sc_number or "") or "",
+            value=lc_sc_number or "",
             confidence=saved_document.extracted_lc_sc_confidence,
             provenance=dict(saved_document.extracted_lc_sc_provenance or {}),
         ),
         quantity=quantity,
         source_saved_document_id=saved_document.saved_document_id,
     )
+
+
+def _lc_sc_number_from_document_number(document_number: str | None) -> str | None:
+    if not document_number:
+        return None
+    segments = document_number.split("-")
+    if len(segments) < 3:
+        return None
+    prefix = segments[1].strip().upper()
+    if prefix not in {"LC", "SC"}:
+        return None
+    return normalize_lc_sc_number(f"{prefix}-{segments[2].strip()}")

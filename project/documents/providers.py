@@ -14,6 +14,12 @@ from project.erp.normalization import normalize_lc_sc_date, normalize_lc_sc_numb
 
 
 LC_SC_CANDIDATE_PATTERN = re.compile(r"(?i)\b(?:LC|SC)\s*[- ]\s*[A-Z0-9]+(?:\s*-\s*[A-Z0-9]+){0,8}\b")
+LC_SC_LABEL_PATTERN = re.compile(
+    r"(?i)\b(?:L|S)\s*/?\s*C\s*(?:NO|NUMBER)\.?\s*[:\-|]?\s*"
+)
+LC_SC_VALUE_BOUNDARY_PATTERN = re.compile(
+    r"(?i)(?=\b(?:UD|IP|EXP)\s*(?:NO|NUMBER|DATE)\b|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b)"
+)
 PI_CANDIDATE_PATTERN = re.compile(r"(?i)\bPDL\s*[- ]*\s*\d{2}\s*[- ]*\s*\d{1,4}(?:\s*[- ]*\s*R\d+)?\b")
 AMENDMENT_CANDIDATE_PATTERN = re.compile(
     r"(?i)\b(?:AMD|AMND|AMENDMENT)(?:\s*(?:NO|NUMBER|#)\.?\s*)?[-:|]?\s*0*(\d{1,3})\b"
@@ -21,12 +27,18 @@ AMENDMENT_CANDIDATE_PATTERN = re.compile(
 UD_IP_EXP_CANDIDATE_PATTERN = re.compile(
     r"(?i)\b(?:UD|IP|EXP)(?:[\s./\\_:;,\-]+[A-Z0-9]+){1,10}\b"
 )
+UD_IP_EXP_DOCUMENT_LABEL_PATTERN = re.compile(
+    r"(?i)\b(?:UD|IP|EXP)\s*(?:NO|NUMBER)\.?\s*[:\-|]?\s*"
+)
+UD_IP_EXP_DOCUMENT_VALUE_BOUNDARY_PATTERN = re.compile(
+    r"(?i)(?=\b(?:UD|IP|EXP)\s*DATE\b|\bL\s*/?\s*C\s*NO\b|\bS\s*/?\s*C\s*NO\b|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b)"
+)
 DOCUMENT_DATE_LABEL_PATTERN = re.compile(
-    r"(?i)\b(?:UD|IP|EXP)?\s*DATE\b\s*[:\-]?\s*"
+    r"(?i)\b(?:UD|IP|EXP)?\s*DATE\b\s*[:\-|]?\s*"
     r"(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}-[A-Z]{3}-\d{2,4})"
 )
 QUANTITY_LABEL_PATTERN = re.compile(
-    r"(?i)\b(?:QTY|QUANTITY)\b\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(YDS?|YARDS?|MTR|METER|METERS|METRE|METRES)\b"
+    r"(?i)\b(?:QTY|QUANTITY)\b\s*[:\-|]?\s*([\d,]+(?:\.\d+)?)\s*(YDS?|YARDS?|MTRS?|METER|METERS|METRE|METRES)\b"
 )
 _UD_IP_EXP_PREFIX_RE = re.compile(r"^(UD|IP|EXP)(?:[\s./\\_:;,\-]+|$)(.*)$")
 _UD_IP_EXP_SEPARATOR_RE = re.compile(r"[\s/\\_\-]+")
@@ -1557,8 +1569,13 @@ def _safe_int(value: object, *, default: int | None = None) -> int | None:
 
 
 def _first_lc_sc_match(text: str) -> tuple[str, int] | None:
+    labeled_match = _first_labeled_lc_sc_match(text)
+    if labeled_match is not None:
+        return labeled_match
     seen: set[str] = set()
     for match in LC_SC_CANDIDATE_PATTERN.finditer(text):
+        if _is_embedded_ud_ip_exp_lc_sc_candidate(text, match.start()):
+            continue
         normalized = normalize_lc_sc_number(match.group(0))
         if normalized is None or normalized in seen:
             continue
@@ -1568,10 +1585,13 @@ def _first_lc_sc_match(text: str) -> tuple[str, int] | None:
 
 
 def _first_ud_ip_exp_document_match(text: str) -> tuple[str, int] | None:
+    labeled_match = _first_labeled_ud_ip_exp_document_match(text)
+    if labeled_match is not None:
+        return labeled_match
     seen: set[str] = set()
     for match in UD_IP_EXP_CANDIDATE_PATTERN.finditer(text):
         normalized = _normalize_ud_ip_exp_document_number(match.group(0))
-        if normalized is None or normalized in seen:
+        if normalized is None or normalized in seen or _is_label_only_ud_ip_exp_identifier(normalized):
             continue
         seen.add(normalized)
         return normalized, match.start()
@@ -1655,6 +1675,70 @@ def _normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
     return f"{prefix}-{'-'.join(body_tokens)}"
 
 
+def _first_labeled_ud_ip_exp_document_match(text: str) -> tuple[str, int] | None:
+    for match in UD_IP_EXP_DOCUMENT_LABEL_PATTERN.finditer(text):
+        trailing_text = text[match.end() :]
+        field_text = _slice_labeled_ud_ip_exp_value(trailing_text)
+        if not field_text.strip():
+            continue
+        candidate_match = UD_IP_EXP_CANDIDATE_PATTERN.search(field_text)
+        if candidate_match is None or candidate_match.start() > 12:
+            continue
+        normalized = _normalize_ud_ip_exp_document_number(candidate_match.group(0))
+        if normalized is None or _is_label_only_ud_ip_exp_identifier(normalized):
+            continue
+        return normalized, match.end() + candidate_match.start()
+    return None
+
+
+def _slice_labeled_ud_ip_exp_value(text: str) -> str:
+    lines = text.splitlines()
+    first_line = lines[0] if lines else text
+    boundary = UD_IP_EXP_DOCUMENT_VALUE_BOUNDARY_PATTERN.search(first_line)
+    if boundary is not None:
+        return first_line[: boundary.start()]
+    return first_line
+
+
+def _first_labeled_lc_sc_match(text: str) -> tuple[str, int] | None:
+    for match in LC_SC_LABEL_PATTERN.finditer(text):
+        trailing_text = text[match.end() :]
+        field_text = _slice_labeled_lc_sc_value(trailing_text)
+        if not field_text.strip():
+            continue
+        candidate_match = LC_SC_CANDIDATE_PATTERN.search(field_text)
+        if candidate_match is None or candidate_match.start() > 8:
+            continue
+        normalized = normalize_lc_sc_number(candidate_match.group(0))
+        if normalized is None:
+            continue
+        return normalized, match.end() + candidate_match.start()
+    return None
+
+
+def _slice_labeled_lc_sc_value(text: str) -> str:
+    lines = text.splitlines()
+    first_line = lines[0] if lines else text
+    boundary = LC_SC_VALUE_BOUNDARY_PATTERN.search(first_line)
+    if boundary is not None:
+        return first_line[: boundary.start()]
+    return first_line
+
+
+def _is_embedded_ud_ip_exp_lc_sc_candidate(text: str, start_index: int) -> bool:
+    if start_index <= 0:
+        return False
+    prefix_window = text[max(0, start_index - 12) : start_index]
+    return re.search(r"(?i)(?:UD|IP|EXP)[\s./\\_:;,\-]+$", prefix_window) is not None
+
+
+def _is_label_only_ud_ip_exp_identifier(value: str) -> bool:
+    segments = [segment.strip().upper() for segment in value.split("-") if segment.strip()]
+    if len(segments) < 2:
+        return False
+    return segments[1] in {"NO", "NUMBER", "DATE"}
+
+
 def _apply_ud_ip_exp_identifier_primitives(raw_value: str) -> str:
     cleaned = "".join(_clean_ud_ip_exp_identifier_char(character) for character in str(raw_value))
     return re.sub(r"\s+", " ", cleaned).strip().upper()
@@ -1672,7 +1756,7 @@ def _normalize_quantity_unit(raw_value: str) -> str:
     normalized = raw_value.strip().upper()
     if normalized in {"YD", "YARD", "YARDS"}:
         return "YDS"
-    if normalized in {"METER", "METERS", "METRE", "METRES"}:
+    if normalized in {"MTR", "MTRS", "METER", "METERS", "METRE", "METRES"}:
         return "MTR"
     return normalized
 

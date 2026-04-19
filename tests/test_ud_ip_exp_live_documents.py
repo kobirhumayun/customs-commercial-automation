@@ -141,6 +141,263 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             "ud_document",
         )
 
+    def test_prepare_live_ud_ip_exp_documents_infers_lc_sc_from_document_number_when_field_missing(self) -> None:
+        mail = _mail(
+            "entry-live-002",
+            "UD-LC-0043-ANANTA",
+            attachments=[{"attachment_name": "UD-LC-0043-ANANTA.pdf"}],
+        )
+        workbook_snapshot = _full_snapshot(
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={
+                        1: "LC-0043",
+                        2: "ANANTA GARMENTS LTD",
+                        3: "2026-01-10",
+                        4: "1000 YDS",
+                        5: "",
+                        6: "",
+                        7: "",
+                    },
+                )
+            ]
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_date="2026-04-01",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-002",
+                mail=mail,
+                workbook_snapshot=workbook_snapshot,
+                document_root=root,
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud infer\n"}
+                ),
+                analysis_provider=Provider(),
+            )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(len(result.classified_documents.documents), 1)
+        self.assertEqual(result.classified_documents.documents[0].lc_sc_number.value, "LC-0043")
+
+    def test_prepare_live_ud_ip_exp_documents_hard_blocks_mixed_live_document_families(self) -> None:
+        mail = _mail(
+            "entry-live-003",
+            "UD-LC-0043-ANANTA",
+            attachments=[
+                {"attachment_name": "UD-LC-0043-ONE.pdf"},
+                {"attachment_name": "UD-LC-9999-TWO.pdf"},
+            ],
+        )
+        workbook_snapshot = _full_snapshot(
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={
+                        1: "LC-0043",
+                        2: "ANANTA GARMENTS LTD",
+                        3: "2026-01-10",
+                        4: "1000 YDS",
+                        5: "",
+                        6: "",
+                        7: "",
+                    },
+                )
+            ]
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
+                    return SavedDocumentAnalysis(
+                        analysis_basis="fixture",
+                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_date="2026-04-01",
+                        extracted_lc_sc_number="LC-0043",
+                        extracted_quantity="1000",
+                        extracted_quantity_unit="YDS",
+                    )
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-9999-TWO",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-9999",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-003",
+                mail=mail,
+                workbook_snapshot=workbook_snapshot,
+                document_root=root,
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (mail.entry_id, 0): b"%PDF-1.4\nud one\n",
+                        (mail.entry_id, 1): b"%PDF-1.4\nud two\n",
+                    }
+                ),
+                analysis_provider=Provider(),
+            )
+
+        self.assertEqual(len(result.document_save_result.issues), 1)
+        self.assertEqual(result.document_save_result.issues[0].code, "document_storage_path_unresolved")
+        self.assertEqual(
+            result.document_save_result.issues[0].details["lc_sc_numbers"],
+            ["LC-0043", "LC-9999"],
+        )
+        self.assertEqual(
+            [
+                evidence["document_number"]
+                for evidence in result.document_save_result.issues[0].details["document_evidence"]
+            ],
+            ["UD-LC-0043-ONE", "UD-LC-9999-TWO"],
+        )
+        self.assertEqual(
+            [
+                evidence["attachment_name"]
+                for evidence in result.document_save_result.issues[0].details["document_evidence"]
+            ],
+            ["UD-LC-0043-ONE.pdf", "UD-LC-9999-TWO.pdf"],
+        )
+
+    def test_prepare_live_ud_ip_exp_documents_hard_blocks_unresolved_family_with_attachment_evidence(self) -> None:
+        mail = _mail(
+            "entry-live-004",
+            "UD attachment unresolved",
+            attachments=[{"attachment_name": "ud-unresolved.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-REFERENCE-ONLY",
+                    extracted_document_date="2026-04-01",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-004",
+                mail=mail,
+                workbook_snapshot=_full_snapshot(rows=[]),
+                document_root=root,
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud unresolved\n"}
+                ),
+                analysis_provider=Provider(),
+            )
+
+        self.assertEqual(len(result.document_save_result.issues), 1)
+        self.assertEqual(result.document_save_result.issues[0].code, "document_storage_path_unresolved")
+        self.assertEqual(result.document_save_result.issues[0].details["lc_sc_numbers"], [])
+        self.assertEqual(len(result.document_save_result.issues[0].details["document_evidence"]), 1)
+        self.assertEqual(
+            {key: value for key, value in result.document_save_result.issues[0].details["document_evidence"][0].items() if key != "saved_document_id"},
+            {
+                "attachment_name": "ud-unresolved.pdf",
+                "normalized_filename": "ud-unresolved.pdf",
+                "document_kind": "UD",
+                "document_number": "UD-REFERENCE-ONLY",
+                "lc_sc_number": "",
+                "document_date": "2026-04-01",
+                "quantity": "1000 YDS",
+            },
+        )
+        self.assertTrue(result.document_save_result.issues[0].details["document_evidence"][0]["saved_document_id"])
+
+    def test_validate_run_snapshot_serializes_live_document_resolution_evidence(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail(
+            "entry-live-005",
+            "UD mixed family live validation",
+            attachments=[
+                {"attachment_name": "UD-LC-0043-ONE.pdf"},
+                {"attachment_name": "UD-LC-9999-TWO.pdf"},
+            ],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
+                    return SavedDocumentAnalysis(
+                        analysis_basis="fixture",
+                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_date="2026-04-01",
+                        extracted_lc_sc_number="LC-0043",
+                        extracted_quantity="1000",
+                        extracted_quantity_unit="YDS",
+                    )
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-9999-TWO",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-9999",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [mail]),
+                rule_pack=rule_pack,
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        )
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (mail.entry_id, 0): b"%PDF-1.4\nud one\n",
+                        (mail.entry_id, 1): b"%PDF-1.4\nud two\n",
+                    }
+                ),
+                document_root=Path(temp_dir),
+                document_analysis_provider=Provider(),
+            )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+        discrepancy = next(
+            item
+            for item in validation_result.mail_outcomes[0].discrepancies
+            if item["code"] == "document_storage_path_unresolved"
+        )
+        self.assertEqual(discrepancy["code"], "document_storage_path_unresolved")
+        self.assertEqual(discrepancy["details"]["lc_sc_numbers"], ["LC-0043", "LC-9999"])
+        self.assertEqual(
+            [evidence["document_number"] for evidence in discrepancy["details"]["document_evidence"]],
+            ["UD-LC-0043-ONE", "UD-LC-9999-TWO"],
+        )
+
 
 def _mail(entry_id: str, subject: str, *, attachments: list[dict] | None = None):
     return build_email_snapshot(

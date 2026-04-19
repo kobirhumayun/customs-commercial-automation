@@ -64,9 +64,15 @@ def prepare_live_ud_ip_exp_documents(
         saved_documents=staged_result.saved_documents,
         analysis_provider=analysis_provider,
     )
+    resolution_documents = list(documents_override or staged_classified.documents)
+    document_evidence = _build_document_resolution_evidence(
+        saved_documents=staged_classified.saved_documents,
+        documents=resolution_documents,
+    )
     family = _resolve_family_from_documents(
-        documents=list(documents_override or staged_classified.documents),
+        documents=resolution_documents,
         workbook_snapshot=workbook_snapshot,
+        document_evidence=document_evidence,
     )
     if isinstance(family, DocumentSaveIssue):
         _cleanup_directory(staging_directory)
@@ -198,6 +204,7 @@ def _resolve_family_from_documents(
     *,
     documents,
     workbook_snapshot: WorkbookSnapshot | None,
+    document_evidence: list[dict[str, object]],
 ) -> ERPFamily | DocumentSaveIssue:
     normalized_lc_sc_numbers = {
         normalize_lc_sc_number(document.lc_sc_number.value)
@@ -210,21 +217,27 @@ def _resolve_family_from_documents(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path could not be resolved without an extracted LC/SC number.",
-            details={"lc_sc_numbers": []},
+            details={"lc_sc_numbers": [], "document_evidence": document_evidence},
         )
     if len(normalized_lc_sc_numbers) != 1:
         return DocumentSaveIssue(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path requires one resolved LC/SC family per mail.",
-            details={"lc_sc_numbers": sorted(str(value) for value in normalized_lc_sc_numbers)},
+            details={
+                "lc_sc_numbers": sorted(str(value) for value in normalized_lc_sc_numbers),
+                "document_evidence": document_evidence,
+            },
         )
     if workbook_snapshot is None:
         return DocumentSaveIssue(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path requires a workbook snapshot for family resolution.",
-            details={"lc_sc_numbers": sorted(str(value) for value in normalized_lc_sc_numbers)},
+            details={
+                "lc_sc_numbers": sorted(str(value) for value in normalized_lc_sc_numbers),
+                "document_evidence": document_evidence,
+            },
         )
 
     mapping = resolve_ud_ip_exp_storage_header_mapping(workbook_snapshot)
@@ -233,7 +246,7 @@ def _resolve_family_from_documents(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path could not resolve workbook family headers deterministically.",
-            details={"sheet_name": workbook_snapshot.sheet_name},
+            details={"sheet_name": workbook_snapshot.sheet_name, "document_evidence": document_evidence},
         )
 
     expected_lc_sc_number = next(iter(normalized_lc_sc_numbers))
@@ -247,7 +260,7 @@ def _resolve_family_from_documents(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path could not find workbook rows for the extracted LC/SC family.",
-            details={"lc_sc_number": expected_lc_sc_number},
+            details={"lc_sc_number": expected_lc_sc_number, "document_evidence": document_evidence},
         )
 
     buyer_name = _canonical_workbook_buyer_name(matching_rows[0], mapping)
@@ -257,7 +270,7 @@ def _resolve_family_from_documents(
             code="document_storage_path_unresolved",
             severity=FinalDecision.HARD_BLOCK,
             message="UD/IP/EXP attachment storage path requires workbook buyer and LC issue date values.",
-            details={"lc_sc_number": expected_lc_sc_number},
+            details={"lc_sc_number": expected_lc_sc_number, "document_evidence": document_evidence},
         )
 
     for row in matching_rows[1:]:
@@ -269,6 +282,7 @@ def _resolve_family_from_documents(
                 details={
                     "lc_sc_number": expected_lc_sc_number,
                     "row_indexes": [match.row_index for match in matching_rows],
+                    "document_evidence": document_evidence,
                 },
             )
 
@@ -286,6 +300,72 @@ def _canonical_workbook_buyer_name(row: WorkbookRow, mapping: dict[str, int]) ->
 
 def _canonical_workbook_issue_date(row: WorkbookRow, mapping: dict[str, int]) -> str | None:
     return normalize_lc_sc_date(row.values.get(mapping["lc_issue_date"], ""))
+
+
+def _build_document_resolution_evidence(
+    *,
+    saved_documents: list[SavedDocument],
+    documents: list[UDIPEXPDocumentPayload],
+) -> list[dict[str, object]]:
+    documents_by_saved_document_id = {
+        document.source_saved_document_id: document
+        for document in documents
+        if document.source_saved_document_id
+    }
+    evidence: list[dict[str, object]] = []
+    for saved_document in sorted(
+        saved_documents,
+        key=lambda item: (
+            item.attachment_index if item.attachment_index is not None else 10**6,
+            item.normalized_filename,
+        ),
+    ):
+        document = documents_by_saved_document_id.get(saved_document.saved_document_id)
+        quantity_value = _document_evidence_quantity(saved_document=saved_document, document=document)
+        evidence.append(
+            {
+                "attachment_name": saved_document.attachment_name,
+                "normalized_filename": saved_document.normalized_filename,
+                "saved_document_id": saved_document.saved_document_id,
+                "document_kind": document.document_kind.value if document is not None else None,
+                "document_number": (
+                    document.document_number.value
+                    if document is not None
+                    else (saved_document.extracted_document_number or "")
+                ),
+                "lc_sc_number": (
+                    document.lc_sc_number.value
+                    if document is not None
+                    else (normalize_lc_sc_number(saved_document.extracted_lc_sc_number or "") or "")
+                ),
+                "document_date": (
+                    document.document_date.value
+                    if document is not None and document.document_date is not None
+                    else (saved_document.extracted_document_date or "")
+                ),
+                "quantity": quantity_value,
+            }
+        )
+    return evidence
+
+
+def _document_evidence_quantity(
+    *,
+    saved_document: SavedDocument,
+    document: UDIPEXPDocumentPayload | None,
+) -> str:
+    if document is not None and document.quantity is not None:
+        return f"{_format_decimal_string(document.quantity.amount)} {document.quantity.unit}"
+    if saved_document.extracted_quantity and saved_document.extracted_quantity_unit:
+        return f"{saved_document.extracted_quantity} {saved_document.extracted_quantity_unit}"
+    return ""
+
+
+def _format_decimal_string(value) -> str:
+    normalized = format(value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized or "0"
 
 
 def _move_staged_documents_to_final_directory(
