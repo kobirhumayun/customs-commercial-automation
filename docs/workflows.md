@@ -16,7 +16,62 @@ Every CLI workflow should follow the same control shape:
 10. batch print only after the workbook-write phase completes successfully for the eligible mails
 11. perform post-run mail moves for successful mails only
 
+For production export attachment storage, the configured `document_root` must be a stable base path, not a per-run timestamped directory. The canonical family hierarchy beneath that base path is what determines where later amendments and related documents are stored:
+`Year / Buyer Name / LC-or-SC Number / All Attachments`.
+
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
+
+### Operator setup helper: Outlook folder EntryIDs
+Live Outlook workflows require real folder `EntryID` values in local config for keys such as:
+- `source_working_folder_entry_id`
+- `destination_success_entry_id`
+
+Operators may discover these values with the read-only inspection command:
+
+```powershell
+uv run python -m project inspect-outlook-folders --outlook-profile "outlook"
+```
+
+Optional narrowing flags:
+- `--contains <text>` filters by folder name, full folder path, or EntryID
+- `--max-depth <n>` limits recursion depth for large mailboxes
+
+The command returns JSON records containing `display_name`, `folder_path`, `entry_id`, `depth`, `store_name`, and `parent_entry_id`. These records are intended for manual config setup only; the command does not create run artifacts or mutate Outlook state.
+
+### Operator diagnostic helper: stopped runs
+If a run stops with `hard_blocked_no_write`, `uncertain_not_committed`, `hard_blocked`, or another attention-required phase status, operators should first run the read-only explanation command:
+
+```powershell
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+```
+
+The command summarizes primary causes separately from secondary effects by reading persisted run artifacts such as `discrepancies.jsonl`, `mail_outcomes.jsonl`, `target_probes.jsonl`, and `staged_write_plan.json`. It must not mutate Outlook, ERP, workbook, print, mail-move, or run artifacts. It is the preferred operator-facing first step before deciding whether the correct action is to fix input mails, clean a partial workbook row, use recovery, or simply rerun after correcting the environment.
+
+### Operator setup helper: ERP download debugging
+When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+```
+
+The command accepts repeated `--fill SELECTOR=VALUE` inputs plus optional selectors for submit, post-submit wait state, download menu, and download format click.
+
+For stable local reuse, the same fill values may be stored in config under:
+- `erp_report_fill_values = ["SELECTOR=VALUE", ...]`
+
+Typical example:
+
+```powershell
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+  --fill "#fromDate=2026-03-01" `
+  --fill "#toDate=2026-03-31" `
+  --submit-selector "#btnShow" `
+  --post-submit-wait-selector "#downloadDropdown" `
+  --download-menu-selector "#downloadDropdown" `
+  --download-format-selector "text=CSV"
+```
+
+The debug run writes page HTML, a full-page screenshot, and any downloaded export file under `report_root/erp_debug/...`. This command is intended for selector discovery and evidence capture only; it does not create run artifacts or stage workflow validation.
 
 ### Shared decision and phase-state enums (normative)
 
@@ -44,7 +99,8 @@ Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fu
   2. `planned` → `printing`
   3. `printing` → `completed`
   4. `planned` or `printing` → `uncertain_incomplete` (runtime interruption)
-  5. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
+  5. `uncertain_incomplete` → `printing` (resume from persisted partial print progress)
+  6. `not_started` or `planned` → `hard_blocked` (cross-phase gate or eligibility failure)
 
 #### `mail_move_phase_status` enum
 - Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
@@ -235,8 +291,12 @@ Recovery must produce exactly one outcome:
 When recovery outcome is `safe resume`, perform these idempotency gates before resuming:
 1. **Print idempotency**
    - each print group has a stable id derived from `(run_id, mail_id, print_group_index, document_path_hash)`
+   - each print group marker may be either `completed` or `partial_incomplete`
+   - a `partial_incomplete` marker must persist `printed_document_path_hashes` as a deterministic prefix of the planned `document_path_hashes`
+   - if Acrobat timed out after physical paper output, operators may advance that deterministic prefix manually with `acknowledge-partial-print`
    - resume must skip any group whose completion marker exists and is hash-consistent
-   - resume may print only groups without completion markers
+   - resume may continue a `partial_incomplete` print group only from the remaining suffix of `document_path_hashes`
+   - if operators confirm that all planned PDFs physically printed, `acknowledge-partial-print --printed-count <total>` may finalize the marker as `completed`; one final `execute-print` pass must then be used to close the run metadata without sending more print commands
    - if marker exists but hash/metadata differs from persisted plan, hard-block
 2. **Mail-move idempotency**
    - each mail move has a stable operation id derived from `(run_id, entry_id, destination_folder)`
@@ -471,22 +531,23 @@ Mail-level:
 
 ### Inputs
 - Outlook folder: `working` after operator triage from `temp-export`; snapshot all messages in the folder when the CLI is triggered
-- ERP report: `rptDateWiseLCRegister`
-- Attachments: LC/SC PDFs and PI PDFs
+- ERP report: `RptCommercialExport/DateWiseLCRegisterForDocuments`
+- Attachments: all PDF attachments are saved; LC/SC and PI extraction/classification is informational only
 
 ### Deterministic checks
 - parse subject into document type, LC/SC end sequence, buyer, and optional suffix
 - extract all body file numbers matching `P/<yy>/<nnnn>`
 - validate every extracted file number through ERP lookup and pathing rules while retaining all file numbers for audit
-- define LC/SC family consistency using LC/SC number, normalized buyer, and LC/SC date
+- deduplicate repeated mentions of the same canonical file number within one mail body before ERP lookup and workbook staging
+- define ERP family consistency using ERP `LC No.`, normalized buyer, and canonicalized ERP `LC DT.`
 - canonical row selection follows ERP row order
 - the first occurrence row is the canonical row for that file number/family context
 - canonical row fields drive folder path construction, workbook mapping, and reporting metadata
 - duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen
 - hard-block if the extracted file numbers do not resolve to the same LC/SC family; any partial family match is a hard block
 - normalize ERP buyer name by splitting on `\`, trimming whitespace, and trimming trailing periods
-- hard-block if normalized subject buyer and LC/SC number do not exactly match ERP-derived values
-- identify base/amendment context from ERP `Amd No`, clause text, and attachment naming patterns
+- subject parsing and subject-to-ERP comparison remain optional/advisory only; ERP rows selected from body file numbers are final
+- attachment naming and OCR-derived signals may be recorded for reporting, but they do not block processing
 
 Example (canonical selection): if two ERP rows are true-equivalent for `P/26/0042` and appear as row 118 then row 241, row 118 remains canonical and its fields are used for folder pathing, workbook mapping, and reporting metadata.
 
@@ -505,22 +566,33 @@ Use ERP fields to populate:
 - `Lien Bank` ← `Nego Bank`
 - `Master L/C No.` ← `Master LC No.`
 - `Master L/C Issue Dt.` ← `M.L/C Date`
+- `Bangladesh Bank Ref.` ← `Ship. Remarks`
 - `Commercial File No.` ← `File No.`
 
 Note: the master workbook intentionally contains duplicate `Amount` headers. The export workflow must write only to column 6. Column 22 `Amount` is reserved for Import LC (Back-to-Back) workflow writes.
+The `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are mandatory for export mapping. The ERP `Ship. Remarks` row value may be blank; in that case the workflow writes a blank workbook value and does not hard-block the mail for that field alone.
 
 ### No-write rules
-- subject mismatch
 - any extracted file number is missing its required ERP row
 - any partial family match across LC/SC number, normalized buyer, and LC/SC date
 - duplicate file number already present when workflow expects skip
-- ambiguous document identity not resolved by rules
+- duplicate file number already staged earlier in the same run when workflow expects skip
 - any incomplete validation needed for append/skip decision
+
+### Duplicate-only terminal behavior
+- If every canonical file number in a mail is already present in the workbook, the mail outcome is `duplicate_only_noop`.
+- A `duplicate_only_noop` mail stages no workbook writes and requires no print planning or print execution.
+- Subject parsing and subject-to-ERP comparison remain advisory only in this path as well; body file numbers plus ERP rows remain final.
+- A `duplicate_only_noop` mail may still complete the workflow through post-run mail movement once validation succeeds.
+- Duplicate-only handling must be visible in run reports, workflow summaries, dashboards, and mail-move receipts.
 
 ### Batch execution behavior
 - blocked emails remain in `working`
-- successfully processed export-team emails move to `UD and LC` only after the batch workbook-write and batch print phases finish
-- print batches are built from successful mails in the active run snapshot, using only newly saved PDFs
+- successfully processed export-team emails with new writes move to `UD and LC` only after the batch workbook-write and batch print phases finish
+- duplicate-only successful emails may move to `UD and LC` without workbook-write or print completion because no new write or print obligation exists
+- print batches are built from successful mails in the active run snapshot, using all newly saved PDFs
+- duplicate prevention is enforced by canonical file number, not by identical mail subject/body detection
+- if multiple mails in one run contain the same canonical file number, deterministic `mail_iteration_order` decides which mail is evaluated first and later mails must not create an additional workbook row for that file
 
 ## UD / IP / EXP processing
 
@@ -664,7 +736,42 @@ Rows where:
 - within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
-- any print failure must be reported with retry/review metadata
+- live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
+- when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission
+- if `print_printer_name` is configured, that fallback must temporarily switch the Windows default printer to the configured printer, submit the silent job, and then restore the original default printer in `finally`
+- print success in phase 1 means deterministic job submission order only; the workflow does not wait for physical printer completion
+- any print submission failure must be reported with retry/review metadata
+
+### Operator recovery for partial Acrobat timeouts
+- If `execute-print` returns `uncertain_incomplete`, operators must first confirm whether any planned PDFs physically printed after silent submission.
+- If no paper output occurred, rerunning `execute-print` is allowed because no print progress was acknowledged.
+- If one or more leading PDFs physically printed, operators must record that progress before retrying:
+
+```powershell
+uv run python -m project acknowledge-partial-print <workflow_id> --config "<config.toml>" --run-id "<RUN_ID>" --printed-count <N>
+```
+
+- After acknowledgment, rerun `execute-print`; the workflow must resume only from the remaining suffix of the planned print group.
+- If all planned PDFs physically printed across one or more timed-out attempts, operators may acknowledge the full planned count. The marker becomes `completed`, and one final `execute-print` invocation closes the print phase without sending additional Acrobat submission commands.
+- Post-run email moves remain blocked until print phase reaches terminal `completed`.
+
+### Release readiness checklist
+- `report-live-readiness` must return `overall_status = "ready"` before first live use on a workstation/profile
+- Outlook folder `EntryID` values must be copied from `inspect-outlook-folders` into the active TOML
+- ERP download selectors/settings must be validated against the live report form
+- the workbook year, sheet, and header mapping must be confirmed for the active filing cycle
+- if `print_printer_name` is configured, the operator must validate one real silent print cycle on that named printer
+- operators must know that named-printer fallback may temporarily switch the Windows default printer and then restore it automatically
+- before release signoff, at least one full live cycle must reach:
+  `write = committed`, `print = completed`, `mail move = completed`
+
+### Phase 1 released operator note
+- The standard released sequence is:
+  `report-live-readiness` -> `validate-run` -> `plan-print` -> `execute-print` -> `execute-mail-moves`
+- `acknowledge-partial-print` is an exception-path recovery command, not part of the normal happy-path operator flow.
+- Print completion in phase 1 means deterministic silent submission order has completed and the workflow state reached `completed`; it does not mean the system waited for physical paper completion.
+- A run may end in terminal `completed` state while still retaining discrepancy records from earlier failed attempts in the same audit trail. Operators should treat terminal phase statuses as the authoritative state and use discrepancies as historical evidence.
+- In the released export workflow path, daily `validate-run` with `--document-root` saves attachments for printing/storage but does not perform OCR-based saved-document analysis by default.
 
 ## Rule-pack loading contract (shared, normative)
 To prevent workflow divergence, rule packs must be discovered and loaded through one canonical structure.

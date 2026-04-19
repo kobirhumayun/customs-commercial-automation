@@ -39,11 +39,32 @@ Every discrepancy payload should include:
 | `workbook_save_conflict` | `hard_block` | shared | Save conflict during/after write application. |
 | `invalid_phase_state_transition` | `hard_block` | shared | Attempted workflow phase-state transition outside allowed state machine. |
 | `workbook_header_mapping_invalid` | `hard_block` | shared | Required workbook header missing/duplicated/ambiguous for canonical mapping. |
+| `workbook_target_prevalidation_failed` | `hard_block` | shared | A staged workbook target failed live prevalidation before any write attempt. |
+| `workbook_post_write_probe_mismatch` | `hard_block` | shared | A staged workbook target did not match its expected post-write value before commit marker creation. |
+| `workbook_apply_runtime_error` | `hard_block` | shared | A runtime error occurred after write application began and before a commit marker could be created. |
+| `print_adapter_unavailable` | `hard_block` | shared | Print adapter unavailable or not configured for the requested print execution path. |
+| `print_marker_mismatch` | `hard_block` | shared | A persisted print completion marker conflicted with the planned print group identity. |
+| `print_source_document_missing` | `hard_block` | shared | A planned print document path was missing at print execution time. |
+| `print_group_runtime_error` | `hard_block` | shared | A runtime error interrupted print execution for a planned print group. |
+| `mail_move_gate_unsatisfied` | `hard_block` | shared | Mail moves were attempted before required upstream phases reached terminal success. |
+| `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
+| `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |
+| `mail_move_runtime_error` | `hard_block` | shared | A runtime error interrupted mail-move execution for a planned move operation. |
+| `document_storage_path_unresolved` | `hard_block` | shared | Attachment storage path could not be resolved deterministically for the active mail. |
+| `document_save_runtime_error` | `hard_block` | shared | A runtime error interrupted attachment saving before validation completed. |
+| `mail_subject_missing` | `hard_block` | shared | A snapshotted mail is missing a usable subject. |
+| `mail_sender_missing` | `hard_block` | shared | A snapshotted mail is missing a canonical sender address. |
 
 ### Export / import candidate ambiguity
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `export_candidate_tie_after_full_tiebreak` | `hard_block` | export_lc_sc | Export candidate resolution remained tied after all keys. |
+| `export_subject_unparseable` | `hard_block` | export_lc_sc | Export mail subject could not be parsed into prefix, LC/SC number, buyer, and suffix context. |
+| `export_file_number_missing` | `hard_block` | export_lc_sc | Export mail body did not yield any canonical file numbers. |
+| `export_erp_row_missing` | `hard_block` | export_lc_sc | One or more extracted export file numbers did not resolve to a canonical ERP row. |
+| `export_family_inconsistent` | `hard_block` | export_lc_sc | Resolved ERP rows for extracted file numbers did not belong to one LC/SC family. |
+| `export_required_erp_field_missing` | `hard_block` | export_lc_sc | A canonical ERP row is missing one or more fields required for export workbook staging. |
+| `export_subject_family_mismatch` | `hard_block` | export_lc_sc | Parsed export subject fields did not match the verified ERP family. |
 | `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Import candidate resolution remained tied after all keys. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |
 

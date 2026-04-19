@@ -1,0 +1,289 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from project.models.enums import (
+    FinalDecision,
+    MailProcessingStatus,
+    MailMovePhaseStatus,
+    PrintPhaseStatus,
+    WorkflowId,
+    WritePhaseStatus,
+)
+from project.reporting.schemas import (
+    DISCREPANCY_REPORT_SCHEMA_ID,
+    MAIL_REPORT_SCHEMA_ID,
+    MAIL_OUTCOME_RECORD_SCHEMA_ID,
+    REPORT_SCHEMA_VERSION,
+    RUN_REPORT_SCHEMA_ID,
+)
+
+
+@dataclass(slots=True, frozen=True)
+class OperatorContext:
+    operator_id: str
+    username: str
+    host_name: str
+    process_id: int
+
+
+@dataclass(slots=True, frozen=True)
+class ProcessingJob:
+    run_id: str
+    workflow_id: WorkflowId
+    started_at_utc: str
+    operator_id: str
+    mail_iteration_order: list[str]
+    hash_algorithm: str
+    run_start_backup_hash: str
+    staged_write_plan_hash: str | None
+    write_phase_status: WritePhaseStatus
+    print_phase_status: PrintPhaseStatus
+    mail_move_phase_status: MailMovePhaseStatus
+
+
+@dataclass(slots=True, frozen=True)
+class EmailAttachment:
+    attachment_id: str
+    attachment_index: int
+    attachment_name: str
+    normalized_filename: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class EmailMessage:
+    mail_id: str
+    entry_id: str
+    received_time_utc: str
+    received_time_workflow_tz: str
+    subject_raw: str
+    sender_address: str
+    snapshot_index: int
+    body_text: str = ""
+    attachments: list["EmailAttachment"] = field(default_factory=list)
+
+
+@dataclass(slots=True, frozen=True)
+class SavedDocument:
+    saved_document_id: str
+    mail_id: str
+    attachment_name: str
+    normalized_filename: str
+    destination_path: str
+    file_sha256: str
+    save_decision: str
+    attachment_index: int | None = None
+    document_type: str | None = None
+    classification_reason: str | None = None
+    print_eligible: bool = False
+    analysis_basis: str | None = None
+    extracted_lc_sc_number: str | None = None
+    extracted_lc_sc_confidence: float | None = None
+    extracted_pi_number: str | None = None
+    extracted_pi_confidence: float | None = None
+    extracted_amendment_number: str | None = None
+    clause_related_lc_sc_number: str | None = None
+    clause_excerpt: str | None = None
+    clause_confidence: float | None = None
+    extracted_lc_sc_provenance: dict[str, Any] | None = None
+    extracted_pi_provenance: dict[str, Any] | None = None
+    extracted_amendment_provenance: dict[str, Any] | None = None
+    clause_provenance: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class WriteOperation:
+    write_operation_id: str
+    run_id: str
+    mail_id: str
+    operation_index_within_mail: int
+    sheet_name: str
+    row_index: int
+    column_key: str
+    expected_pre_write_value: str | int | float | None
+    expected_post_write_value: str | int | float | None
+    row_eligibility_checks: list[str]
+    number_format: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class WorkbookSessionPreflight:
+    workbook_path: str
+    adapter_name: str
+    status: str
+    attempt_count: int
+    host_name: str
+    process_id: int
+    session_id: str | None = None
+    opened_at_utc: str | None = None
+    read_only: bool | None = None
+    save_capable: bool | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class WorkbookTargetProbe:
+    write_operation_id: str
+    run_id: str
+    mail_id: str
+    probe_stage: str
+    sheet_name: str
+    row_index: int
+    column_key: str
+    column_index: int | None
+    expected_pre_write_value: str | int | float | None
+    expected_post_write_value: str | int | float | None
+    observed_value: str | int | float | None
+    classification: str
+
+
+@dataclass(slots=True, frozen=True)
+class WorkbookTargetPrevalidationSummary:
+    total_targets: int
+    matches_pre_write: int
+    matches_post_write: int
+    mismatch_unknown: int
+    status: str
+
+
+@dataclass(slots=True, frozen=True)
+class WriteCommitMarker:
+    run_id: str
+    workflow_id: WorkflowId
+    tool_version: str
+    rule_pack_version: str
+    committed_at_utc: str
+    operation_count: int
+    mail_iteration_order_hash: str
+    staged_write_plan_hash: str
+    run_start_backup_hash: str
+    post_write_probe_summary: dict[str, int]
+
+
+@dataclass(slots=True, frozen=True)
+class PrintBatch:
+    print_group_id: str
+    run_id: str
+    mail_id: str
+    print_group_index: int
+    document_paths: list[str]
+    document_path_hashes: list[str]
+    completion_marker_id: str
+    manual_verification_summary: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class MailMoveOperation:
+    mail_move_operation_id: str
+    run_id: str
+    mail_id: str
+    entry_id: str
+    source_folder: str
+    destination_folder: str
+    moved_at_utc: str | None
+    move_status: str
+
+
+@dataclass(slots=True, frozen=True)
+class DiscrepancyReport:
+    run_id: str
+    workflow_id: WorkflowId
+    severity: FinalDecision
+    code: str
+    message: str
+    created_at_utc: str
+    mail_id: str | None = None
+    rule_id: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+    schema_id: str = DISCREPANCY_REPORT_SCHEMA_ID
+    schema_version: str = REPORT_SCHEMA_VERSION
+    report_schema_version: str = REPORT_SCHEMA_VERSION
+
+
+@dataclass(slots=True, frozen=True)
+class MailReport:
+    run_id: str
+    mail_id: str
+    workflow_id: WorkflowId
+    rule_pack_id: str
+    rule_pack_version: str
+    applied_rule_ids: list[str]
+    final_decision: FinalDecision
+    decision_reasons: list[str]
+    file_numbers_extracted: list[str]
+    saved_documents: list[dict[str, Any]]
+    staged_write_operations: list[dict[str, Any]]
+    discrepancies: list[dict[str, Any]]
+    import_keyword_revision: str | None = None
+    print_group_id: str | None = None
+    mail_move_operation_id: str | None = None
+    schema_id: str = MAIL_REPORT_SCHEMA_ID
+    schema_version: str = REPORT_SCHEMA_VERSION
+    report_schema_version: str = REPORT_SCHEMA_VERSION
+
+
+@dataclass(slots=True, frozen=True)
+class MailOutcomeRecord:
+    run_id: str
+    mail_id: str
+    workflow_id: WorkflowId
+    snapshot_index: int
+    processing_status: MailProcessingStatus
+    final_decision: FinalDecision | None
+    decision_reasons: list[str]
+    eligible_for_write: bool
+    eligible_for_print: bool
+    eligible_for_mail_move: bool
+    source_entry_id: str
+    subject_raw: str
+    sender_address: str
+    rule_pack_id: str | None = None
+    rule_pack_version: str | None = None
+    applied_rule_ids: list[str] = field(default_factory=list)
+    discrepancies: list[dict[str, Any]] = field(default_factory=list)
+    file_numbers_extracted: list[str] = field(default_factory=list)
+    saved_documents: list[dict[str, Any]] = field(default_factory=list)
+    staged_write_operations: list[dict[str, Any]] = field(default_factory=list)
+    write_disposition: str | None = None
+    manual_document_verification_summary: dict[str, Any] | None = None
+    import_keyword_revision: str | None = None
+    print_group_id: str | None = None
+    mail_move_operation_id: str | None = None
+    schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID
+    schema_version: str = REPORT_SCHEMA_VERSION
+    report_schema_version: str = REPORT_SCHEMA_VERSION
+
+
+@dataclass(slots=True, frozen=True)
+class RunReport:
+    run_id: str
+    workflow_id: WorkflowId
+    tool_version: str
+    rule_pack_id: str
+    rule_pack_version: str
+    started_at_utc: str
+    completed_at_utc: str | None
+    state_timezone: str
+    mail_iteration_order: list[str]
+    print_group_order: list[str]
+    write_phase_status: WritePhaseStatus
+    print_phase_status: PrintPhaseStatus
+    mail_move_phase_status: MailMovePhaseStatus
+    hash_algorithm: str
+    run_start_backup_hash: str
+    current_workbook_hash: str
+    staged_write_plan_hash: str
+    summary: dict[str, int]
+    operator_context: OperatorContext | None = None
+    mail_snapshot: list[EmailMessage] = field(default_factory=list)
+    resolved_source_folder_entry_id: str | None = None
+    resolved_destination_folder_entry_id: str | None = None
+    folder_resolution_mode: str | None = None
+    workbook_session_preflight: WorkbookSessionPreflight | None = None
+    target_prevalidation_summary: WorkbookTargetPrevalidationSummary | None = None
+    schema_id: str = RUN_REPORT_SCHEMA_ID
+    schema_version: str = REPORT_SCHEMA_VERSION
+    report_schema_version: str = REPORT_SCHEMA_VERSION

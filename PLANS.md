@@ -56,6 +56,7 @@ Goal: support manual export email processing with strict validation and safe wor
 
 ### Phase 3 — UD / IP / EXP workflow
 Goal: support shared-column population and quantity/value matching rules.
+- Use `docs/ud-ip-exp-implementation-handoff.md` as the implementation handoff before coding this workflow.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
 - Combination-based UD allocation logic.

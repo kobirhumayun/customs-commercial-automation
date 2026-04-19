@@ -20,6 +20,8 @@
 ### Export path
 `Year (LC/SC opening year) / Buyer Name / LC Number or Sales Contract Number / All Attachments`
 
+The configured export `document_root` is a stable storage base, not a per-run container. New emails, amendments, and later-arriving related PDFs for the same canonical LC/SC family must resolve back into the same attachment directory under that base path, even when they arrive on different days or reference different file numbers from the same family.
+
 ### Import path
 Designated import root organized by year.
 
@@ -178,20 +180,22 @@ Extraction order is mandatory:
 3. table extraction fallback for required tabular fields
 
 Decision rules:
-- Any required field below threshold emits `ocr_required_field_below_threshold` and hard-blocks.
-- Any missing required field emits `ocr_required_field_missing` and hard-blocks.
+- OCR- or parser-derived LC/SC and PI fields are informational only in phase 1 and never hard-block export processing.
 - Non-required low-confidence fields may emit `ocr_non_required_field_low_confidence` warning if all required fields pass.
 
 ## ERP normalization rules
-- ERP report is `rptDateWiseLCRegister`.
+- ERP report is `RptCommercialExport/DateWiseLCRegisterForDocuments`.
 - Headers are read from row 2 of sheet 1.
 - Canonical row selection follows ERP row order.
 - The first occurrence row is the canonical row for that file number/family context.
 - Canonical row fields drive folder path construction, workbook mapping, and reporting metadata.
+- ERP `LC No.` is preserved as the canonical family number exactly as exported, after shared string normalization. It is not constrained to mail-subject-style `LC-...` or `SC-...` patterns.
+- ERP `LC DT.` is canonicalized to ISO `YYYY-MM-DD` for internal storage/pathing.
 - Duplicate true-equivalent ERP rows do not alter canonical selection once the first occurrence is chosen.
 - When multiple file numbers are extracted from one email, each must be validated against ERP and all resolved rows must be consistent with the same LC/SC family.
 - Any partial family match is a hard block.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
+- Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
 
 Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
 
@@ -201,8 +205,22 @@ Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` a
 - Export workflow generally appends new rows.
 - Before appending, check whether the same file number already exists.
 - If the same file number exists, skip that file.
+- The uniqueness contract for export writes is the canonical workbook file number in `Commercial File No.`.
+- Phase-1 operating assumption: once an automation cycle starts, no manual or external workbook edits occur until that cycle finishes.
+- Under that operating assumption, duplicate prevention is enforced by canonical file number across:
+  - repeated mentions of the same file in one mail body
+  - different mails within the same run
+  - files already present in the workbook before the run starts
+- A duplicate file must never produce a second staged workbook row in the same run.
+- A file already present in `Commercial File No.` must never be written again as a new workbook row.
 - If required, first attempt to locate an existing row for the same file/amendment to avoid duplicate insertion.
 - Operational ordering is row sequence and drives staged write ordering, reporting, and print ordering.
+- If a mail resolves only to file numbers already present in `Commercial File No.`, the workflow outcome is `duplicate_only_noop`.
+- `duplicate_only_noop` means:
+  - no workbook writes
+  - no print requirement
+  - mail remains eligible for deterministic post-run movement when validation otherwise passes
+- This duplicate-only terminal path is valid only because workbook uniqueness by canonical file number is the final contract for export processing.
 
 ### Workbook mapping contract (normative)
 Implementations must resolve workbook targets from exact row-2 header text on sheet 1 and then stage writes using canonical `column_key` names. Header aliases are allowed only where explicitly listed.
@@ -211,9 +229,9 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 #### Mapping matrix — shared/core fields
 | column_key | Required header text (exact) | Allowed aliases | Source | Write mode | Pre-write constraint |
 |---|---|---|---|---|---|
-| `file_no` | `File No.` | `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
-| `lc_sc_no` | `L/C No.` | `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
-| `buyer_name` | `Buyer Name` | `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
+| `file_no` | `Commercial File No.` | `File No.`, `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
+| `lc_sc_no` | `L/C & S/C No.` | `L/C No.`, `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
+| `buyer_name` | `Name of Buyers` | `Buyer Name`, `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
 | `ud_ip_shared` | `UD No. & IP No.` | none | UD/IP/EXP extraction and ordering rules | `update_if_blank_or_append_multiline` | existing value may be preserved and line-extended only by deterministic rule pack |
 | `up_no` | `UP No.` | `UP` | workflow filters only in phase 1 | `never_write` (except future approved workflow) | n/a |
 
@@ -222,6 +240,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 |---|---|---|---|---|
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
+| `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; ERP row value may be blank; target blank |
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
@@ -346,10 +365,21 @@ The dashboard column is verification-only and should not be used to drive other 
 - Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 - If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
 - Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
+- Duplicate suppression is file-number-driven, not subject/body identity-driven.
+- If two mails in the same run resolve to the same canonical file number, only the earliest eligible mail in deterministic `mail_iteration_order` may stage that file; later mails must skip it.
 - The run initialization stage must capture both the email snapshot and a master-workbook backup before write-capable phases continue.
 - The workbook write stage must commit as an all-or-nothing batch from the approved staged write plan.
 - If write state is uncertain/incomplete, downstream print and mail-move stages must not run.
 - Rerun entry must perform recovery validation using the backup artifact plus recorded staged write plan before allowing new writes.
+- Print execution must persist deterministic per-group progress markers.
+- Live PDF printing is a silent submission flow through hidden Acrobat OLE automation plus the `JSObject` bridge; physical paper completion is not a decision gate in phase 1.
+- If the machine's Acrobat COM bridge does not expose the `JSObject` print-parameter path, the adapter may fall back to hidden `AVDoc.PrintPagesSilent` submission while preserving deterministic document order.
+- If `print_printer_name` is configured in that fallback path, the adapter may temporarily switch the Windows default printer to the configured printer for the silent submission window and must restore the original default printer afterward.
+- If a print group is interrupted after some PDFs are printed, recovery/resume may continue only from the remaining document suffix recorded by the partial print marker.
+- If physical paper output occurred during an Acrobat timeout, operators may advance the recorded print prefix with `acknowledge-partial-print` before resuming.
+- If operators confirm that all PDFs in the planned print group physically printed, `acknowledge-partial-print` may finalize the marker as `completed`; one final `execute-print` pass is still required to close run metadata without sending more print commands.
+- If physical print output occurred but no partial/completed print marker was persisted, the run remains a manual recovery boundary and mail moves must stay blocked.
+- Terminal run state is determined by phase-status completion markers, not by the absence of older discrepancy records. Historical failed attempts may remain preserved in the run audit trail after a later successful completion.
 
 ## Rerun/recovery hash invariants
 - Recovery hash algorithm is fixed to **SHA-256** for:

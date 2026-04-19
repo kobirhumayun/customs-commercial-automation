@@ -1,4 +1,4 @@
-# Architecture Overview
+﻿# Architecture Overview
 
 ## 1. Executive summary
 The target solution is a **Windows-first, monolithic but internally modular Python application** that exposes a set of **manually triggered CLI tools** for customs/commercial document workflows. This shape fits the business because the automations depend on local desktop integrations (Outlook COM, Excel, Adobe Acrobat, Playwright-driven ERP access, local file storage) and because the phase 1 objective is safe, deterministic automation with strong auditability rather than a distributed platform.
@@ -40,7 +40,7 @@ The architecture must optimize for:
    - save-only-new-file guarantees
 5. **ERP downloader**
    - Playwright login/navigation
-   - `rptDateWiseLCRegister` retrieval
+   - `RptCommercialExport/DateWiseLCRegisterForDocuments` retrieval
    - normalization and row selection across all extracted file numbers, including family-consistency checks
 6. **Parsing and normalization layer**
    - subject parsing
@@ -86,13 +86,13 @@ The architecture must optimize for:
 
 ## 3. Staged execution model
 Each manually triggered CLI run should follow one explicit execution contract:
-1. **Run-level snapshot + workbook backup** — capture the complete set of messages currently in `working` for that workflow, bind them to the run id, and create a backup copy of the target yearly master workbook before any write-capable phase can proceed.
-2. **Deterministic mail ordering** — sort the snapshotted messages by `ReceivedTime` converted to the configured workflow state timezone (current deployment basis: Bangladesh Standard Time, UTC+06:00), then tie-break by ascending Outlook `EntryID`; persist this ordered list in run metadata before mail processing starts.
-3. **Mail-level validation** — iterate the ordered snapshot, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
-4. **Batch workbook write** — open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
-5. **Batch print planning + print** — derive mail-group print order from master-workbook row sequence (group key = originating mail, group rank = earliest row sequence written for that mail), persist final print-group order in run metadata, then print only newly saved PDFs for each group without extra intra-group sorting and insert exactly one blank page between consecutive groups.
-6. **Post-run mail moves** — move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
-7. **Rerun recovery gate** — if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed, using the shared **Recovery Decision Matrix** contract defined in `docs/workflows.md` (required artifacts, exact outcomes, idempotency checks, and pseudocode flow).
+1. **Run-level snapshot + workbook backup** â€” capture the complete set of messages currently in `working` for that workflow, bind them to the run id, and create a backup copy of the target yearly master workbook before any write-capable phase can proceed.
+2. **Deterministic mail ordering** â€” sort the snapshotted messages by `ReceivedTime` converted to the configured workflow state timezone (current deployment basis: Bangladesh Standard Time, UTC+06:00), then tie-break by ascending Outlook `EntryID`; persist this ordered list in run metadata before mail processing starts.
+3. **Mail-level validation** â€” iterate the ordered snapshot, save only new PDFs, extract entities, validate against ERP and workbook context, and build proposed write/print/move outcomes per mail.
+4. **Batch workbook write** â€” open the yearly master workbook in one controlled write session and apply only the approved write operations for mails that passed validation.
+5. **Batch print planning + print** â€” derive mail-group print order from master-workbook row sequence (group key = originating mail, group rank = earliest row sequence written for that mail), persist final print-group order in run metadata, then print only newly saved PDFs for each group without extra intra-group sorting and insert exactly one blank page between consecutive groups.
+6. **Post-run mail moves** â€” move only successful mails to their destination Outlook folders after workbook writes and printing complete; blocked mails remain in `working`.
+7. **Rerun recovery gate** â€” if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed, using the shared **Recovery Decision Matrix** contract defined in `docs/workflows.md` (required artifacts, exact outcomes, idempotency checks, and pseudocode flow).
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
@@ -129,7 +129,7 @@ If contention is detected, outcome is `hard_block` (no write attempt), with dete
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
 If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
-Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
+Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) â‡’ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 
 ### Explicit write transaction strategy (normative)
 Write-capable workflows must execute workbook mutations using one staged protocol so recovery and audit logic can unambiguously classify run state.
@@ -186,10 +186,10 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Operator moves eligible emails from `temp-export` to `working`.
 - CLI snapshots all messages currently present in `working` and binds them to the active run before any side effects occur.
 - Body parser extracts all file numbers matching `P/<yy>/<nnnn>`.
-- Every extracted file number is used for ERP lookup, subject validation, and folder-path verification to confirm they all belong to the same LC/SC family.
-- ERP downloader retrieves `rptDateWiseLCRegister`, normalizes row-2 headers, and validates family consistency using LC/SC number, normalized buyer, and LC/SC date. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
-- Subject validation compares normalized buyer name and LC/SC number against the verified family; any mismatch is a hard block.
-- Attachment classifier identifies LC/SC and PI PDFs using naming conventions, clauses, amendment context, and ERP PI references.
+- Every extracted file number is used for ERP lookup and folder-path verification to confirm they all belong to the same ERP family.
+- ERP downloader retrieves `RptCommercialExport/DateWiseLCRegisterForDocuments`, normalizes row-2 headers, and validates family consistency using ERP `LC No.`, normalized buyer, and canonicalized `LC DT.`. Duplicate ERP rows may use any one row when they are true duplicates. Any partial family match is a hard block.
+- Mail subject parsing is optional and advisory only. ERP rows selected by extracted body file numbers are the final source for family data, workbook values, and storage path construction.
+- Attachment saving persists all new PDF attachments into the export folder hierarchy; LC/SC and PI extraction/classification signals are informational only and do not gate run success.
 - Storage manager saves only new PDFs into export folder hierarchy:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`.
 - Excel adapter appends or skips based on file number existence and amendment matching rules.
@@ -225,7 +225,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### Printing CLI/service
 - Triggered automatically after the batch workbook-write phase succeeds for at least one mail in a write-capable workflow.
-- Prints only newly saved PDFs from successful mails in the active run snapshot.
+- Prints all newly saved PDFs from successful mails in the active run snapshot.
 - Batches are grouped by originating mail and ordered by master-workbook row sequence captured from the staged write outcomes.
 - Within each mail group, all newly saved PDFs are printed in saved/staged order with no extra intra-group sorting.
 - Inserts exactly one blank page between consecutive mail groups.
@@ -326,7 +326,8 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 - A duplicate informational attachment (not selected for extraction/write) is present in the email, while at least one required document is valid and all write-gating checks pass.
 
 ### Examples of hard blocks
-- subject validation mismatch against ERP buyer name and LC/SC number
+- any extracted file number missing its ERP row
+- ERP family inconsistency across extracted file numbers
 - missing required extraction fields
 - contradictory matching results
 - workbook row eligibility not satisfied
@@ -346,7 +347,7 @@ During early live deployment, the system should treat any failure to satisfy spe
   - column 22 `Amount` is the **Import LC (Back-to-Back) amount** target
 - Any attempt to resolve `Amount` by header text alone is invalid; writes must bind to canonical column keys first, then enforce the declared column index.
 - Never write unless all validations pass.
-- Execute the batch workbook-write phase as all-or-nothing for the run’s approved write set.
+- Execute the batch workbook-write phase as all-or-nothing for the runâ€™s approved write set.
 - Restrict writes to previously validated blank target cells (or validated append targets that are blank by construction).
 - For export LC/SC, append new rows only after skip-if-file-number-exists and same-file/amendment checks.
 - Preserve formulas, styles, merged cells, conditional formatting, filters, comments, validations, and protection exactly.
@@ -415,11 +416,11 @@ This allows deterministic review of why a value was accepted or blocked.
 - Publish workflow-specific runbooks for command usage, recovery, and reruns.
 
 ## 11. Risks and mitigation themes
-- **Excel corruption risk** → constrain writes to surgical adapter operations and require pre-write validation.
-- **Unreliable document extraction** → layered extraction, provenance, and human-review thresholds.
-- **Duplicate processing on rerun** → run snapshots, job ids, filename dedupe, workbook existence checks, staged side effects, and print-state tracking.
-- **Rule ambiguity** → explicit open questions and review checkpoints instead of silent inference.
-- **Desktop dependency fragility** → adapter abstraction and environment readiness checklist.
+- **Excel corruption risk** â†’ constrain writes to surgical adapter operations and require pre-write validation.
+- **Unreliable document extraction** â†’ layered extraction, provenance, and human-review thresholds.
+- **Duplicate processing on rerun** â†’ run snapshots, job ids, filename dedupe, workbook existence checks, staged side effects, and print-state tracking.
+- **Rule ambiguity** â†’ explicit open questions and review checkpoints instead of silent inference.
+- **Desktop dependency fragility** â†’ adapter abstraction and environment readiness checklist.
 
 ## 12. Open questions needing business clarification
 - Which future business-approved exceptions need to be added to workflow-specific rule-pack modules once they are identified in production?
@@ -581,6 +582,13 @@ Write-capable workflows must also provide:
 - `excel_lock_timeout_seconds`
 - `print_enabled`
 
+`master_workbook_path_template` controls the expected yearly workbook filename.
+The normal production pattern is to store the exact real workbook filename in config and update it manually when the yearly workbook changes.
+
+Optional placeholders may be used if a deployment intentionally wants generated naming:
+- `{year}`
+- `{workflow_id}`
+
 ### Workflow-specific required keys
 Workflow modules must declare their own required key list (for example import keyword controls, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
 
@@ -606,7 +614,7 @@ state_timezone = "Asia/Dhaka"
 report_root = "C:/customs-automation/reports"
 run_artifact_root = "C:/customs-automation/state/runs"
 backup_root = "C:/customs-automation/state/backups"
-outlook_profile = "Operations"
+outlook_profile = "outlook"
 master_workbook_root = "C:/customs-automation/workbooks"
 erp_base_url = "https://erp.example.local"
 playwright_browser_channel = "msedge"
@@ -616,3 +624,4 @@ excel_lock_timeout_seconds = 120
 
 ## 9. Artifact storage layout reference
 Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.
+
