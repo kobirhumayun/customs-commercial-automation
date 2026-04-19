@@ -44,6 +44,12 @@ from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider
 from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
 
 
+UD_IP_EXP_TRANSPORT_POLICY_STATUS = "disabled_pending_policy"
+UD_IP_EXP_TRANSPORT_POLICY_REASON = (
+    "UD/IP/EXP print and mail-move policy remains unresolved; downstream transport eligibility is disabled."
+)
+
+
 @dataclass(slots=True, frozen=True)
 class WorkflowValidationContext:
     run_id: str
@@ -220,7 +226,7 @@ def _build_mail_outcome(
     )
     transport_allowed = descriptor.workflow_id != WorkflowId.UD_IP_EXP
     transport_reason = (
-        ["UD/IP/EXP print and mail-move policy remains unresolved; downstream transport eligibility is disabled."]
+        [UD_IP_EXP_TRANSPORT_POLICY_REASON]
         if allowed and descriptor.workflow_id == WorkflowId.UD_IP_EXP
         else []
     )

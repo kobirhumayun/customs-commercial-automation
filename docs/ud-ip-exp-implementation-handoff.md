@@ -204,6 +204,21 @@ If print is required:
 If print is not required for some terminal path:
 - document that policy and encode it explicitly in mail outcomes and mail-move eligibility.
 
+## Deterministic Fixture Manifest
+
+The initial implementation includes a read-only fixture path for deterministic UD validation via `validate-run ud_ip_exp --ud-payload-json <path>`.
+
+This manifest is only for tests, fixture-backed dry runs, and development while live UD/IP/EXP PDF identification and extraction rules remain open. It must not be treated as a replacement for the unresolved live extraction rules.
+
+Manifest shape:
+- Top-level JSON value is a list of records.
+- Each record must include `mail_id` or `entry_id` matching the mail snapshot.
+- Each record must include `document_number`, `document_date`, and `lc_sc_number`.
+- `quantity` and `quantity_unit` should be supplied for UD allocation.
+- Optional confidence/provenance fields are supported for required extracted values.
+
+See `docs/ud-ip-exp-payload-manifest-example.json` for a minimal example.
+
 ## Tests to Add
 
 Minimum test groups:

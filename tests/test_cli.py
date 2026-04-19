@@ -4596,10 +4596,16 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["workflow_id"], "ud_ip_exp")
         self.assertEqual(payload["summary"], {"pass": 1, "warning": 0, "hard_block": 0})
         self.assertEqual(payload["staged_write_operation_count"], 1)
+        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
+        self.assertIn("mail-move policy remains unresolved", payload["transport_policy"]["reason"])
         self.assertEqual(mail_outcomes[0]["ud_selection"]["selected_candidate_id"], "11")
         self.assertTrue(mail_outcomes[0]["eligible_for_write"])
         self.assertFalse(mail_outcomes[0]["eligible_for_print"])
         self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
+        self.assertIn(
+            "mail-move policy remains unresolved",
+            "\n".join(mail_outcomes[0]["decision_reasons"]),
+        )
 
     def test_validate_run_ud_ip_exp_without_ud_payload_manifest_hard_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4657,6 +4663,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["summary"], {"pass": 0, "warning": 0, "hard_block": 1})
         self.assertEqual(payload["staged_write_operation_count"], 0)
+        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
         self.assertEqual(
             [item["code"] for item in discrepancies],
             ["ud_allocation_unresolved", "ud_required_document_missing"],

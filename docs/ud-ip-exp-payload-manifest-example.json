@@ -1,0 +1,23 @@
+[
+  {
+    "entry_id": "outlook-entry-id-from-snapshot",
+    "document_number": "UD-LC-0043-ANANTA",
+    "document_number_confidence": 1.0,
+    "document_number_provenance": {
+      "source": "deterministic_fixture"
+    },
+    "document_date": "2026-04-01",
+    "document_date_confidence": 1.0,
+    "document_date_provenance": {
+      "source": "deterministic_fixture"
+    },
+    "lc_sc_number": "LC-0043",
+    "lc_sc_number_confidence": 1.0,
+    "lc_sc_number_provenance": {
+      "source": "deterministic_fixture"
+    },
+    "quantity": "1000",
+    "quantity_unit": "YDS",
+    "source_saved_document_id": "optional-saved-document-id"
+  }
+]

@@ -28,7 +28,7 @@ from project.outlook import (
     Win32ComOutlookFolderCatalogProvider,
 )
 from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, SimulatedPrintProvider
-from project.models import SavedDocument
+from project.models import SavedDocument, WorkflowId
 from project.reporting.persistence import (
     append_discrepancy,
     write_commit_marker,
@@ -112,7 +112,11 @@ from project.workflows.workflow_summary import build_workflow_summary
 from project.workflows.workflow_handoff_export import build_workflow_handoff_export
 from project.workflows.write_execution import execute_live_write_batch
 from project.workflows.registry import WORKFLOW_REGISTRY, WorkflowDescriptor
-from project.workflows.validation import validate_run_snapshot
+from project.workflows.validation import (
+    UD_IP_EXP_TRANSPORT_POLICY_REASON,
+    UD_IP_EXP_TRANSPORT_POLICY_STATUS,
+    validate_run_snapshot,
+)
 from project.workflows.write_preparation import prepare_live_write_batch
 
 
@@ -1831,6 +1835,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             else 0
         ),
     }
+    if descriptor.workflow_id == WorkflowId.UD_IP_EXP:
+        payload["transport_policy"] = {
+            "status": UD_IP_EXP_TRANSPORT_POLICY_STATUS,
+            "reason": UD_IP_EXP_TRANSPORT_POLICY_REASON,
+        }
     print(pretty_json_dumps(payload), end="")
     return 0
 
