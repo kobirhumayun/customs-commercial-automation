@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import json
+from decimal import Decimal
+import tempfile
+import unittest
+from pathlib import Path
+
+from project.models import (
+    FinalDecision,
+    RunReport,
+    WorkflowId,
+    WritePhaseStatus,
+    PrintPhaseStatus,
+    MailMovePhaseStatus,
+)
+from project.rules import load_rule_pack
+from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
+from project.workflows.registry import get_workflow_descriptor
+from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
+from project.workflows.ud_ip_exp import (
+    DocumentExtractionField,
+    JsonManifestUDDocumentPayloadProvider,
+    MappingUDDocumentPayloadProvider,
+    UDDocumentPayload,
+    UDIPEXPQuantity,
+)
+from project.workflows.validation import validate_run_snapshot
+
+
+class UDIPEXPManifestValidationTests(unittest.TestCase):
+    def test_json_manifest_ud_document_provider_loads_payload_by_entry_id(self) -> None:
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "ud-payloads.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_date": "2026-04-01",
+                            "lc_sc_number": "LC-0043",
+                            "quantity": "1000",
+                            "quantity_unit": "YDS",
+                            "document_number_confidence": 0.99,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = JsonManifestUDDocumentPayloadProvider(manifest_path)
+            payload = provider.get_ud_document(mail)
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload.document_number.value, "UD-LC-0043-ANANTA")
+        self.assertEqual(payload.document_number.confidence, 0.99)
+        self.assertEqual(payload.quantity.amount, Decimal("1000"))
+
+    def test_validate_run_snapshot_for_ud_manifest_stages_writes_and_reports_selection(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {mail.entry_id: _ud_document("UD-LC-0043-ANANTA", quantity=Decimal("1000"))}
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(validation_result.staged_write_plan[0].row_index, 11)
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
+        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
+        self.assertEqual(validation_result.mail_reports[0].ud_selection["final_decision"], "selected")
+        self.assertEqual(validation_result.discrepancy_reports, [])
+
+    def test_validate_run_snapshot_for_ud_without_payload_hard_blocks(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            workbook_snapshot=_snapshot(rows=[]),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(validation_result.staged_write_plan, [])
+        self.assertEqual(
+            [report.code for report in validation_result.discrepancy_reports],
+            ["ud_allocation_unresolved", "ud_required_document_missing"],
+        )
+        self.assertIsNone(validation_result.mail_outcomes[0].ud_selection)
+
+    def test_validate_run_snapshot_advances_ud_workbook_snapshot_between_mails(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        first_mail = _mail("entry-ud-001", "UD-LC-0043-ONE")
+        second_mail = _mail("entry-ud-002", "UD-LC-0043-TWO")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [first_mail, second_mail]),
+            rule_pack=rule_pack,
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {
+                    first_mail.entry_id: _ud_document("UD-LC-0043-ONE", quantity=Decimal("1000")),
+                    second_mail.entry_id: _ud_document("UD-LC-0043-TWO", quantity=Decimal("1000")),
+                }
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 1})
+        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual(
+            validation_result.mail_outcomes[1].discrepancies[0]["code"],
+            "ud_shared_column_nonblank_policy_unresolved",
+        )
+
+
+def _ud_document(document_number: str, *, quantity: Decimal | None) -> UDDocumentPayload:
+    return UDDocumentPayload(
+        document_number=DocumentExtractionField(document_number),
+        document_date=DocumentExtractionField("2026-04-01"),
+        lc_sc_number=DocumentExtractionField("LC-0043"),
+        quantity=UDIPEXPQuantity(amount=quantity, unit="YDS") if quantity is not None else None,
+    )
+
+
+def _mail(entry_id: str, subject: str):
+    return build_email_snapshot(
+        [
+            SourceEmailRecord(
+                entry_id=entry_id,
+                received_time="2026-04-01T03:00:00Z",
+                subject_raw=subject,
+                sender_address="sender@example.com",
+            )
+        ],
+        state_timezone="Asia/Dhaka",
+    )[0]
+
+
+def _run_report(rule_pack, mails):
+    return RunReport(
+        run_id="run-1",
+        workflow_id=WorkflowId.UD_IP_EXP,
+        tool_version="0.1.0",
+        rule_pack_id=rule_pack.rule_pack_id,
+        rule_pack_version=rule_pack.rule_pack_version,
+        started_at_utc="2026-04-01T00:00:00Z",
+        completed_at_utc=None,
+        state_timezone="Asia/Dhaka",
+        mail_iteration_order=[mail.mail_id for mail in mails],
+        print_group_order=[],
+        write_phase_status=WritePhaseStatus.NOT_STARTED,
+        print_phase_status=PrintPhaseStatus.NOT_STARTED,
+        mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+        hash_algorithm="sha256",
+        run_start_backup_hash="a" * 64,
+        current_workbook_hash="b" * 64,
+        staged_write_plan_hash="",
+        summary={"pass": 0, "warning": 0, "hard_block": 0},
+        mail_snapshot=list(mails),
+    )
+
+
+def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+        ],
+        rows=rows,
+    )
+
+
+if __name__ == "__main__":
+    unittest.main()

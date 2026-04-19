@@ -218,6 +218,7 @@ class MailReport:
     staged_write_operations: list[dict[str, Any]]
     discrepancies: list[dict[str, Any]]
     import_keyword_revision: str | None = None
+    ud_selection: dict[str, Any] | None = None
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None
     schema_id: str = MAIL_REPORT_SCHEMA_ID
@@ -250,6 +251,7 @@ class MailOutcomeRecord:
     write_disposition: str | None = None
     manual_document_verification_summary: dict[str, Any] | None = None
     import_keyword_revision: str | None = None
+    ud_selection: dict[str, Any] | None = None
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None
     schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID

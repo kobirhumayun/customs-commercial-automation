@@ -59,6 +59,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `staged_write_operations` (array)
 - `discrepancies` (array)
 - `import_keyword_revision` (string; required for import workflow, optional/null otherwise)
+- `ud_selection` (object; required for `ud_ip_exp` mails that reach UD allocation, optional/null otherwise)
 
 ## 4) Discrepancy report schema
 - `schema_id`: `discrepancy_report`

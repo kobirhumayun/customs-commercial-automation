@@ -24,7 +24,7 @@ from project.storage import AttachmentContentProvider, DocumentSaveIssue, Docume
 from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
-from project.workbook import WorkbookRow, WorkbookSnapshot, resolve_export_header_mapping
+from project.workbook import WorkbookRow, WorkbookSnapshot, resolve_export_header_mapping, resolve_ud_ip_exp_header_mapping
 from project.workflows.export_lc_sc.document_classification import (
     ClassifiedDocumentSet,
     DocumentClassificationDiscrepancy,
@@ -39,6 +39,9 @@ from project.workflows.export_lc_sc.staging import (
 )
 from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
+from project.workflows.ud_ip_exp.payloads import UDIPEXPWorkflowPayload
+from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider
+from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
 
 
 @dataclass(slots=True, frozen=True)
@@ -74,6 +77,7 @@ def validate_run_snapshot(
     attachment_content_provider: AttachmentContentProvider | None = None,
     document_root: Path | None = None,
     document_analysis_provider: SavedDocumentAnalysisProvider | None = None,
+    ud_document_provider: UDDocumentPayloadProvider | None = None,
 ) -> ValidationBatchResult:
     mail_outcomes: list[MailOutcomeRecord] = []
     mail_reports: list[MailReport] = []
@@ -83,19 +87,15 @@ def validate_run_snapshot(
     working_workbook_snapshot = workbook_snapshot
 
     for mail in run_report.mail_snapshot:
-        context = WorkflowValidationContext(
-            run_id=run_report.run_id,
-            workflow_id=run_report.workflow_id,
-            rule_pack_id=rule_pack.rule_pack_id,
-            rule_pack_version=rule_pack.rule_pack_version,
-            state_timezone=run_report.state_timezone,
-            operator_context=run_report.operator_context,
+        context, aggregated, staging_result, ud_selection = _evaluate_mail_for_workflow(
+            descriptor=descriptor,
+            run_report=run_report,
+            rule_pack=rule_pack,
             mail=mail,
-            workflow_payload=build_workflow_payload(
-                run_report.workflow_id,
-                mail,
-                erp_row_provider=erp_row_provider,
-            ),
+            workbook_snapshot=working_workbook_snapshot,
+            baseline_workbook_snapshot=workbook_snapshot,
+            erp_row_provider=erp_row_provider,
+            ud_document_provider=ud_document_provider,
         )
         document_save_result = _save_mail_documents_if_configured(
             descriptor=descriptor,
@@ -110,16 +110,6 @@ def validate_run_snapshot(
             document_save_result=document_save_result,
             document_analysis_provider=document_analysis_provider,
         )
-        aggregated = evaluate_rule_pack(context, rule_pack)
-        staging_result = _stage_mail_if_eligible(
-            descriptor=descriptor,
-            run_report=run_report,
-            mail=mail,
-            aggregated=aggregated,
-            workflow_payload=context.workflow_payload,
-            workbook_snapshot=working_workbook_snapshot,
-            baseline_workbook_snapshot=workbook_snapshot,
-        )
         mail_outcome = _build_mail_outcome(
             descriptor=descriptor,
             run_report=run_report,
@@ -129,6 +119,7 @@ def validate_run_snapshot(
             staging_result=staging_result,
             document_save_result=document_save_result,
             document_classification_result=document_classification_result,
+            ud_selection=ud_selection,
         )
         mail_report = _build_mail_report(run_report, rule_pack, mail_outcome)
         mail_discrepancies = _build_discrepancy_reports(
@@ -201,6 +192,7 @@ def _build_mail_outcome(
     staging_result,
     document_save_result: DocumentSaveResult,
     document_classification_result: ClassifiedDocumentSet,
+    ud_selection: dict | None = None,
 ) -> MailOutcomeRecord:
     final_decision = (
         FinalDecision.HARD_BLOCK
@@ -226,6 +218,12 @@ def _build_mail_outcome(
         ),
         staged_write_operations=staging_result.staged_write_operations,
     )
+    transport_allowed = descriptor.workflow_id != WorkflowId.UD_IP_EXP
+    transport_reason = (
+        ["UD/IP/EXP print and mail-move policy remains unresolved; downstream transport eligibility is disabled."]
+        if allowed and descriptor.workflow_id == WorkflowId.UD_IP_EXP
+        else []
+    )
     return MailOutcomeRecord(
         run_id=run_report.run_id,
         mail_id=mail.mail_id,
@@ -238,14 +236,16 @@ def _build_mail_outcome(
             + list(document_classification_result.decision_reasons)
             + list(aggregated.decision_reasons)
             + list(staging_result.decision_reasons)
+            + transport_reason
         ),
         eligible_for_write=allowed and descriptor.write_capable and bool(staging_result.staged_write_operations),
         eligible_for_print=(
             allowed
+            and transport_allowed
             and descriptor.supports_print
             and write_disposition in {"new_writes_staged", "mixed_duplicate_and_new_writes"}
         ),
-        eligible_for_mail_move=allowed,
+        eligible_for_mail_move=allowed and transport_allowed,
         source_entry_id=mail.entry_id,
         subject_raw=mail.subject_raw,
         sender_address=mail.sender_address,
@@ -265,6 +265,7 @@ def _build_mail_outcome(
         saved_documents=to_jsonable(document_classification_result.saved_documents),
         staged_write_operations=to_jsonable(staging_result.staged_write_operations),
         write_disposition=write_disposition,
+        ud_selection=to_jsonable(ud_selection),
     )
 
 
@@ -287,6 +288,113 @@ def _build_mail_report(
         staged_write_operations=list(mail_outcome.staged_write_operations),
         discrepancies=list(mail_outcome.discrepancies),
         import_keyword_revision=mail_outcome.import_keyword_revision,
+        ud_selection=mail_outcome.ud_selection,
+    )
+
+
+def _evaluate_mail_for_workflow(
+    *,
+    descriptor: WorkflowDescriptor,
+    run_report: RunReport,
+    rule_pack: LoadedRulePack,
+    mail: EmailMessage,
+    workbook_snapshot: WorkbookSnapshot | None,
+    baseline_workbook_snapshot: WorkbookSnapshot | None,
+    erp_row_provider: ERPRowProvider | None,
+    ud_document_provider: UDDocumentPayloadProvider | None,
+) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, object, dict | None]:
+    if descriptor.workflow_id == WorkflowId.UD_IP_EXP:
+        return _evaluate_ud_ip_exp_mail(
+            run_report=run_report,
+            rule_pack=rule_pack,
+            mail=mail,
+            workbook_snapshot=workbook_snapshot,
+            ud_document_provider=ud_document_provider,
+        )
+
+    context = WorkflowValidationContext(
+        run_id=run_report.run_id,
+        workflow_id=run_report.workflow_id,
+        rule_pack_id=rule_pack.rule_pack_id,
+        rule_pack_version=rule_pack.rule_pack_version,
+        state_timezone=run_report.state_timezone,
+        operator_context=run_report.operator_context,
+        mail=mail,
+        workflow_payload=build_workflow_payload(
+            run_report.workflow_id,
+            mail,
+            erp_row_provider=erp_row_provider,
+        ),
+    )
+    aggregated = evaluate_rule_pack(context, rule_pack)
+    staging_result = _stage_mail_if_eligible(
+        descriptor=descriptor,
+        run_report=run_report,
+        mail=mail,
+        aggregated=aggregated,
+        workflow_payload=context.workflow_payload,
+        workbook_snapshot=workbook_snapshot,
+        baseline_workbook_snapshot=baseline_workbook_snapshot,
+    )
+    return context, aggregated, staging_result, None
+
+
+def _evaluate_ud_ip_exp_mail(
+    *,
+    run_report: RunReport,
+    rule_pack: LoadedRulePack,
+    mail: EmailMessage,
+    workbook_snapshot: WorkbookSnapshot | None,
+    ud_document_provider: UDDocumentPayloadProvider | None,
+) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, UDIPEXPWriteStagingResult, dict | None]:
+    ud_document = (
+        ud_document_provider.get_ud_document(mail)
+        if ud_document_provider is not None
+        else None
+    )
+    if ud_document is not None:
+        from project.workflows.ud_ip_exp.validation import assemble_ud_validation
+
+        assembly = assemble_ud_validation(
+            run_id=run_report.run_id,
+            mail=mail,
+            rule_pack=rule_pack,
+            ud_document=ud_document,
+            workbook_snapshot=workbook_snapshot,
+            state_timezone=run_report.state_timezone,
+        )
+        context = WorkflowValidationContext(
+            run_id=run_report.run_id,
+            workflow_id=run_report.workflow_id,
+            rule_pack_id=rule_pack.rule_pack_id,
+            rule_pack_version=rule_pack.rule_pack_version,
+            state_timezone=run_report.state_timezone,
+            operator_context=run_report.operator_context,
+            mail=mail,
+            workflow_payload=assembly.workflow_payload,
+        )
+        return context, assembly.rule_evaluation, assembly.staging_result, assembly.ud_selection
+
+    workflow_payload = UDIPEXPWorkflowPayload(documents=[])
+    context = WorkflowValidationContext(
+        run_id=run_report.run_id,
+        workflow_id=run_report.workflow_id,
+        rule_pack_id=rule_pack.rule_pack_id,
+        rule_pack_version=rule_pack.rule_pack_version,
+        state_timezone=run_report.state_timezone,
+        operator_context=run_report.operator_context,
+        mail=mail,
+        workflow_payload=workflow_payload,
+    )
+    return (
+        context,
+        evaluate_rule_pack(context, rule_pack),
+        UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=["UD staging skipped because no deterministic UD payload was supplied."],
+        ),
+        None,
     )
 
 
@@ -464,10 +572,14 @@ def _advance_workbook_snapshot_for_staged_writes(
 ) -> WorkbookSnapshot | None:
     if workbook_snapshot is None or not staged_write_operations:
         return workbook_snapshot
-    if descriptor.workflow_id != WorkflowId.EXPORT_LC_SC:
+    if descriptor.workflow_id not in {WorkflowId.EXPORT_LC_SC, WorkflowId.UD_IP_EXP}:
         return workbook_snapshot
 
-    header_mapping = resolve_export_header_mapping(workbook_snapshot)
+    header_mapping = (
+        resolve_export_header_mapping(workbook_snapshot)
+        if descriptor.workflow_id == WorkflowId.EXPORT_LC_SC
+        else resolve_ud_ip_exp_header_mapping(workbook_snapshot)
+    )
     if header_mapping is None:
         return workbook_snapshot
 
