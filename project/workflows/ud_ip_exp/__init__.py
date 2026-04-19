@@ -27,6 +27,7 @@ from project.workflows.ud_ip_exp.providers import (
 from project.workflows.ud_ip_exp.staging import (
     UDIPEXPStagingDiscrepancy,
     UDIPEXPWriteStagingResult,
+    stage_ip_exp_shared_column_operations,
     stage_ud_shared_column_operations,
 )
 from project.workflows.ud_ip_exp.reporting import build_ud_selection_report
@@ -53,5 +54,6 @@ __all__ = [
     "collect_ud_candidate_rows",
     "format_shared_column_entry",
     "format_shared_column_values",
+    "stage_ip_exp_shared_column_operations",
     "stage_ud_shared_column_operations",
 ]

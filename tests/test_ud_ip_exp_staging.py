@@ -6,9 +6,12 @@ import unittest
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
+    EXPDocumentPayload,
+    IPDocumentPayload,
     UDCandidateRow,
     UDDocumentPayload,
     allocate_ud_rows,
+    stage_ip_exp_shared_column_operations,
     stage_ud_shared_column_operations,
 )
 
@@ -146,6 +149,57 @@ class UDIPEXPStagingTests(unittest.TestCase):
 
         self.assertEqual(result.staged_write_operations, [])
         self.assertEqual(result.discrepancies[0].code, "workbook_header_mapping_invalid")
+
+    def test_stage_ip_exp_shared_column_operations_hard_blocks_until_policy_confirmed(self) -> None:
+        result = stage_ip_exp_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            documents=[
+                IPDocumentPayload(
+                    document_number=DocumentExtractionField("IP-002"),
+                    document_date=DocumentExtractionField("2026-04-03"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+                EXPDocumentPayload(
+                    document_number=DocumentExtractionField("EXP-001"),
+                    document_date=DocumentExtractionField("2026-04-02"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+            ],
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            target_row_indexes=[11],
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies[0].code, "ip_exp_policy_unresolved")
+        self.assertEqual(
+            result.discrepancies[0].details["proposed_shared_column_value"],
+            "EXP: EXP-001\nIP: IP-002",
+        )
+        self.assertEqual(result.discrepancies[0].details["target_row_indexes"], [11])
+        self.assertIn(
+            "date column mapping",
+            "\n".join(result.discrepancies[0].details["unresolved_policies"]),
+        )
+
+    def test_stage_ip_exp_shared_column_operations_noops_when_no_ip_exp_documents(self) -> None:
+        result = stage_ip_exp_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            documents=[_ud_document("UD-LC-0043-ANANTA")],
+            workbook_snapshot=_snapshot(rows=[]),
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies, [])
+        self.assertEqual(
+            result.decision_reasons,
+            ["No IP/EXP document payloads supplied; no IP/EXP staging needed."],
+        )
 
 
 def _ud_document(document_number: str) -> UDDocumentPayload:

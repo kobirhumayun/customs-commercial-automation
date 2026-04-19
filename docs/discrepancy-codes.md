@@ -83,6 +83,7 @@ Every discrepancy payload should include:
 | `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
 | `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row already has a non-blank shared-column value and append/duplicate behavior is not yet business-confirmed. |
+| `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | IP/EXP matching, date-column, total-check, or shared-column update policy remains unresolved, so staging is blocked with document evidence. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

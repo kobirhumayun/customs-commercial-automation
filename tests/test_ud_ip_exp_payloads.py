@@ -49,6 +49,27 @@ class UDIPEXPModelTests(unittest.TestCase):
 
         self.assertEqual(format_shared_column_values(documents), "EXP: EXP-001\nIP: IP-002")
 
+    def test_shared_column_values_keep_ud_before_exp_and_ip(self) -> None:
+        documents = [
+            IPDocumentPayload(
+                document_number=DocumentExtractionField("IP-002"),
+                document_date=DocumentExtractionField("2026-04-03"),
+                lc_sc_number=DocumentExtractionField("LC-0043"),
+            ),
+            UDDocumentPayload(
+                document_number=DocumentExtractionField("UD-003"),
+                document_date=DocumentExtractionField("2026-04-01"),
+                lc_sc_number=DocumentExtractionField("LC-0043"),
+            ),
+            EXPDocumentPayload(
+                document_number=DocumentExtractionField("EXP-001"),
+                document_date=DocumentExtractionField("2026-04-02"),
+                lc_sc_number=DocumentExtractionField("LC-0043"),
+            ),
+        ]
+
+        self.assertEqual(format_shared_column_values(documents), "UD-003\nEXP: EXP-001\nIP: IP-002")
+
 
 if __name__ == "__main__":
     unittest.main()

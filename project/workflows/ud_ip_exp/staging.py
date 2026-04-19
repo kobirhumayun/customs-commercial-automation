@@ -6,7 +6,13 @@ from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
 from project.workbook import WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
 from project.workflows.ud_ip_exp.matching import UDAllocationResult
-from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, format_shared_column_entry
+from project.workflows.ud_ip_exp.payloads import (
+    UDDocumentPayload,
+    UDIPEXPDocumentKind,
+    UDIPEXPDocumentPayload,
+    format_shared_column_entry,
+    format_shared_column_values,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -153,3 +159,92 @@ def stage_ud_shared_column_operations(
             f"to rows {selected_candidate.row_indexes}."
         ],
     )
+
+
+def stage_ip_exp_shared_column_operations(
+    *,
+    run_id: str,
+    mail_id: str,
+    documents: list[UDIPEXPDocumentPayload],
+    workbook_snapshot: WorkbookSnapshot | None,
+    target_row_indexes: list[int] | None = None,
+) -> UDIPEXPWriteStagingResult:
+    ip_exp_documents = [
+        document
+        for document in documents
+        if document.document_kind in {UDIPEXPDocumentKind.EXP, UDIPEXPDocumentKind.IP}
+    ]
+    if not ip_exp_documents:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=["No IP/EXP document payloads supplied; no IP/EXP staging needed."],
+        )
+
+    if workbook_snapshot is None:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=["Workbook snapshot not supplied; IP/EXP write staging deferred."],
+        )
+
+    header_mapping = resolve_ud_ip_exp_header_mapping(workbook_snapshot)
+    if header_mapping is None:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[
+                UDIPEXPStagingDiscrepancy(
+                    code="workbook_header_mapping_invalid",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message="Required UD/IP/EXP workbook headers could not be resolved deterministically.",
+                    details={"sheet_name": workbook_snapshot.sheet_name},
+                )
+            ],
+            decision_reasons=["UD/IP/EXP workbook header mapping failed."],
+        )
+
+    unresolved_policies = [
+        "IP/EXP workbook target-row matching keys are not confirmed.",
+        "IP/EXP total value and quantity reconciliation is not fully specified.",
+        "IP/EXP date column mapping and line-by-line date write policy are not confirmed.",
+        "IP/EXP append, replacement, and duplicate handling for the shared column are not confirmed.",
+    ]
+    return UDIPEXPWriteStagingResult(
+        staged_write_operations=[],
+        discrepancies=[
+            UDIPEXPStagingDiscrepancy(
+                code="ip_exp_policy_unresolved",
+                severity=FinalDecision.HARD_BLOCK,
+                message=(
+                    "IP/EXP shared-column staging is blocked because required matching, date, "
+                    "total-check, and update policies are not fully confirmed."
+                ),
+                details={
+                    "run_id": run_id,
+                    "mail_id": mail_id,
+                    "sheet_name": workbook_snapshot.sheet_name,
+                    "target_column_key": "ud_ip_shared",
+                    "target_column_index": header_mapping["ud_ip_shared"],
+                    "target_row_indexes": list(target_row_indexes or []),
+                    "proposed_shared_column_value": format_shared_column_values(ip_exp_documents),
+                    "documents": [_document_summary(document) for document in ip_exp_documents],
+                    "unresolved_policies": unresolved_policies,
+                },
+            )
+        ],
+        decision_reasons=[
+            "IP/EXP staging blocked because matching, date, total-check, and shared-column update policies remain unresolved."
+        ],
+    )
+
+
+def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
+    return {
+        "document_kind": document.document_kind.value,
+        "document_number": document.document_number.value,
+        "document_date": document.document_date.value if document.document_date is not None else None,
+        "lc_sc_number": document.lc_sc_number.value,
+        "quantity": str(document.quantity.amount) if document.quantity is not None else None,
+        "quantity_unit": document.quantity.unit if document.quantity is not None else None,
+        "source_saved_document_id": document.source_saved_document_id,
+    }
