@@ -40,6 +40,7 @@ def assemble_ud_validation(
     ud_document: UDDocumentPayload,
     workbook_snapshot: WorkbookSnapshot | None,
     documents: list[UDIPEXPDocumentPayload] | None = None,
+    saved_documents: list | None = None,
     state_timezone: str = "Asia/Dhaka",
 ) -> UDValidationAssemblyResult:
     allocation_result = _build_allocation_result(
@@ -48,6 +49,7 @@ def assemble_ud_validation(
     )
     workflow_payload = UDIPEXPWorkflowPayload(
         documents=list(documents or [ud_document]),
+        saved_documents=list(saved_documents or []),
         ud_allocation_result=allocation_result,
     )
     rule_evaluation = evaluate_rule_pack(

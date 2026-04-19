@@ -7,6 +7,7 @@ from project.workbook.mapping import (
     resolve_export_header_mapping,
     resolve_header_mapping,
     resolve_ud_ip_exp_header_mapping,
+    resolve_ud_ip_exp_storage_header_mapping,
 )
 from project.workbook.models import WorkbookHeader, WorkbookRow, WorkbookSnapshot
 from project.workbook.mutation import (
@@ -56,4 +57,5 @@ __all__ = [
     "resolve_export_header_mapping",
     "resolve_header_mapping",
     "resolve_ud_ip_exp_header_mapping",
+    "resolve_ud_ip_exp_storage_header_mapping",
 ]

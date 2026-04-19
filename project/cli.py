@@ -1747,7 +1747,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             document_analysis_provider=(
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
-                else NullSavedDocumentAnalysisProvider()
+                else (
+                    LayeredSavedDocumentAnalysisProvider()
+                    if descriptor.workflow_id == WorkflowId.UD_IP_EXP and args.document_root is not None
+                    else NullSavedDocumentAnalysisProvider()
+                )
             ),
             ud_document_provider=(
                 JsonManifestUDDocumentPayloadProvider(args.ud_payload_json)

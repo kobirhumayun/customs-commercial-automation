@@ -84,12 +84,21 @@ class SavedDocument:
     extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
     extracted_pi_confidence: float | None = None
+    extracted_document_number: str | None = None
+    extracted_document_number_confidence: float | None = None
+    extracted_document_date: str | None = None
+    extracted_document_date_confidence: float | None = None
+    extracted_quantity: str | None = None
+    extracted_quantity_unit: str | None = None
     extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
     extracted_lc_sc_provenance: dict[str, Any] | None = None
     extracted_pi_provenance: dict[str, Any] | None = None
+    extracted_document_number_provenance: dict[str, Any] | None = None
+    extracted_document_date_provenance: dict[str, Any] | None = None
+    extracted_quantity_provenance: dict[str, Any] | None = None
     extracted_amendment_provenance: dict[str, Any] | None = None
     clause_provenance: dict[str, Any] | None = None
 

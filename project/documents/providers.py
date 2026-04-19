@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from io import BytesIO
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
 
 from project.models import SavedDocument
-from project.erp.normalization import normalize_lc_sc_number
+from project.erp.normalization import normalize_lc_sc_date, normalize_lc_sc_number
 
 
 LC_SC_CANDIDATE_PATTERN = re.compile(r"(?i)\b(?:LC|SC)\s*[- ]\s*[A-Z0-9]+(?:\s*-\s*[A-Z0-9]+){0,8}\b")
@@ -16,6 +18,33 @@ PI_CANDIDATE_PATTERN = re.compile(r"(?i)\bPDL\s*[- ]*\s*\d{2}\s*[- ]*\s*\d{1,4}(
 AMENDMENT_CANDIDATE_PATTERN = re.compile(
     r"(?i)\b(?:AMD|AMND|AMENDMENT)(?:\s*(?:NO|NUMBER|#)\.?\s*)?[-:|]?\s*0*(\d{1,3})\b"
 )
+UD_IP_EXP_CANDIDATE_PATTERN = re.compile(
+    r"(?i)\b(?:UD|IP|EXP)(?:[\s./\\_:;,\-]+[A-Z0-9]+){1,10}\b"
+)
+DOCUMENT_DATE_LABEL_PATTERN = re.compile(
+    r"(?i)\b(?:UD|IP|EXP)?\s*DATE\b\s*[:\-]?\s*"
+    r"(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}-[A-Z]{3}-\d{2,4})"
+)
+QUANTITY_LABEL_PATTERN = re.compile(
+    r"(?i)\b(?:QTY|QUANTITY)\b\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(YDS?|YARDS?|MTR|METER|METERS|METRE|METRES)\b"
+)
+_UD_IP_EXP_PREFIX_RE = re.compile(r"^(UD|IP|EXP)(?:[\s./\\_:;,\-]+|$)(.*)$")
+_UD_IP_EXP_SEPARATOR_RE = re.compile(r"[\s/\\_\-]+")
+_UNICODE_DASHES = {
+    "\u2010",
+    "\u2011",
+    "\u2012",
+    "\u2013",
+    "\u2014",
+    "\u2015",
+    "\u2212",
+}
+_ZERO_WIDTH = {
+    "\u200b",
+    "\u200c",
+    "\u200d",
+    "\ufeff",
+}
 
 
 @dataclass(slots=True, frozen=True)
@@ -25,12 +54,21 @@ class SavedDocumentAnalysis:
     extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
     extracted_pi_confidence: float | None = None
+    extracted_document_number: str | None = None
+    extracted_document_number_confidence: float | None = None
+    extracted_document_date: str | None = None
+    extracted_document_date_confidence: float | None = None
+    extracted_quantity: str | None = None
+    extracted_quantity_unit: str | None = None
     extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
     extracted_lc_sc_provenance: dict[str, object] | None = None
     extracted_pi_provenance: dict[str, object] | None = None
+    extracted_document_number_provenance: dict[str, object] | None = None
+    extracted_document_date_provenance: dict[str, object] | None = None
+    extracted_quantity_provenance: dict[str, object] | None = None
     extracted_amendment_provenance: dict[str, object] | None = None
     clause_provenance: dict[str, object] | None = None
 
@@ -114,8 +152,19 @@ class JsonManifestSavedDocumentAnalysisProvider:
         match = _match_manifest_record(payload, saved_document)
         if match is None:
             return SavedDocumentAnalysis(analysis_basis="none")
-        extracted_lc_sc_number = _optional_string(match.get("extracted_lc_sc_number"))
-        extracted_lc_sc_confidence = _optional_float(match.get("extracted_lc_sc_confidence"))
+        extracted_document_number = _optional_canonical_ud_ip_exp_number(match.get("document_number"))
+        extracted_document_number_confidence = _optional_float(match.get("document_number_confidence"))
+        extracted_document_date = _optional_canonical_date(match.get("document_date"))
+        extracted_document_date_confidence = _optional_float(match.get("document_date_confidence"))
+        extracted_quantity = _optional_quantity(match.get("quantity"))
+        extracted_quantity_unit = _optional_quantity_unit(match.get("quantity_unit"))
+        extracted_lc_sc_number = _optional_string(match.get("extracted_lc_sc_number")) or _optional_string(
+            match.get("lc_sc_number")
+        )
+        extracted_lc_sc_confidence = _optional_float_or_default(
+            match.get("extracted_lc_sc_confidence"),
+            default=_optional_float(match.get("lc_sc_number_confidence")),
+        )
         extracted_pi_number = _optional_string(match.get("extracted_pi_number"))
         extracted_pi_confidence = _optional_float(match.get("extracted_pi_confidence"))
         extracted_amendment_number = _optional_amendment_number(match.get("extracted_amendment_number"))
@@ -128,15 +177,29 @@ class JsonManifestSavedDocumentAnalysisProvider:
             extracted_lc_sc_confidence=extracted_lc_sc_confidence,
             extracted_pi_number=extracted_pi_number,
             extracted_pi_confidence=extracted_pi_confidence,
+            extracted_document_number=extracted_document_number,
+            extracted_document_number_confidence=extracted_document_number_confidence,
+            extracted_document_date=extracted_document_date,
+            extracted_document_date_confidence=extracted_document_date_confidence,
+            extracted_quantity=extracted_quantity,
+            extracted_quantity_unit=extracted_quantity_unit,
             extracted_amendment_number=extracted_amendment_number,
             clause_related_lc_sc_number=clause_related_lc_sc_number,
             clause_excerpt=clause_excerpt,
             clause_confidence=clause_confidence,
-            extracted_lc_sc_provenance=_manifest_field_provenance(
-                record=match,
-                field_name="extracted_lc_sc",
-                default_confidence=extracted_lc_sc_confidence,
-                default_excerpt=clause_excerpt,
+            extracted_lc_sc_provenance=(
+                _manifest_field_provenance(
+                    record=match,
+                    field_name="extracted_lc_sc",
+                    default_confidence=extracted_lc_sc_confidence,
+                    default_excerpt=clause_excerpt,
+                )
+                or _manifest_field_provenance(
+                    record=match,
+                    field_name="lc_sc_number",
+                    default_confidence=extracted_lc_sc_confidence,
+                    default_excerpt=clause_excerpt,
+                )
             )
             if extracted_lc_sc_number
             else None,
@@ -147,6 +210,26 @@ class JsonManifestSavedDocumentAnalysisProvider:
                 default_excerpt=clause_excerpt,
             )
             if extracted_pi_number
+            else None,
+            extracted_document_number_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="document_number",
+                default_confidence=extracted_document_number_confidence,
+            )
+            if extracted_document_number
+            else None,
+            extracted_document_date_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="document_date",
+                default_confidence=extracted_document_date_confidence,
+            )
+            if extracted_document_date
+            else None,
+            extracted_quantity_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="quantity",
+            )
+            if extracted_quantity
             else None,
             extracted_amendment_provenance=_manifest_field_provenance(
                 record=match,
@@ -377,6 +460,51 @@ def _optional_string(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _optional_canonical_ud_ip_exp_number(value: object) -> str | None:
+    raw_value = _optional_string(value)
+    if raw_value is None:
+        return None
+    canonical = _normalize_ud_ip_exp_document_number(raw_value)
+    if canonical is None:
+        raise ValueError("Saved-document analysis manifest document_number must be a valid UD/IP/EXP identifier.")
+    return canonical
+
+
+def _optional_canonical_date(value: object) -> str | None:
+    raw_value = _optional_string(value)
+    if raw_value is None:
+        return None
+    canonical = normalize_lc_sc_date(raw_value)
+    if canonical is None:
+        raise ValueError("Saved-document analysis manifest document_date must be a parseable date string.")
+    return canonical
+
+
+def _optional_quantity(value: object) -> str | None:
+    raw_value = _optional_string(value)
+    if raw_value is None:
+        return None
+    try:
+        numeric = Decimal(raw_value.replace(",", ""))
+    except (InvalidOperation, AttributeError) as exc:
+        raise ValueError("Saved-document analysis manifest quantity must be numeric when present.") from exc
+    return _format_decimal(numeric)
+
+
+def _optional_quantity_unit(value: object) -> str | None:
+    raw_value = _optional_string(value)
+    if raw_value is None:
+        return None
+    return _normalize_quantity_unit(raw_value)
+
+
+def _format_decimal(value: Decimal) -> str:
+    normalized = format(value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized or "0"
 
 
 def _optional_float(value: object) -> float | None:
@@ -854,6 +982,27 @@ def _analysis_from_page_text_report(
     pages = report.get("pages", [])
     if not isinstance(pages, list):
         pages = []
+    document_match = _first_match_from_pages(
+        pages,
+        matcher=_first_ud_ip_exp_document_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
+    document_date_match = _first_match_from_pages(
+        pages,
+        matcher=_first_document_date_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
+    quantity_match = _first_match_from_pages(
+        pages,
+        matcher=_first_quantity_match,
+        extraction_method_resolver=extraction_method_resolver,
+        page_text_resolver=page_text_resolver,
+        confidence_resolver=lambda _page, _value: default_confidence,
+    )
     lc_sc_match = _first_match_from_pages(
         pages,
         matcher=_first_lc_sc_match,
@@ -882,12 +1031,25 @@ def _analysis_from_page_text_report(
         extracted_lc_sc_confidence=lc_sc_match["confidence"] if lc_sc_match is not None else None,
         extracted_pi_number=pi_match["value"] if pi_match is not None else None,
         extracted_pi_confidence=pi_match["confidence"] if pi_match is not None else None,
+        extracted_document_number=document_match["value"] if document_match is not None else None,
+        extracted_document_number_confidence=document_match["confidence"] if document_match is not None else None,
+        extracted_document_date=document_date_match["value"] if document_date_match is not None else None,
+        extracted_document_date_confidence=(
+            document_date_match["confidence"] if document_date_match is not None else None
+        ),
+        extracted_quantity=quantity_match["value"].split(" ", 1)[0] if quantity_match is not None else None,
+        extracted_quantity_unit=(
+            quantity_match["value"].split(" ", 1)[1] if quantity_match is not None else None
+        ),
         extracted_amendment_number=amendment_match["value"] if amendment_match is not None else None,
         clause_related_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
         clause_excerpt=clause_match["excerpt"] if clause_match is not None else None,
         clause_confidence=clause_match["confidence"] if clause_match is not None else None,
         extracted_lc_sc_provenance=_provenance_from_match(lc_sc_match),
         extracted_pi_provenance=_provenance_from_match(pi_match),
+        extracted_document_number_provenance=_provenance_from_match(document_match),
+        extracted_document_date_provenance=_provenance_from_match(document_date_match),
+        extracted_quantity_provenance=_provenance_from_match(quantity_match),
         extracted_amendment_provenance=_provenance_from_match(amendment_match),
         clause_provenance=_provenance_from_match(clause_match),
     )
@@ -897,6 +1059,24 @@ def _analysis_from_ocr_report(report: dict[str, object], *, analysis_basis: str)
     pages = report.get("pages", [])
     if not isinstance(pages, list):
         pages = []
+    document_match = _first_match_from_pages(
+        pages,
+        matcher=_first_ud_ip_exp_document_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, _value: _safe_float(page.get("average_confidence")),
+    )
+    document_date_match = _first_match_from_pages(
+        pages,
+        matcher=_first_document_date_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, _value: _safe_float(page.get("average_confidence")),
+    )
+    quantity_match = _first_match_from_pages(
+        pages,
+        matcher=_first_quantity_match,
+        extraction_method_resolver=lambda _page: "ocr",
+        confidence_resolver=lambda page, _value: _safe_float(page.get("average_confidence")),
+    )
     lc_sc_match = _first_match_from_pages(
         pages,
         matcher=_first_lc_sc_match,
@@ -932,12 +1112,25 @@ def _analysis_from_ocr_report(report: dict[str, object], *, analysis_basis: str)
         extracted_lc_sc_confidence=lc_sc_match["confidence"] if lc_sc_match is not None else None,
         extracted_pi_number=pi_match["value"] if pi_match is not None else None,
         extracted_pi_confidence=pi_match["confidence"] if pi_match is not None else None,
+        extracted_document_number=document_match["value"] if document_match is not None else None,
+        extracted_document_number_confidence=document_match["confidence"] if document_match is not None else None,
+        extracted_document_date=document_date_match["value"] if document_date_match is not None else None,
+        extracted_document_date_confidence=(
+            document_date_match["confidence"] if document_date_match is not None else None
+        ),
+        extracted_quantity=quantity_match["value"].split(" ", 1)[0] if quantity_match is not None else None,
+        extracted_quantity_unit=(
+            quantity_match["value"].split(" ", 1)[1] if quantity_match is not None else None
+        ),
         extracted_amendment_number=amendment_match["value"] if amendment_match is not None else None,
         clause_related_lc_sc_number=lc_sc_match["value"] if lc_sc_match is not None else None,
         clause_excerpt=clause_match["excerpt"] if clause_match is not None else None,
         clause_confidence=clause_match["confidence"] if clause_match is not None else None,
         extracted_lc_sc_provenance=_provenance_from_match(lc_sc_match),
         extracted_pi_provenance=_provenance_from_match(pi_match),
+        extracted_document_number_provenance=_provenance_from_match(document_match),
+        extracted_document_date_provenance=_provenance_from_match(document_date_match),
+        extracted_quantity_provenance=_provenance_from_match(quantity_match),
         extracted_amendment_provenance=_provenance_from_match(amendment_match),
         clause_provenance=_provenance_from_match(clause_match),
     )
@@ -1374,6 +1567,38 @@ def _first_lc_sc_match(text: str) -> tuple[str, int] | None:
     return None
 
 
+def _first_ud_ip_exp_document_match(text: str) -> tuple[str, int] | None:
+    seen: set[str] = set()
+    for match in UD_IP_EXP_CANDIDATE_PATTERN.finditer(text):
+        normalized = _normalize_ud_ip_exp_document_number(match.group(0))
+        if normalized is None or normalized in seen:
+            continue
+        seen.add(normalized)
+        return normalized, match.start()
+    return None
+
+
+def _first_document_date_match(text: str) -> tuple[str, int] | None:
+    match = DOCUMENT_DATE_LABEL_PATTERN.search(text)
+    if match is None:
+        return None
+    normalized = normalize_lc_sc_date(match.group(1))
+    if normalized is None:
+        return None
+    return normalized, match.start(1)
+
+
+def _first_quantity_match(text: str) -> tuple[str, int] | None:
+    match = QUANTITY_LABEL_PATTERN.search(text)
+    if match is None:
+        return None
+    quantity = _optional_quantity(match.group(1))
+    unit = _optional_quantity_unit(match.group(2))
+    if quantity is None or unit is None:
+        return None
+    return f"{quantity} {unit}", match.start(1)
+
+
 def _first_pi_match(text: str) -> tuple[str, int] | None:
     seen: set[str] = set()
     for match in PI_CANDIDATE_PATTERN.finditer(text):
@@ -1408,6 +1633,50 @@ def _normalize_pi_number(raw_value: str) -> str | None:
     return canonical
 
 
+def _normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
+    normalized = _apply_ud_ip_exp_identifier_primitives(raw_value)
+    match = _UD_IP_EXP_PREFIX_RE.match(normalized)
+    if match is None:
+        return None
+
+    prefix = match.group(1)
+    body = match.group(2).strip().strip(".,;:")
+    if not body:
+        return None
+
+    body_tokens = [token for token in _UD_IP_EXP_SEPARATOR_RE.split(body) if token]
+    if not body_tokens:
+        return None
+    if len(body_tokens) >= 2 and body_tokens[0] in {"LC", "SC"}:
+        remainder = " ".join(body_tokens[2:])
+        if remainder:
+            return f"{prefix}-{body_tokens[0]}-{body_tokens[1]}-{remainder}"
+        return f"{prefix}-{body_tokens[0]}-{body_tokens[1]}"
+    return f"{prefix}-{'-'.join(body_tokens)}"
+
+
+def _apply_ud_ip_exp_identifier_primitives(raw_value: str) -> str:
+    cleaned = "".join(_clean_ud_ip_exp_identifier_char(character) for character in str(raw_value))
+    return re.sub(r"\s+", " ", cleaned).strip().upper()
+
+
+def _clean_ud_ip_exp_identifier_char(character: str) -> str:
+    if character in _ZERO_WIDTH or unicodedata.category(character)[0] == "C":
+        return ""
+    if character in _UNICODE_DASHES:
+        return "-"
+    return character
+
+
+def _normalize_quantity_unit(raw_value: str) -> str:
+    normalized = raw_value.strip().upper()
+    if normalized in {"YD", "YARD", "YARDS"}:
+        return "YDS"
+    if normalized in {"METER", "METERS", "METRE", "METRES"}:
+        return "MTR"
+    return normalized
+
+
 def _build_clause_excerpt(text: str, seed_index: int | None) -> str | None:
     if seed_index is None:
         return None
@@ -1419,6 +1688,9 @@ def _build_clause_excerpt(text: str, seed_index: int | None) -> str | None:
 
 def _analysis_has_identifier(analysis: SavedDocumentAnalysis) -> bool:
     return bool(
+        (analysis.extracted_document_number and analysis.extracted_document_number.strip())
+        or (analysis.extracted_document_date and analysis.extracted_document_date.strip())
+        or
         (analysis.extracted_lc_sc_number and analysis.extracted_lc_sc_number.strip())
         or (analysis.extracted_pi_number and analysis.extracted_pi_number.strip())
     )
@@ -1431,12 +1703,31 @@ def _merge_analysis(primary: SavedDocumentAnalysis, secondary: SavedDocumentAnal
         extracted_lc_sc_confidence=primary.extracted_lc_sc_confidence or secondary.extracted_lc_sc_confidence,
         extracted_pi_number=primary.extracted_pi_number or secondary.extracted_pi_number,
         extracted_pi_confidence=primary.extracted_pi_confidence or secondary.extracted_pi_confidence,
+        extracted_document_number=primary.extracted_document_number or secondary.extracted_document_number,
+        extracted_document_number_confidence=(
+            primary.extracted_document_number_confidence or secondary.extracted_document_number_confidence
+        ),
+        extracted_document_date=primary.extracted_document_date or secondary.extracted_document_date,
+        extracted_document_date_confidence=(
+            primary.extracted_document_date_confidence or secondary.extracted_document_date_confidence
+        ),
+        extracted_quantity=primary.extracted_quantity or secondary.extracted_quantity,
+        extracted_quantity_unit=primary.extracted_quantity_unit or secondary.extracted_quantity_unit,
         extracted_amendment_number=primary.extracted_amendment_number or secondary.extracted_amendment_number,
         clause_related_lc_sc_number=primary.clause_related_lc_sc_number or secondary.clause_related_lc_sc_number,
         clause_excerpt=primary.clause_excerpt or secondary.clause_excerpt,
         clause_confidence=primary.clause_confidence or secondary.clause_confidence,
         extracted_lc_sc_provenance=primary.extracted_lc_sc_provenance or secondary.extracted_lc_sc_provenance,
         extracted_pi_provenance=primary.extracted_pi_provenance or secondary.extracted_pi_provenance,
+        extracted_document_number_provenance=(
+            primary.extracted_document_number_provenance or secondary.extracted_document_number_provenance
+        ),
+        extracted_document_date_provenance=(
+            primary.extracted_document_date_provenance or secondary.extracted_document_date_provenance
+        ),
+        extracted_quantity_provenance=(
+            primary.extracted_quantity_provenance or secondary.extracted_quantity_provenance
+        ),
         extracted_amendment_provenance=(
             primary.extracted_amendment_provenance or secondary.extracted_amendment_provenance
         ),

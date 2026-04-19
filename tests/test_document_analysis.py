@@ -629,6 +629,47 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_pi_provenance["extraction_method"], "json_manifest")
         self.assertEqual(analysis.clause_provenance["confidence"], 0.99)
 
+    def test_json_manifest_provider_loads_ud_specific_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "document-analysis.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "normalized_filename": "UD-LC-0043-ANANTA.pdf",
+                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_number_confidence": 0.99,
+                            "document_date": "2026-04-01",
+                            "document_date_confidence": 0.98,
+                            "lc_sc_number": "LC-0043",
+                            "lc_sc_number_confidence": 1.0,
+                            "quantity": "1000",
+                            "quantity_unit": "YDS",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            analysis = JsonManifestSavedDocumentAnalysisProvider(manifest_path).analyze(
+                saved_document=SavedDocument(
+                    saved_document_id="doc-1",
+                    mail_id="mail-1",
+                    attachment_name="UD-LC-0043-ANANTA.pdf",
+                    normalized_filename="UD-LC-0043-ANANTA.pdf",
+                    destination_path="C:/docs/UD-LC-0043-ANANTA.pdf",
+                    file_sha256="a" * 64,
+                    save_decision="saved_new",
+                )
+            )
+
+        self.assertEqual(analysis.analysis_basis, "json_manifest")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
     def test_pdfplumber_provider_extracts_identifiers_and_amendment_from_table_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "table.pdf"

@@ -15,10 +15,15 @@ Before implementation, read these files in order:
 
 - Workflow id: `ud_ip_exp`
 - Registry entry: present in `project/workflows/registry.py`
-- Rule pack stub: present at `project/rules/workflows/ud_ip_exp/__init__.py`
+- Rule pack: implemented at `project/rules/workflows/ud_ip_exp/__init__.py`
 - Rule pack id: `ud_ip_exp.default`
 - Rule pack version: `1.0.0`
-- Implementation status: not implemented beyond shared workflow infrastructure and placeholder rule-pack registration.
+- Implementation status:
+  - payload models, parsing helpers, workbook header mapping, deterministic UD allocation, staging, reporting, and rule-pack wiring are implemented
+  - CLI validation accepts deterministic fixture payloads through `validate-run ud_ip_exp --ud-payload-json <path>`
+  - live UD document preparation is implemented for `validate-run` when `--document-root` is used, including PDF save, saved-document analysis, workflow-local document classification, workbook-family storage-path resolution, and UD payload derivation from saved documents
+  - transport for `ud_ip_exp` remains intentionally disabled pending unresolved print/mail-move policy
+  - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
 
 ## Objective
@@ -32,6 +37,10 @@ The workflow must:
 - Match extracted LC/SC family and quantities to existing workbook rows.
 - Write values into shared workbook columns safely.
 - Preserve workbook fidelity and use the same staged write, prevalidation, live write, print, mail-move, recovery, and reporting contracts used by the released workflow.
+
+Current implementation note:
+- The repository already satisfies the initial pure-function foundation goals plus a first live-UD intake slice.
+- Remaining work is no longer "start from zero"; it is to extend the current implementation without breaking export behavior.
 
 ## Non-Negotiable Shared Contracts
 
@@ -120,15 +129,17 @@ The exact extraction fields, workbook date columns, matching keys, and update/ap
 
 ### 1. Payload and Extraction Models
 
-Add workflow-specific payload models under `project/workflows/ud_ip_exp/`.
-
-Expected modules:
+Implemented modules:
 - `payloads.py`
-- `parsing.py` or `extraction.py`
+- `parsing.py`
+- `matching.py`
 - `staging.py`
-- optional `document_classification.py` if shared export classification cannot be reused cleanly
+- `reporting.py`
+- `providers.py`
+- `document_classification.py`
+- `live_documents.py`
 
-The payload should carry:
+Current payload coverage:
 - parsed/extracted document type: UD, IP, EXP
 - extracted LC/SC number
 - extracted quantities and units
@@ -137,18 +148,28 @@ The payload should carry:
 - extraction provenance/confidence, where available
 - saved document metadata
 
+Current live-extraction boundary:
+- saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
+- live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
+
 ### 2. Workbook Header Mapping
 
-Extend workbook mapping with UD/IP/EXP-owned columns.
-
-At minimum, confirm and map:
+Implemented:
 - `UD No. & IP No.`
+- `L/C & S/C No.`
+- `Quantity of Fabrics (Yds/Mtr)`
+- `L/C Amnd No.`
+- `L/C Amnd Date`
+
+Additional live-document storage-path mapping is also implemented to resolve:
+- `Name of Buyers`
+- `LC Issue Date`
 
 Do not assume additional workbook columns without verifying `docs/workflows.md`, `docs/domain-rules.md`, the real workbook headers, and user confirmation.
 
 ### 3. Candidate Matching
 
-Implement candidate row selection from an existing workbook snapshot:
+Implemented:
 - Match rows by LC/SC family.
 - Compare quantities using normalized numeric values and unit compatibility.
 - Generate all valid candidate combinations for UD allocation.
@@ -157,35 +178,37 @@ Implement candidate row selection from an existing workbook snapshot:
 
 ### 4. Write Staging
 
-Stage workbook operations using existing `WriteOperation` contracts.
-
-Required behavior:
+Implemented behavior:
 - No direct Excel writes during validation.
 - All target cells must be prevalidated before live write.
-- If updating a shared multiline column, use an explicit expected pre-write value and expected post-write value.
-- Preserve existing line-break ordering and avoid duplicate UD/IP/EXP entries.
-- Treat conflicting non-blank target values as hard-block unless the rule explicitly permits append/update.
+- UD shared-column writes stage explicit `WriteOperation` records using expected post-write values.
+- Conflicting non-blank target values currently hard-block with `ud_shared_column_nonblank_policy_unresolved`.
+
+Still deferred:
+- append/update behavior for non-blank shared-column cells beyond the current hard-block path
+- IP/EXP shared-column staging beyond explicit unresolved-policy hard-block reporting
 
 ### 5. Rule Pack
 
-Replace the placeholder rule pack in `project/rules/workflows/ud_ip_exp/__init__.py` with deterministic rules.
+Implemented rule categories:
+- required UD document present
+- required UD extraction fields present
+- deterministic UD allocation selected
+- unresolved IP/EXP policy hard-block when IP/EXP documents are present
 
-Likely rule categories:
+Still expected before workflow completion:
 - required document classification present
-- required extraction fields present
 - LC/SC family match
 - quantity/unit compatibility
-- candidate combination selected
-- no full tie after deterministic scoring
 - workbook target update permitted
 
 Any new discrepancy code must first be added to `docs/discrepancy-codes.md`.
 
 ### 6. Validation Orchestration
 
-Extend shared validation branching currently focused on `export_lc_sc` so `ud_ip_exp` can:
+Implemented:
 - build its workflow payload
-- save/classify documents
+- save/classify live documents for UD/IP/EXP intake when `--document-root` is used
 - run rules
 - stage workbook operations
 - emit mail outcomes and reports
@@ -196,13 +219,10 @@ Keep export behavior unchanged. Add tests proving `export_lc_sc` still passes.
 
 Confirm whether UD/IP/EXP requires printing all newly saved PDFs, only selected document types, or no print. Until clarified, do not invent a different transport policy.
 
-If print is required:
-- reuse `plan_print_batches`
-- ensure only eligible saved PDFs are print-planned
-- preserve deterministic order
-
-If print is not required for some terminal path:
-- document that policy and encode it explicitly in mail outcomes and mail-move eligibility.
+Current implementation:
+- `ud_ip_exp` print and mail-move eligibility is intentionally disabled in validation output
+- CLI output includes explicit transport-policy status explaining the unresolved-policy block
+- no print/mail-move behavior should be added until the business rule is confirmed in durable docs
 
 ## Deterministic Fixture Manifest
 
@@ -223,14 +243,21 @@ See `docs/ud-ip-exp-payload-manifest-example.json` for a minimal example.
 
 ## Tests to Add
 
-Minimum test groups:
+Implemented test groups:
 - `tests/test_ud_ip_exp_payloads.py`
+- `tests/test_ud_ip_exp_parsing.py`
+- `tests/test_ud_ip_exp_matching.py`
 - `tests/test_ud_ip_exp_staging.py`
 - `tests/test_ud_ip_exp_rules.py`
+- `tests/test_ud_ip_exp_validation.py`
+- `tests/test_ud_ip_exp_reporting.py`
+- `tests/test_ud_ip_exp_manifest_validation.py`
+- `tests/test_ud_ip_exp_workbook.py`
+- `tests/test_ud_ip_exp_live_documents.py`
 - CLI integration tests in `tests/test_cli.py`
 - regression tests proving `export_lc_sc` behavior unchanged
 
-Core scenarios:
+Implemented scenarios include:
 - UD exact quantity maps to one row.
 - UD exact quantity maps to multiple non-sequential rows.
 - Duplicate row quantities use multiset matching correctly.
@@ -243,7 +270,12 @@ Core scenarios:
 - Missing required extraction field hard-blocks.
 - Workbook prevalidation blocks non-safe target cells.
 
-## Open Questions Before Coding
+Still valuable to add later:
+- more live document-analysis fixtures covering mixed-quality PDFs
+- explicit tests for LC/SC family inconsistency across multiple live derived documents in one mail
+- eventual IP/EXP completion-path tests once the business rules are finalized
+
+## Open Questions Before Production Completion
 
 These must be answered or intentionally hard-blocked before production release:
 
@@ -261,15 +293,13 @@ These must be answered or intentionally hard-blocked before production release:
 
 Until answered, default to hard-block with comprehensive discrepancy reporting rather than guessing.
 
-## Suggested First Implementation Step
+## Suggested Next Implementation Step
 
-Start with read-only tests and models:
-1. Add UD/IP/EXP payload dataclasses.
-2. Add workbook header mapping for `UD No. & IP No.` only.
-3. Add candidate-combination selection as a pure function with unit tests.
-4. Add rule-pack tests for the deterministic tie behavior.
-
-Only after those pass should live workbook staging be connected.
+The next highest-value work is whichever of these the team wants to unblock first:
+1. Update this handoff and adjacent durable docs whenever the implementation boundary changes.
+2. Improve live UD extraction quality using deterministic saved-document analysis fixtures and hard-block reporting.
+3. Finalize IP/EXP business rules in docs, then replace the current unresolved-policy hard-block path with deterministic matching and staging logic.
+4. Finalize `ud_ip_exp` transport policy before enabling print/mail-move eligibility.
 
 ## Guardrails for New Sessions
 

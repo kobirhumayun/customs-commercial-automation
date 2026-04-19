@@ -28,6 +28,14 @@ from project.workflows.ud_ip_exp.providers import (
     MappingUDDocumentPayloadProvider,
     UDDocumentPayloadProvider,
 )
+from project.workflows.ud_ip_exp.document_classification import (
+    ClassifiedUDIPEXPDocumentSet,
+    classify_saved_ud_ip_exp_documents,
+)
+from project.workflows.ud_ip_exp.live_documents import (
+    UDIPEXPLiveDocumentPreparationResult,
+    prepare_live_ud_ip_exp_documents,
+)
 from project.workflows.ud_ip_exp.staging import (
     UDIPEXPStagingDiscrepancy,
     UDIPEXPWriteStagingResult,
@@ -37,11 +45,13 @@ from project.workflows.ud_ip_exp.staging import (
 from project.workflows.ud_ip_exp.reporting import build_ud_selection_report
 
 __all__ = [
+    "ClassifiedUDIPEXPDocumentSet",
     "DocumentExtractionField",
     "EXPDocumentPayload",
     "IPDocumentPayload",
     "JsonManifestUDDocumentPayloadProvider",
     "MappingUDDocumentPayloadProvider",
+    "UDIPEXPLiveDocumentPreparationResult",
     "UDAllocationCandidate",
     "UDAllocationResult",
     "UDCandidateRow",
@@ -55,11 +65,13 @@ __all__ = [
     "UDIPEXPWriteStagingResult",
     "allocate_ud_rows",
     "build_ud_selection_report",
+    "classify_saved_ud_ip_exp_documents",
     "collect_ud_candidate_rows",
     "document_kind_from_number",
     "format_shared_column_entry",
     "format_shared_column_values",
     "normalize_ud_ip_exp_document_number",
+    "prepare_live_ud_ip_exp_documents",
     "stage_ip_exp_shared_column_operations",
     "stage_ud_shared_column_operations",
 ]
