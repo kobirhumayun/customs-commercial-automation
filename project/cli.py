@@ -103,6 +103,7 @@ from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_handoff_export import build_run_handoff_export
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
+from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadProvider
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
@@ -1597,6 +1598,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON manifest of saved-document analysis outputs for deterministic attachment classification.",
     )
     parser.add_argument(
+        "--ud-payload-json",
+        type=Path,
+        help="Optional UD/IP/EXP payload manifest for deterministic UD validation fixtures.",
+    )
+    parser.add_argument(
         "--workbook-json",
         type=Path,
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
@@ -1738,6 +1744,11 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
                 else NullSavedDocumentAnalysisProvider()
+            ),
+            ud_document_provider=(
+                JsonManifestUDDocumentPayloadProvider(args.ud_payload_json)
+                if args.ud_payload_json is not None
+                else None
             ),
         )
         if args.apply_live_writes and not args.live_workbook:
