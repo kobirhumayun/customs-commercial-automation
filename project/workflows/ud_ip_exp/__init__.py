@@ -7,6 +7,10 @@ from project.workflows.ud_ip_exp.matching import (
     allocate_ud_rows,
     collect_ud_candidate_rows,
 )
+from project.workflows.ud_ip_exp.parsing import (
+    document_kind_from_number,
+    normalize_ud_ip_exp_document_number,
+)
 from project.workflows.ud_ip_exp.payloads import (
     DocumentExtractionField,
     EXPDocumentPayload,
@@ -52,8 +56,10 @@ __all__ = [
     "allocate_ud_rows",
     "build_ud_selection_report",
     "collect_ud_candidate_rows",
+    "document_kind_from_number",
     "format_shared_column_entry",
     "format_shared_column_values",
+    "normalize_ud_ip_exp_document_number",
     "stage_ip_exp_shared_column_operations",
     "stage_ud_shared_column_operations",
 ]

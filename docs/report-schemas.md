@@ -81,6 +81,24 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `severity` must match the catalog entry for that code.
 - If `rule_id` is null, `details` must include `non_rule_source` describing the emitting subsystem.
 
+### UD/IP/EXP unresolved IP/EXP policy details
+When `code` is `ip_exp_policy_unresolved`, `details` must include:
+- `mail_id`
+- `document_count`
+- `document_kinds`
+- `proposed_shared_column_value`
+- `documents`
+- `unresolved_policies`
+
+Each `documents[]` item should include:
+- `document_kind`
+- `document_number`
+- `document_date`
+- `lc_sc_number`
+- `quantity`
+- `quantity_unit`
+- `source_saved_document_id`
+
 ## 5) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`
 - `schema_version`: `1.0.0`

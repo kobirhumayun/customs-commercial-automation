@@ -1,7 +1,13 @@
 from project.models import FinalDecision
 from project.models.enums import RuleStage
 from project.rules.types import RuleDefinition, RuleDiscrepancy, RuleEvaluationResult
-from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, UDIPEXPWorkflowPayload
+from project.workflows.ud_ip_exp.payloads import (
+    UDDocumentPayload,
+    UDIPEXPDocumentKind,
+    UDIPEXPDocumentPayload,
+    UDIPEXPWorkflowPayload,
+    format_shared_column_values,
+)
 
 RULE_PACK_ID = "ud_ip_exp.default"
 RULE_PACK_VERSION = "1.0.0"
@@ -119,6 +125,49 @@ def evaluate_ud_allocation_selected(context) -> RuleEvaluationResult:
     )
 
 
+def evaluate_ip_exp_policy_resolved(context) -> RuleEvaluationResult:
+    payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    ip_exp_documents = _ip_exp_documents(payload)
+    if not ip_exp_documents:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+            outcome=FinalDecision.PASS,
+            rationale="No IP/EXP document payloads are present for unresolved IP/EXP policy checks.",
+        )
+
+    unresolved_policies = [
+        "IP/EXP workbook target-row matching keys are not confirmed.",
+        "IP/EXP total value and quantity reconciliation is not fully specified.",
+        "IP/EXP date column mapping and line-by-line date write policy are not confirmed.",
+        "IP/EXP append, replacement, and duplicate handling for the shared column are not confirmed.",
+    ]
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="IP/EXP document payloads are present but required processing policies remain unresolved.",
+        discrepancies=(
+            RuleDiscrepancy(
+                code="ip_exp_policy_unresolved",
+                severity=FinalDecision.HARD_BLOCK,
+                message=(
+                    "IP/EXP documents were supplied, but matching, date, total-check, "
+                    "and shared-column update policies are not fully confirmed."
+                ),
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "document_count": len(ip_exp_documents),
+                    "document_kinds": [document.document_kind.value for document in ip_exp_documents],
+                    "proposed_shared_column_value": format_shared_column_values(ip_exp_documents),
+                    "documents": [_document_summary(document) for document in ip_exp_documents],
+                    "unresolved_policies": unresolved_policies,
+                },
+            ),
+        ),
+    )
+
+
 def _require_ud_ip_exp_payload(payload) -> UDIPEXPWorkflowPayload:
     if not isinstance(payload, UDIPEXPWorkflowPayload):
         raise ValueError("UD/IP/EXP rules require a UDIPEXPWorkflowPayload")
@@ -133,7 +182,32 @@ def _ud_documents(payload: UDIPEXPWorkflowPayload) -> list[UDDocumentPayload]:
     ]
 
 
+def _ip_exp_documents(payload: UDIPEXPWorkflowPayload) -> list[UDIPEXPDocumentPayload]:
+    return [
+        document
+        for document in payload.documents
+        if document.document_kind in {UDIPEXPDocumentKind.EXP, UDIPEXPDocumentKind.IP}
+    ]
+
+
+def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
+    return {
+        "document_kind": document.document_kind.value,
+        "document_number": document.document_number.value,
+        "document_date": document.document_date.value if document.document_date is not None else None,
+        "lc_sc_number": document.lc_sc_number.value,
+        "quantity": str(document.quantity.amount) if document.quantity is not None else None,
+        "quantity_unit": document.quantity.unit if document.quantity is not None else None,
+        "source_saved_document_id": document.source_saved_document_id,
+    }
+
+
 RULE_DEFINITIONS = (
+    RuleDefinition(
+        rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+        stage=RuleStage.WORKFLOW_STANDARD,
+        evaluator=evaluate_ip_exp_policy_resolved,
+    ),
     RuleDefinition(
         rule_id="ud_ip_exp.ud_allocation_selected.v1",
         stage=RuleStage.WORKFLOW_STANDARD,

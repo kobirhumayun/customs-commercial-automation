@@ -4669,6 +4669,111 @@ class CLITests(unittest.TestCase):
             ["ud_allocation_unresolved", "ud_required_document_missing"],
         )
 
+    def test_validate_run_ud_ip_exp_mixed_manifest_hard_blocks_ip_exp_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_cli_config(root, workflow_year=datetime.datetime.now().year)
+            snapshot_path = root / "snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "received_time": "2026-04-01T03:00:00Z",
+                            "subject_raw": "UD-LC-0043-ANANTA",
+                            "sender_address": "sender@example.com",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "L/C & S/C No."},
+                            {"column_index": 2, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                            {"column_index": 3, "text": "UD No. & IP No."},
+                            {"column_index": 4, "text": "L/C Amnd No."},
+                            {"column_index": 5, "text": "L/C Amnd Date"},
+                        ],
+                        "rows": [
+                            {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": ""}},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ud_payload_path = root / "ud-payloads.json"
+            ud_payload_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "UD",
+                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_date": "2026-04-01",
+                            "lc_sc_number": "LC-0043",
+                            "quantity": "1000",
+                            "quantity_unit": "YDS",
+                        },
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "EXP",
+                            "document_number": "EXP-001",
+                            "document_date": "2026-04-02",
+                            "lc_sc_number": "LC-0043",
+                        },
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "IP",
+                            "document_number": "IP-002",
+                            "document_date": "2026-04-03",
+                            "lc_sc_number": "LC-0043",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "validate-run",
+                        "ud_ip_exp",
+                        "--config",
+                        str(config_path),
+                        "--snapshot-json",
+                        str(snapshot_path),
+                        "--workbook-json",
+                        str(workbook_path),
+                        "--ud-payload-json",
+                        str(ud_payload_path),
+                    ]
+                )
+            payload = json.loads(buffer.getvalue())
+            artifact_root = Path(payload["artifact_root"])
+            discrepancies = _read_jsonl(artifact_root / "discrepancies.jsonl")
+            mail_outcomes = _read_jsonl(artifact_root / "mail_outcomes.jsonl")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["summary"], {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(payload["staged_write_operation_count"], 0)
+        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
+        self.assertEqual([item["code"] for item in discrepancies], ["ip_exp_policy_unresolved"])
+        self.assertEqual(
+            discrepancies[0]["details"]["proposed_shared_column_value"],
+            "EXP: EXP-001\nIP: IP-002",
+        )
+        self.assertIn("date column mapping", "\n".join(discrepancies[0]["details"]["unresolved_policies"]))
+        self.assertEqual(mail_outcomes[0]["ud_selection"]["selected_candidate_id"], "11")
+        self.assertFalse(mail_outcomes[0]["eligible_for_write"])
+        self.assertFalse(mail_outcomes[0]["eligible_for_print"])
+        self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
+
 
 def _write_cli_config(root: Path, *, workflow_year: int) -> Path:
     for name in ("reports", "runs", "backups", "workbooks"):

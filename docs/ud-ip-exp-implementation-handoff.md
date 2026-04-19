@@ -213,6 +213,8 @@ This manifest is only for tests, fixture-backed dry runs, and development while 
 Manifest shape:
 - Top-level JSON value is a list of records.
 - Each record must include `mail_id` or `entry_id` matching the mail snapshot.
+- Each record may include `document_kind` (`UD`, `IP`, or `EXP`); omitted kind defaults to `UD` for backward-compatible UD fixtures.
+- Multiple records may reference the same mail when a fixture mail carries UD plus IP/EXP documents.
 - Each record must include `document_number`, `document_date`, and `lc_sc_number`.
 - `quantity` and `quantity_unit` should be supplied for UD allocation.
 - Optional confidence/provenance fields are supported for required extracted values.

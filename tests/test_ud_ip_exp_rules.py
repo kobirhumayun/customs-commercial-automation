@@ -8,6 +8,8 @@ from project.rules import evaluate_rule_pack, load_rule_pack
 from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
+    EXPDocumentPayload,
+    IPDocumentPayload,
     UDCandidateRow,
     UDDocumentPayload,
     UDIPEXPWorkflowPayload,
@@ -28,6 +30,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
             [
                 "core.mail.sender_present.v1",
                 "core.mail.subject_present.v1",
+                "ud_ip_exp.ip_exp_policy_resolved.v1",
                 "ud_ip_exp.ud_allocation_selected.v1",
                 "ud_ip_exp.ud_document_present.v1",
                 "ud_ip_exp.ud_required_fields_present.v1",
@@ -129,6 +132,45 @@ class UDIPEXPRuleTests(unittest.TestCase):
 
         self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
         self.assertEqual([item.code for item in result.discrepancies], ["ud_candidate_tie_after_full_tiebreak"])
+
+    def test_rule_pack_hard_blocks_ip_exp_payloads_until_policy_resolved(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        payload = UDIPEXPWorkflowPayload(
+            documents=[
+                _ud_document(),
+                IPDocumentPayload(
+                    document_number=DocumentExtractionField("IP-002"),
+                    document_date=DocumentExtractionField("2026-04-03"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+                EXPDocumentPayload(
+                    document_number=DocumentExtractionField("EXP-001"),
+                    document_date=DocumentExtractionField("2026-04-02"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+            ],
+            ud_allocation_result=allocate_ud_rows(
+                required_quantity=Decimal("1000"),
+                quantity_unit="YDS",
+                candidate_rows=[
+                    UDCandidateRow(
+                        row_index=11,
+                        lc_sc_number="LC-0043",
+                        quantity=Decimal("1000"),
+                        quantity_unit="YDS",
+                    )
+                ],
+            ),
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual([item.code for item in result.discrepancies], ["ip_exp_policy_unresolved"])
+        self.assertEqual(
+            result.discrepancies[0].details["proposed_shared_column_value"],
+            "EXP: EXP-001\nIP: IP-002",
+        )
 
 
 def _ud_document() -> UDDocumentPayload:

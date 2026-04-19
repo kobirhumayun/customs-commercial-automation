@@ -11,7 +11,11 @@ from project.workflows.ud_ip_exp.matching import (
     allocate_ud_rows,
     collect_ud_candidate_rows,
 )
-from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, UDIPEXPWorkflowPayload
+from project.workflows.ud_ip_exp.payloads import (
+    UDDocumentPayload,
+    UDIPEXPDocumentPayload,
+    UDIPEXPWorkflowPayload,
+)
 from project.workflows.ud_ip_exp.reporting import build_ud_selection_report
 from project.workflows.ud_ip_exp.staging import (
     UDIPEXPWriteStagingResult,
@@ -35,6 +39,7 @@ def assemble_ud_validation(
     rule_pack: LoadedRulePack,
     ud_document: UDDocumentPayload,
     workbook_snapshot: WorkbookSnapshot | None,
+    documents: list[UDIPEXPDocumentPayload] | None = None,
     state_timezone: str = "Asia/Dhaka",
 ) -> UDValidationAssemblyResult:
     allocation_result = _build_allocation_result(
@@ -42,7 +47,7 @@ def assemble_ud_validation(
         workbook_snapshot=workbook_snapshot,
     )
     workflow_payload = UDIPEXPWorkflowPayload(
-        documents=[ud_document],
+        documents=list(documents or [ud_document]),
         ud_allocation_result=allocation_result,
     )
     rule_evaluation = evaluate_rule_pack(

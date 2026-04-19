@@ -6,6 +6,7 @@ rule_ids = [
   "export_lc_sc.file_number_present.v1",
   "export_lc_sc.subject_family_match.v1",
   "export_lc_sc.subject_parseable.v1",
+  "ud_ip_exp.ip_exp_policy_resolved.v1",
   "ud_ip_exp.ud_allocation_selected.v1",
   "ud_ip_exp.ud_document_present.v1",
   "ud_ip_exp.ud_required_fields_present.v1",

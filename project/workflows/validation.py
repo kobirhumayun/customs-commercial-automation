@@ -353,11 +353,8 @@ def _evaluate_ud_ip_exp_mail(
     workbook_snapshot: WorkbookSnapshot | None,
     ud_document_provider: UDDocumentPayloadProvider | None,
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, UDIPEXPWriteStagingResult, dict | None]:
-    ud_document = (
-        ud_document_provider.get_ud_document(mail)
-        if ud_document_provider is not None
-        else None
-    )
+    documents = ud_document_provider.get_documents(mail) if ud_document_provider is not None else []
+    ud_document = ud_document_provider.get_ud_document(mail) if ud_document_provider is not None else None
     if ud_document is not None:
         from project.workflows.ud_ip_exp.validation import assemble_ud_validation
 
@@ -367,6 +364,7 @@ def _evaluate_ud_ip_exp_mail(
             rule_pack=rule_pack,
             ud_document=ud_document,
             workbook_snapshot=workbook_snapshot,
+            documents=documents,
             state_timezone=run_report.state_timezone,
         )
         context = WorkflowValidationContext(
@@ -381,7 +379,7 @@ def _evaluate_ud_ip_exp_mail(
         )
         return context, assembly.rule_evaluation, assembly.staging_result, assembly.ud_selection
 
-    workflow_payload = UDIPEXPWorkflowPayload(documents=[])
+    workflow_payload = UDIPEXPWorkflowPayload(documents=documents)
     context = WorkflowValidationContext(
         run_id=run_report.run_id,
         workflow_id=run_report.workflow_id,

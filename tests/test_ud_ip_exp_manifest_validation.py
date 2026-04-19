@@ -20,6 +20,8 @@ from project.workflows.registry import get_workflow_descriptor
 from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
+    EXPDocumentPayload,
+    IPDocumentPayload,
     JsonManifestUDDocumentPayloadProvider,
     MappingUDDocumentPayloadProvider,
     UDDocumentPayload,
@@ -58,6 +60,94 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(payload.document_number.confidence, 0.99)
         self.assertEqual(payload.quantity.amount, Decimal("1000"))
 
+    def test_json_manifest_provider_canonicalizes_document_number(self) -> None:
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "ud-payloads.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "IP",
+                            "document_number": "ip lc 0043 vintage denim studio ltd.",
+                            "document_date": "2026-04-03",
+                            "lc_sc_number": "LC-0043",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = JsonManifestUDDocumentPayloadProvider(manifest_path)
+            documents = provider.get_documents(mail)
+
+        self.assertEqual(documents[0].document_number.value, "IP-LC-0043-VINTAGE DENIM STUDIO LTD")
+
+    def test_json_manifest_provider_rejects_document_kind_number_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "ud-payloads.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "UD",
+                            "document_number": "IP-LC-0043-VINTAGE DENIM STUDIO LTD",
+                            "document_date": "2026-04-03",
+                            "lc_sc_number": "LC-0043",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "does not match document_number"):
+                JsonManifestUDDocumentPayloadProvider(manifest_path)
+
+    def test_json_manifest_provider_loads_multiple_document_kinds_for_one_mail(self) -> None:
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "ud-payloads.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "UD",
+                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_date": "2026-04-01",
+                            "lc_sc_number": "LC-0043",
+                            "quantity": "1000",
+                            "quantity_unit": "YDS",
+                        },
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "EXP",
+                            "document_number": "EXP-001",
+                            "document_date": "2026-04-02",
+                            "lc_sc_number": "LC-0043",
+                        },
+                        {
+                            "entry_id": "entry-ud-001",
+                            "document_kind": "IP",
+                            "document_number": "IP-002",
+                            "document_date": "2026-04-03",
+                            "lc_sc_number": "LC-0043",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = JsonManifestUDDocumentPayloadProvider(manifest_path)
+            documents = provider.get_documents(mail)
+            ud_payload = provider.get_ud_document(mail)
+
+        self.assertEqual([document.document_kind.value for document in documents], ["UD", "EXP", "IP"])
+        self.assertIsNotNone(ud_payload)
+        self.assertEqual(ud_payload.document_number.value, "UD-LC-0043-ANANTA")
+
     def test_validate_run_snapshot_for_ud_manifest_stages_writes_and_reports_selection(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
@@ -85,6 +175,49 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
         self.assertEqual(validation_result.mail_reports[0].ud_selection["final_decision"], "selected")
         self.assertEqual(validation_result.discrepancy_reports, [])
+
+    def test_validate_run_snapshot_hard_blocks_mixed_ud_ip_exp_manifest_until_policy_resolved(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {
+                    mail.entry_id: [
+                        _ud_document("UD-LC-0043-ANANTA", quantity=Decimal("1000")),
+                        EXPDocumentPayload(
+                            document_number=DocumentExtractionField("EXP-001"),
+                            document_date=DocumentExtractionField("2026-04-02"),
+                            lc_sc_number=DocumentExtractionField("LC-0043"),
+                        ),
+                        IPDocumentPayload(
+                            document_number=DocumentExtractionField("IP-002"),
+                            document_date=DocumentExtractionField("2026-04-03"),
+                            lc_sc_number=DocumentExtractionField("LC-0043"),
+                        ),
+                    ]
+                }
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(validation_result.staged_write_plan, [])
+        self.assertEqual(
+            [report.code for report in validation_result.discrepancy_reports],
+            ["ip_exp_policy_unresolved"],
+        )
+        self.assertEqual(
+            validation_result.discrepancy_reports[0].details["proposed_shared_column_value"],
+            "EXP: EXP-001\nIP: IP-002",
+        )
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
 
     def test_validate_run_snapshot_for_ud_without_payload_hard_blocks(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)

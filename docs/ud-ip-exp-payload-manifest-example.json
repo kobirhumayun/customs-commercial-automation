@@ -1,6 +1,7 @@
 [
   {
     "entry_id": "outlook-entry-id-from-snapshot",
+    "document_kind": "UD",
     "document_number": "UD-LC-0043-ANANTA",
     "document_number_confidence": 1.0,
     "document_number_provenance": {
@@ -19,5 +20,19 @@
     "quantity": "1000",
     "quantity_unit": "YDS",
     "source_saved_document_id": "optional-saved-document-id"
+  },
+  {
+    "entry_id": "outlook-entry-id-from-snapshot",
+    "document_kind": "EXP",
+    "document_number": "EXP-001",
+    "document_date": "2026-04-02",
+    "lc_sc_number": "LC-0043"
+  },
+  {
+    "entry_id": "outlook-entry-id-from-snapshot",
+    "document_kind": "IP",
+    "document_number": "IP-002",
+    "document_date": "2026-04-03",
+    "lc_sc_number": "LC-0043"
   }
 ]
