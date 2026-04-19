@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from project.models import WorkflowId, WorkbookSessionPreflight, WriteOperation
 from project.utils.json import to_jsonable
-from project.workbook import WorkbookSnapshot, prevalidate_staged_write_plan, resolve_export_header_mapping
+from project.workbook import (
+    WorkbookSnapshot,
+    prevalidate_staged_write_plan,
+    resolve_export_header_mapping,
+    resolve_ud_ip_exp_header_mapping,
+)
 
 
 def summarize_workbook_readiness(
@@ -78,10 +83,12 @@ def _resolve_workflow_mapping(
 ) -> dict[str, int] | None:
     if workflow_id == WorkflowId.EXPORT_LC_SC:
         return resolve_export_header_mapping(workbook_snapshot)
+    if workflow_id == WorkflowId.UD_IP_EXP:
+        return resolve_ud_ip_exp_header_mapping(workbook_snapshot)
     return {}
 
 
 def _mapping_status(workflow_id: WorkflowId, mapping: dict[str, int] | None) -> str:
-    if workflow_id != WorkflowId.EXPORT_LC_SC:
+    if workflow_id not in {WorkflowId.EXPORT_LC_SC, WorkflowId.UD_IP_EXP}:
         return "not_applicable"
     return "resolved" if mapping is not None else "invalid"

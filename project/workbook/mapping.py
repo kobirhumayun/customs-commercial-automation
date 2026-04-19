@@ -49,6 +49,20 @@ EXPORT_HEADER_SPECS = (
 
 EXPORT_OPTIONAL_HEADER_SPECS = ()
 
+UD_IP_EXP_HEADER_SPECS = (
+    HeaderMappingSpec(
+        "lc_sc_no",
+        "L/C & S/C No.",
+        ("L/C No.", "LC/SC No.", "LC No."),
+    ),
+    HeaderMappingSpec("quantity_fabrics", "Quantity of Fabrics (Yds/Mtr)"),
+    HeaderMappingSpec("lc_amnd_no", "L/C Amnd No."),
+    HeaderMappingSpec("lc_amnd_date", "L/C Amnd Date"),
+    HeaderMappingSpec("ud_ip_shared", "UD No. & IP No."),
+)
+
+UD_IP_EXP_OPTIONAL_HEADER_SPECS = ()
+
 
 def resolve_header_mapping(
     snapshot: WorkbookSnapshot,
@@ -74,6 +88,19 @@ def resolve_export_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, int] 
     if required_mapping is None:
         return None
     optional_mapping = _resolve_present_header_mapping(snapshot, EXPORT_OPTIONAL_HEADER_SPECS)
+    if optional_mapping is None:
+        return None
+    return {
+        **required_mapping,
+        **optional_mapping,
+    }
+
+
+def resolve_ud_ip_exp_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, int] | None:
+    required_mapping = resolve_header_mapping(snapshot, UD_IP_EXP_HEADER_SPECS)
+    if required_mapping is None:
+        return None
+    optional_mapping = _resolve_present_header_mapping(snapshot, UD_IP_EXP_OPTIONAL_HEADER_SPECS)
     if optional_mapping is None:
         return None
     return {
