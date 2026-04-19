@@ -22,6 +22,7 @@ Before implementation, read these files in order:
   - payload models, parsing helpers, workbook header mapping, deterministic UD allocation, staging, reporting, and rule-pack wiring are implemented
   - CLI validation accepts deterministic fixture payloads through `validate-run ud_ip_exp --ud-payload-json <path>`
   - live UD document preparation is implemented for `validate-run` when `--document-root` is used, including PDF save, saved-document analysis, workflow-local document classification, workbook-family storage-path resolution, and UD payload derivation from saved documents
+  - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
   - transport for `ud_ip_exp` remains intentionally disabled pending unresolved print/mail-move policy
   - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
@@ -151,6 +152,8 @@ Current payload coverage:
 Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
+- storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution
+- same-mail live-derived UD documents now hard-block with discrepancy code `ud_live_document_conflict` when required UD evidence disagrees across attachments
 
 ### 2. Workbook Header Mapping
 
@@ -269,10 +272,12 @@ Implemented scenarios include:
 - EXP and IP values are ordered as EXP then IP.
 - Missing required extraction field hard-blocks.
 - Workbook prevalidation blocks non-safe target cells.
+- Live-derived documents that resolve to mixed LC/SC families hard-block with attachment-level evidence.
+- Live-derived UD documents for the same family hard-block when extracted date or quantity disagrees across attachments.
 
 Still valuable to add later:
 - more live document-analysis fixtures covering mixed-quality PDFs
-- explicit tests for LC/SC family inconsistency across multiple live derived documents in one mail
+- explicit tests for additional live-document ambiguity patterns beyond family/date/quantity disagreement
 - eventual IP/EXP completion-path tests once the business rules are finalized
 
 ## Open Questions Before Production Completion

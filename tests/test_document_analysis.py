@@ -1366,6 +1366,133 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_provenance["extraction_method"], "plain_text")
         self.assertEqual(analysis.extracted_amendment_provenance["extraction_method"], "table")
 
+    def test_layered_provider_uses_ocr_to_complete_partial_ud_fields(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="doc-5",
+            mail_id="mail-1",
+            attachment_name="ud-partial.pdf",
+            normalized_filename="ud-partial.pdf",
+            destination_path="C:/docs/ud-partial.pdf",
+            file_sha256="i" * 64,
+            save_decision="saved_new",
+        )
+
+        class TextProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="pymupdf_text",
+                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_number_confidence=1.0,
+                    extracted_document_number_provenance={
+                        "page_number": 1,
+                        "extraction_method": "plain_text",
+                        "confidence": 1.0,
+                    },
+                    extracted_lc_sc_number="LC-0043",
+                    extracted_lc_sc_confidence=1.0,
+                    extracted_lc_sc_provenance={
+                        "page_number": 1,
+                        "extraction_method": "plain_text",
+                        "confidence": 1.0,
+                    },
+                )
+
+        class EmptyTableProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+
+        class OCRProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="ocr_text",
+                    extracted_document_date="2026-04-01",
+                    extracted_document_date_confidence=0.98,
+                    extracted_document_date_provenance={
+                        "page_number": 1,
+                        "extraction_method": "ocr",
+                        "confidence": 0.98,
+                    },
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                    extracted_quantity_provenance={
+                        "page_number": 1,
+                        "extraction_method": "ocr",
+                        "confidence": 0.96,
+                    },
+                )
+
+        analysis = LayeredSavedDocumentAnalysisProvider(
+            text_provider=TextProvider(),
+            table_provider=EmptyTableProvider(),
+            ocr_provider=OCRProvider(),
+        ).analyze(saved_document=saved_document)
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text+ocr_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+        self.assertEqual(analysis.extracted_document_number_provenance["extraction_method"], "plain_text")
+        self.assertEqual(analysis.extracted_quantity_provenance["extraction_method"], "ocr")
+
+    def test_layered_provider_skips_ocr_when_ud_bundle_is_already_complete(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="doc-6",
+            mail_id="mail-1",
+            attachment_name="ud-complete.pdf",
+            normalized_filename="ud-complete.pdf",
+            destination_path="C:/docs/ud-complete.pdf",
+            file_sha256="j" * 64,
+            save_decision="saved_new",
+        )
+
+        class TextProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(
+                    analysis_basis="pymupdf_text",
+                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_lc_sc_number="LC-0043",
+                    extracted_document_date="2026-04-01",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        class EmptyTableProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                del saved_document
+                from project.documents import SavedDocumentAnalysis
+
+                return SavedDocumentAnalysis(analysis_basis="pdfplumber_table_empty")
+
+        class OCRProvider:
+            def analyze(self, *, saved_document: SavedDocument):
+                raise AssertionError("OCR fallback should not run when the UD bundle is already complete.")
+
+        analysis = LayeredSavedDocumentAnalysisProvider(
+            text_provider=TextProvider(),
+            table_provider=EmptyTableProvider(),
+            ocr_provider=OCRProvider(),
+        ).analyze(saved_document=saved_document)
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
 
 if __name__ == "__main__":
     unittest.main()

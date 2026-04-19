@@ -79,6 +79,7 @@ Every discrepancy payload should include:
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `ud_candidate_tie_after_full_tiebreak` | `hard_block` | ud_ip_exp | UD row-combination selection tied after all deterministic keys. |
+| `ud_live_document_conflict` | `hard_block` | ud_ip_exp | Multiple live-derived UD attachments in one mail disagree on required UD evidence such as date or quantity, so deterministic processing is blocked. |
 | `ud_required_document_missing` | `hard_block` | ud_ip_exp | No UD document payload was available for deterministic UD processing. |
 | `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |

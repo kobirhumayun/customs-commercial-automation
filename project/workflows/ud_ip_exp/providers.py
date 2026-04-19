@@ -40,7 +40,7 @@ class MappingUDDocumentPayloadProvider:
         return list(self._payloads_by_key.get(mail.mail_id) or self._payloads_by_key.get(mail.entry_id) or [])
 
     def get_ud_document(self, mail: EmailMessage) -> UDDocumentPayload | None:
-        return _first_ud_document(self.get_documents(mail))
+        return select_preferred_ud_document(self.get_documents(mail))
 
 
 class JsonManifestUDDocumentPayloadProvider:
@@ -51,7 +51,7 @@ class JsonManifestUDDocumentPayloadProvider:
         return list(self._payloads_by_key.get(mail.mail_id) or self._payloads_by_key.get(mail.entry_id) or [])
 
     def get_ud_document(self, mail: EmailMessage) -> UDDocumentPayload | None:
-        return _first_ud_document(self.get_documents(mail))
+        return select_preferred_ud_document(self.get_documents(mail))
 
 
 def _load_payloads_by_key(manifest_path: Path) -> dict[str, list[UDIPEXPDocumentPayload]]:
@@ -160,8 +160,30 @@ def _canonical_manifest_document_number(
     return canonical
 
 
-def _first_ud_document(documents: list[UDIPEXPDocumentPayload]) -> UDDocumentPayload | None:
-    return next((document for document in documents if isinstance(document, UDDocumentPayload)), None)
+def select_preferred_ud_document(documents: list[UDIPEXPDocumentPayload]) -> UDDocumentPayload | None:
+    ud_documents = [
+        (index, document)
+        for index, document in enumerate(documents)
+        if isinstance(document, UDDocumentPayload)
+    ]
+    if not ud_documents:
+        return None
+    _, selected = max(
+        ud_documents,
+        key=lambda item: (
+            _ud_document_completeness_key(item[1]),
+            -item[0],
+        ),
+    )
+    return selected
+
+
+def _ud_document_completeness_key(document: UDDocumentPayload) -> tuple[int, int, int]:
+    return (
+        1 if document.quantity is not None else 0,
+        1 if document.document_date is not None and str(document.document_date.value).strip() else 0,
+        1 if str(document.lc_sc_number.value).strip() else 0,
+    )
 
 
 def _optional_float(value) -> float | None:

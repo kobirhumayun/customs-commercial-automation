@@ -431,7 +431,7 @@ class LayeredSavedDocumentAnalysisProvider:
         text_analysis = self.text_provider.analyze(saved_document=saved_document)
         table_analysis = self.table_provider.analyze(saved_document=saved_document)
         merged_analysis = _merge_analysis(text_analysis, table_analysis)
-        if _analysis_has_identifier(merged_analysis):
+        if _analysis_has_identifier(merged_analysis) and not _analysis_needs_ud_ip_exp_completion(merged_analysis):
             return merged_analysis
         ocr_analysis = self.ocr_provider.analyze(saved_document=saved_document)
         return _merge_analysis(merged_analysis, ocr_analysis)
@@ -1777,6 +1777,20 @@ def _analysis_has_identifier(analysis: SavedDocumentAnalysis) -> bool:
         or
         (analysis.extracted_lc_sc_number and analysis.extracted_lc_sc_number.strip())
         or (analysis.extracted_pi_number and analysis.extracted_pi_number.strip())
+    )
+
+
+def _analysis_needs_ud_ip_exp_completion(analysis: SavedDocumentAnalysis) -> bool:
+    document_number = _optional_string(analysis.extracted_document_number)
+    if document_number is None or _normalize_ud_ip_exp_document_number(document_number) is None:
+        return False
+    return not all(
+        (
+            _optional_string(analysis.extracted_lc_sc_number),
+            _optional_string(analysis.extracted_document_date),
+            _optional_string(analysis.extracted_quantity),
+            _optional_string(analysis.extracted_quantity_unit),
+        )
     )
 
 

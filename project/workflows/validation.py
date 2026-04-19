@@ -39,8 +39,8 @@ from project.workflows.export_lc_sc.staging import (
 )
 from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
-from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, UDIPEXPWorkflowPayload
-from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider
+from project.workflows.ud_ip_exp.payloads import UDIPEXPWorkflowPayload
+from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider, select_preferred_ud_document
 from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
 from project.workflows.ud_ip_exp.live_documents import prepare_live_ud_ip_exp_documents
 
@@ -421,10 +421,7 @@ def _evaluate_ud_ip_exp_mail(
     documents = list(workflow_documents or [])
     if not documents and ud_document_provider is not None:
         documents = ud_document_provider.get_documents(mail)
-    ud_document = next(
-        (document for document in documents if isinstance(document, UDDocumentPayload)),
-        None,
-    )
+    ud_document = select_preferred_ud_document(documents)
     if ud_document is not None:
         from project.workflows.ud_ip_exp.validation import assemble_ud_validation
 

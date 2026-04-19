@@ -603,6 +603,13 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - PDF attachments for UD, EXP, and/or IP
 - Existing master workbook rows for the same LC/SC family
 
+### Initial live-document validation boundary
+- live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation
+- live UD attachment saving/classification must hard-block if the derived attachments do not resolve to exactly one LC/SC family for the mail
+- live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
+- these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
+- until IP/EXP business rules are finalized, IP/EXP documents remain allowed only as explicit unresolved-policy hard-block evidence rather than a completed processing path
+
 ### Shared-column behavior
 - Column `UD No. & IP No.` stores UD/EXP/IP values together.
 - UD entries have no prefix.
