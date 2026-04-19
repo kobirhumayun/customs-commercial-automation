@@ -23,6 +23,7 @@ Before implementation, read these files in order:
   - CLI validation accepts deterministic fixture payloads through `validate-run ud_ip_exp --ud-payload-json <path>`
   - live UD document preparation is implemented for `validate-run` when `--document-root` is used, including PDF save, saved-document analysis, workflow-local document classification, workbook-family storage-path resolution, and UD payload derivation from saved documents
   - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
+  - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
   - transport for `ud_ip_exp` remains intentionally disabled pending unresolved print/mail-move policy
   - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
@@ -152,8 +153,10 @@ Current payload coverage:
 Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
+- document-date extraction prefers UD/IP/EXP-specific date labels over LC/SC issue-date labels so export-family dates are not accepted as UD/IP/EXP evidence
 - storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution
 - same-mail live-derived UD documents now hard-block with discrepancy code `ud_live_document_conflict` when required UD evidence disagrees across attachments
+- mixed-quality same-family UD documents still hard-block when any UD payload is missing required fields; selection/reporting uses the most complete UD payload only to keep allocation context deterministic and stable
 
 ### 2. Workbook Header Mapping
 
@@ -212,6 +215,7 @@ Any new discrepancy code must first be added to `docs/discrepancy-codes.md`.
 Implemented:
 - build its workflow payload
 - save/classify live documents for UD/IP/EXP intake when `--document-root` is used
+- choose the most complete deterministic UD payload for allocation/reporting context when multiple UD payloads are present
 - run rules
 - stage workbook operations
 - emit mail outcomes and reports

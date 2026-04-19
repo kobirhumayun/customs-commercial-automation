@@ -18,7 +18,10 @@ LC_SC_LABEL_PATTERN = re.compile(
     r"(?i)\b(?:L|S)\s*/?\s*C\s*(?:NO|NUMBER)\.?\s*[:\-|]?\s*"
 )
 LC_SC_VALUE_BOUNDARY_PATTERN = re.compile(
-    r"(?i)(?=\b(?:UD|IP|EXP)\s*(?:NO|NUMBER|DATE)\b|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b)"
+    r"(?i)(?="
+    r"\b(?:UD|IP|EXP)\s*(?:NO|NUMBER|(?:ISSUE\s*)?DATE)\b"
+    r"|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b"
+    r")"
 )
 PI_CANDIDATE_PATTERN = re.compile(r"(?i)\bPDL\s*[- ]*\s*\d{2}\s*[- ]*\s*\d{1,4}(?:\s*[- ]*\s*R\d+)?\b")
 AMENDMENT_CANDIDATE_PATTERN = re.compile(
@@ -31,11 +34,21 @@ UD_IP_EXP_DOCUMENT_LABEL_PATTERN = re.compile(
     r"(?i)\b(?:UD|IP|EXP)\s*(?:NO|NUMBER)\.?\s*[:\-|]?\s*"
 )
 UD_IP_EXP_DOCUMENT_VALUE_BOUNDARY_PATTERN = re.compile(
-    r"(?i)(?=\b(?:UD|IP|EXP)\s*DATE\b|\bL\s*/?\s*C\s*NO\b|\bS\s*/?\s*C\s*NO\b|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b)"
+    r"(?i)(?="
+    r"\b(?:UD|IP|EXP)\s*(?:ISSUE\s*)?DATE\b"
+    r"|\bL\s*/?\s*C\s*(?:NO|NUMBER|(?:ISSUE\s*)?DATE)\b"
+    r"|\bS\s*/?\s*C\s*(?:NO|NUMBER|(?:ISSUE\s*)?DATE)\b"
+    r"|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b"
+    r")"
+)
+DOCUMENT_DATE_VALUE_PATTERN = (
+    r"\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}-[A-Z]{3}-\d{2,4}"
+)
+DOCUMENT_SPECIFIC_DATE_LABEL_PATTERN = re.compile(
+    rf"(?i)\b(?:UD|IP|EXP)\s*(?:ISSUE\s*)?DATE\b\s*[:\-|]?\s*({DOCUMENT_DATE_VALUE_PATTERN})"
 )
 DOCUMENT_DATE_LABEL_PATTERN = re.compile(
-    r"(?i)\b(?:UD|IP|EXP)?\s*DATE\b\s*[:\-|]?\s*"
-    r"(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}-[A-Z]{3}-\d{2,4})"
+    rf"(?i)\bDATE\b\s*[:\-|]?\s*({DOCUMENT_DATE_VALUE_PATTERN})"
 )
 QUANTITY_LABEL_PATTERN = re.compile(
     r"(?i)\b(?:QTY|QUANTITY)\b\s*[:\-|]?\s*([\d,]+(?:\.\d+)?)\s*(YDS?|YARDS?|MTRS?|METER|METERS|METRE|METRES)\b"
@@ -1599,13 +1612,15 @@ def _first_ud_ip_exp_document_match(text: str) -> tuple[str, int] | None:
 
 
 def _first_document_date_match(text: str) -> tuple[str, int] | None:
-    match = DOCUMENT_DATE_LABEL_PATTERN.search(text)
-    if match is None:
-        return None
-    normalized = normalize_lc_sc_date(match.group(1))
-    if normalized is None:
-        return None
-    return normalized, match.start(1)
+    for pattern in (DOCUMENT_SPECIFIC_DATE_LABEL_PATTERN, DOCUMENT_DATE_LABEL_PATTERN):
+        for match in pattern.finditer(text):
+            if pattern is DOCUMENT_DATE_LABEL_PATTERN and _is_lc_sc_issue_date_label(text, match.start()):
+                continue
+            normalized = normalize_lc_sc_date(match.group(1))
+            if normalized is None:
+                continue
+            return normalized, match.start(1)
+    return None
 
 
 def _first_quantity_match(text: str) -> tuple[str, int] | None:
@@ -1730,6 +1745,19 @@ def _is_embedded_ud_ip_exp_lc_sc_candidate(text: str, start_index: int) -> bool:
         return False
     prefix_window = text[max(0, start_index - 12) : start_index]
     return re.search(r"(?i)(?:UD|IP|EXP)[\s./\\_:;,\-]+$", prefix_window) is not None
+
+
+def _is_lc_sc_issue_date_label(text: str, start_index: int) -> bool:
+    if start_index <= 0:
+        return False
+    prefix_window = text[max(0, start_index - 24) : start_index]
+    return (
+        re.search(
+            r"(?i)(?:\bL\s*/?\s*C\b|\bS\s*/?\s*C\b|\bLC\b|\bSC\b)\s*(?:ISSUE\s*)?$",
+            prefix_window,
+        )
+        is not None
+    )
 
 
 def _is_label_only_ud_ip_exp_identifier(value: str) -> bool:

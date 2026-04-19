@@ -607,6 +607,8 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation
 - live UD attachment saving/classification must hard-block if the derived attachments do not resolve to exactly one LC/SC family for the mail
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
+- when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
+- this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
 - until IP/EXP business rules are finalized, IP/EXP documents remain allowed only as explicit unresolved-policy hard-block evidence rather than a completed processing path
 

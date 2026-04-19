@@ -3,8 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from project.documents import SavedDocumentAnalysis
+from project.documents import PyMuPDFSavedDocumentAnalysisProvider, SavedDocumentAnalysis
 from project.models import (
     FinalDecision,
     MailMovePhaseStatus,
@@ -631,6 +632,86 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             validation_result.mail_outcomes[0].saved_documents[1]["extracted_document_number"],
             "UD-LC-0043-COMPLETE",
         )
+        self.assertEqual(validation_result.staged_write_plan, [])
+
+    def test_validate_run_snapshot_does_not_use_lc_issue_date_as_ud_date(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail(
+            "entry-live-009",
+            "UD with LC issue date only",
+            attachments=[{"attachment_name": "UD-LC-0043-ANANTA.pdf"}],
+        )
+
+        class FakePage:
+            def get_text(self, mode: str) -> str:
+                self.last_mode = mode
+                return (
+                    "UD No: UD-LC-0043-ANANTA\n"
+                    "L/C Issue Date: 2026-01-10\n"
+                    "L/C No: LC-0043\n"
+                    "Quantity: 1,000 Yards\n"
+                )
+
+        class FakeDocument:
+            def __iter__(self):
+                return iter([FakePage()])
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeFitz:
+            @staticmethod
+            def open(path: str) -> FakeDocument:
+                return FakeDocument()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                validation_result = validate_run_snapshot(
+                    descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                    run_report=_run_report(rule_pack, [mail]),
+                    rule_pack=rule_pack,
+                    workbook_snapshot=_full_snapshot(
+                        rows=[
+                            WorkbookRow(
+                                row_index=11,
+                                values={
+                                    1: "LC-0043",
+                                    2: "ANANTA GARMENTS LTD",
+                                    3: "2026-01-10",
+                                    4: "1000 YDS",
+                                    5: "",
+                                    6: "",
+                                    7: "",
+                                },
+                            )
+                        ]
+                    ),
+                    attachment_content_provider=SimulatedAttachmentContentProvider(
+                        content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud with lc issue date only\n"}
+                    ),
+                    document_root=Path(temp_dir),
+                    document_analysis_provider=PyMuPDFSavedDocumentAnalysisProvider(),
+                )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+        discrepancy = next(
+            item
+            for item in validation_result.mail_outcomes[0].discrepancies
+            if item["code"] == "ud_required_field_missing"
+        )
+        self.assertEqual(
+            discrepancy["details"]["missing_by_document"],
+            [
+                {
+                    "document_index": 0,
+                    "document_number": "UD-LC-0043-ANANTA",
+                    "missing_fields": ["document_date"],
+                }
+            ],
+        )
+        self.assertIsNone(validation_result.mail_outcomes[0].saved_documents[0]["extracted_document_date"])
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["required_quantity"], "1000")
         self.assertEqual(validation_result.staged_write_plan, [])
 
 

@@ -826,6 +826,113 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_quantity, "2500")
         self.assertEqual(analysis.extracted_quantity_unit, "MTR")
 
+    def test_pdfplumber_provider_prefers_ud_date_over_lc_issue_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "ud-table-with-lc-date.pdf"
+            pdf_path.write_bytes(b"fake ud table with lc date pdf")
+
+            class FakePage:
+                @staticmethod
+                def extract_tables():
+                    return [
+                        [
+                            ["Field", "Value"],
+                            ["UD No.", "UD-LC-0043-ANANTA"],
+                            ["L/C Issue Date", "2026-01-10"],
+                            ["UD Date", "01-Apr-2026"],
+                            ["L/C No.", "LC-0043"],
+                            ["Quantity", "1,000 Yards"],
+                        ]
+                    ]
+
+            class FakePDF:
+                pages = [FakePage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                analysis = PDFPlumberSavedDocumentAnalysisProvider().analyze(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-ud-table-lc-date",
+                        mail_id="mail-1",
+                        attachment_name="ud-table-with-lc-date.pdf",
+                        normalized_filename="ud-table-with-lc-date.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="y" * 64,
+                        save_decision="saved_new",
+                    )
+                )
+
+        self.assertEqual(analysis.analysis_basis, "pdfplumber_table")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
+    def test_pdfplumber_provider_does_not_use_lc_issue_date_as_ud_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "ud-table-lc-date-only.pdf"
+            pdf_path.write_bytes(b"fake ud table lc date only pdf")
+
+            class FakePage:
+                @staticmethod
+                def extract_tables():
+                    return [
+                        [
+                            ["Field", "Value"],
+                            ["UD No.", "UD-LC-0043-ANANTA"],
+                            ["L/C Issue Date", "2026-01-10"],
+                            ["L/C No.", "LC-0043"],
+                            ["Quantity", "1,000 Yards"],
+                        ]
+                    ]
+
+            class FakePDF:
+                pages = [FakePage()]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakePDFPlumber:
+                @staticmethod
+                def open(path: str) -> FakePDF:
+                    self.assertEqual(path, str(pdf_path))
+                    return FakePDF()
+
+            with patch("project.documents.providers._load_pdfplumber_module", return_value=FakePDFPlumber()):
+                analysis = PDFPlumberSavedDocumentAnalysisProvider().analyze(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-ud-table-lc-date-only",
+                        mail_id="mail-1",
+                        attachment_name="ud-table-lc-date-only.pdf",
+                        normalized_filename="ud-table-lc-date-only.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="1" * 64,
+                        save_decision="saved_new",
+                    )
+                )
+
+        self.assertEqual(analysis.analysis_basis, "pdfplumber_table")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertIsNone(analysis.extracted_document_date)
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
     def test_img2table_provider_extracts_identifiers_from_scanned_table_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "scanned-table.pdf"
@@ -1025,6 +1132,101 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_quantity, "1000")
         self.assertEqual(analysis.extracted_quantity_unit, "YDS")
         self.assertEqual(analysis.extracted_document_number_provenance["page_number"], 1)
+
+    def test_pymupdf_provider_prefers_ud_date_over_lc_issue_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "saved-ud-with-lc-date.pdf"
+            pdf_path.write_bytes(b"fake ud pdf bytes")
+
+            class FakePage:
+                def get_text(self, mode: str) -> str:
+                    self.last_mode = mode
+                    return (
+                        "UD No: UD-LC-0043-ANANTA\n"
+                        "L/C Issue Date: 2026-01-10\n"
+                        "UD Date: 01-Apr-2026\n"
+                        "L/C No: LC-0043\n"
+                        "Quantity: 1,000 Yards\n"
+                    )
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    self.closed = True
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self = FakeDocument()
+                    self.opened_path = path
+                    return self
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                analysis = PyMuPDFSavedDocumentAnalysisProvider().analyze(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-ud-text-lc-date",
+                        mail_id="mail-1",
+                        attachment_name="saved-ud-with-lc-date.pdf",
+                        normalized_filename="saved-ud-with-lc-date.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="w" * 64,
+                        save_decision="saved_new",
+                    )
+                )
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+
+    def test_pymupdf_provider_handles_inline_ud_issue_date_without_overcapture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "saved-ud-inline-issue-date.pdf"
+            pdf_path.write_bytes(b"fake ud pdf bytes")
+
+            class FakePage:
+                def get_text(self, mode: str) -> str:
+                    self.last_mode = mode
+                    return (
+                        "UD No: UD-LC-0043-ANANTA UD Issue Date: 01-Apr-2026 "
+                        "L/C No: LC-0043 Quantity: 1,000 Yards"
+                    )
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    self.closed = True
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    self = FakeDocument()
+                    self.opened_path = path
+                    return self
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                analysis = PyMuPDFSavedDocumentAnalysisProvider().analyze(
+                    saved_document=SavedDocument(
+                        saved_document_id="doc-ud-text-inline-issue-date",
+                        mail_id="mail-1",
+                        attachment_name="saved-ud-inline-issue-date.pdf",
+                        normalized_filename="saved-ud-inline-issue-date.pdf",
+                        destination_path=str(pdf_path),
+                        file_sha256="x" * 64,
+                        save_decision="saved_new",
+                    )
+                )
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
 
     def test_ocr_provider_extracts_identifiers_from_rendered_page_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1269,6 +1471,196 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_quantity, "2500")
         self.assertEqual(analysis.extracted_quantity_unit, "MTR")
         self.assertEqual(analysis.extracted_document_number_provenance["extraction_method"], "ocr")
+
+    def test_ocr_provider_prefers_ud_date_over_lc_issue_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "scan-ud-with-lc-date.pdf"
+            pdf_path.write_bytes(b"fake scanned ud with lc date pdf")
+
+            class FakePixmap:
+                def tobytes(self, image_format: str) -> bytes:
+                    self.last_format = image_format
+                    return b"png-bytes"
+
+            class FakePage:
+                def get_pixmap(self) -> FakePixmap:
+                    return FakePixmap()
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    self.closed = True
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    return FakeDocument()
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    return {"opened": True, "stream_type": type(stream).__name__}
+
+            class FakeTesseract:
+                class Output:
+                    DICT = "DICT"
+
+                @staticmethod
+                def image_to_data(image, output_type=None):
+                    return {
+                        "text": [
+                            "UD",
+                            "No",
+                            "UD-LC-0043-ANANTA",
+                            "L/C",
+                            "Issue",
+                            "Date",
+                            "2026-01-10",
+                            "UD",
+                            "Date",
+                            "01-Apr-2026",
+                            "L/C",
+                            "No",
+                            "LC-0043",
+                            "Quantity",
+                            "1000",
+                            "Yards",
+                        ],
+                        "conf": [
+                            "95",
+                            "95",
+                            "99",
+                            "94",
+                            "94",
+                            "94",
+                            "98",
+                            "94",
+                            "94",
+                            "98",
+                            "93",
+                            "93",
+                            "99",
+                            "96",
+                            "96",
+                            "96",
+                        ],
+                    }
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                    with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                        analysis = OCRSavedDocumentAnalysisProvider().analyze(
+                            saved_document=SavedDocument(
+                                saved_document_id="doc-ud-ocr-lc-date",
+                                mail_id="mail-1",
+                                attachment_name="scan-ud-with-lc-date.pdf",
+                                normalized_filename="scan-ud-with-lc-date.pdf",
+                                destination_path=str(pdf_path),
+                                file_sha256="z" * 64,
+                                save_decision="saved_new",
+                            )
+                        )
+
+        self.assertEqual(analysis.analysis_basis, "ocr_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
+    def test_ocr_provider_does_not_use_lc_issue_date_as_ud_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "scan-ud-lc-date-only.pdf"
+            pdf_path.write_bytes(b"fake scanned ud lc date only pdf")
+
+            class FakePixmap:
+                def tobytes(self, image_format: str) -> bytes:
+                    self.last_format = image_format
+                    return b"png-bytes"
+
+            class FakePage:
+                def get_pixmap(self) -> FakePixmap:
+                    return FakePixmap()
+
+            class FakeDocument:
+                def __iter__(self):
+                    return iter([FakePage()])
+
+                def close(self) -> None:
+                    self.closed = True
+
+            class FakeFitz:
+                @staticmethod
+                def open(path: str) -> FakeDocument:
+                    return FakeDocument()
+
+            class FakeImageModule:
+                @staticmethod
+                def open(stream) -> object:
+                    return {"opened": True, "stream_type": type(stream).__name__}
+
+            class FakeTesseract:
+                class Output:
+                    DICT = "DICT"
+
+                @staticmethod
+                def image_to_data(image, output_type=None):
+                    return {
+                        "text": [
+                            "UD",
+                            "No",
+                            "UD-LC-0043-ANANTA",
+                            "L/C",
+                            "Issue",
+                            "Date",
+                            "2026-01-10",
+                            "L/C",
+                            "No",
+                            "LC-0043",
+                            "Quantity",
+                            "1000",
+                            "Yards",
+                        ],
+                        "conf": [
+                            "95",
+                            "95",
+                            "99",
+                            "94",
+                            "94",
+                            "94",
+                            "98",
+                            "93",
+                            "93",
+                            "99",
+                            "96",
+                            "96",
+                            "96",
+                        ],
+                    }
+
+            with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+                with patch("project.documents.providers._load_pil_image_module", return_value=FakeImageModule()):
+                    with patch("project.documents.providers._load_pytesseract_module", return_value=FakeTesseract()):
+                        analysis = OCRSavedDocumentAnalysisProvider().analyze(
+                            saved_document=SavedDocument(
+                                saved_document_id="doc-ud-ocr-lc-date-only",
+                                mail_id="mail-1",
+                                attachment_name="scan-ud-lc-date-only.pdf",
+                                normalized_filename="scan-ud-lc-date-only.pdf",
+                                destination_path=str(pdf_path),
+                                file_sha256="2" * 64,
+                                save_decision="saved_new",
+                            )
+                        )
+
+        self.assertEqual(analysis.analysis_basis, "ocr_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertIsNone(analysis.extracted_document_date)
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
 
     def test_layered_provider_falls_back_to_ocr_when_text_analysis_has_no_identifiers(self) -> None:
         saved_document = SavedDocument(
