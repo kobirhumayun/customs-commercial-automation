@@ -79,6 +79,8 @@ Every discrepancy payload should include:
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `ud_candidate_tie_after_full_tiebreak` | `hard_block` | ud_ip_exp | UD row-combination selection tied after all deterministic keys. |
+| `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
+| `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row already has a non-blank shared-column value and append/duplicate behavior is not yet business-confirmed. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

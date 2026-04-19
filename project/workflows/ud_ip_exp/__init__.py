@@ -19,6 +19,11 @@ from project.workflows.ud_ip_exp.payloads import (
     format_shared_column_entry,
     format_shared_column_values,
 )
+from project.workflows.ud_ip_exp.staging import (
+    UDIPEXPStagingDiscrepancy,
+    UDIPEXPWriteStagingResult,
+    stage_ud_shared_column_operations,
+)
 
 __all__ = [
     "DocumentExtractionField",
@@ -32,8 +37,11 @@ __all__ = [
     "UDIPEXPDocumentPayload",
     "UDIPEXPWorkflowPayload",
     "UDIPEXPQuantity",
+    "UDIPEXPStagingDiscrepancy",
+    "UDIPEXPWriteStagingResult",
     "allocate_ud_rows",
     "collect_ud_candidate_rows",
     "format_shared_column_entry",
     "format_shared_column_values",
+    "stage_ud_shared_column_operations",
 ]
