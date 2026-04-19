@@ -38,6 +38,7 @@ UD_IP_EXP_DOCUMENT_VALUE_BOUNDARY_PATTERN = re.compile(
     r"\b(?:UD|IP|EXP)\s*(?:ISSUE\s*)?DATE\b"
     r"|\bL\s*/?\s*C\s*(?:NO|NUMBER|(?:ISSUE\s*)?DATE)\b"
     r"|\bS\s*/?\s*C\s*(?:NO|NUMBER|(?:ISSUE\s*)?DATE)\b"
+    r"|\b(?:BUYER(?:\s+NAME)?|NAME\s+OF\s+BUYERS?)\b"
     r"|\b(?:QTY|QUANTITY)\b|\bPI\s*NO\b|\bAMENDMENT\b"
     r")"
 )

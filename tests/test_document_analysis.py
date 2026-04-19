@@ -1228,6 +1228,38 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_quantity, "1000")
         self.assertEqual(analysis.extracted_quantity_unit, "YDS")
 
+    def test_pymupdf_provider_handles_machine_generated_inline_ud_fields(self) -> None:
+        analysis = _analyze_pymupdf_text(
+            "UD Number UD LC 0043 ANANTA L/C Number LC 0043 "
+            "UD Date 01/04/2026 Quantity 2,500 Mtrs",
+            saved_document_id="doc-ud-text-inline-fields",
+            filename="saved-ud-inline-fields.pdf",
+            file_sha256="3" * 64,
+        )
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "2500")
+        self.assertEqual(analysis.extracted_quantity_unit, "MTR")
+
+    def test_pymupdf_provider_stops_ud_number_before_buyer_label(self) -> None:
+        analysis = _analyze_pymupdf_text(
+            "UD No: UD-LC-0043-ANANTA Buyer: ANANTA GARMENTS LTD "
+            "L/C No: LC-0043 UD Date: 01-Apr-2026 Quantity: 1,000 Yards",
+            saved_document_id="doc-ud-text-buyer-boundary",
+            filename="saved-ud-buyer-boundary.pdf",
+            file_sha256="4" * 64,
+        )
+
+        self.assertEqual(analysis.analysis_basis, "pymupdf_text")
+        self.assertEqual(analysis.extracted_document_number, "UD-LC-0043-ANANTA")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-01")
+        self.assertEqual(analysis.extracted_lc_sc_number, "LC-0043")
+        self.assertEqual(analysis.extracted_quantity, "1000")
+        self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
     def test_ocr_provider_extracts_identifiers_from_rendered_page_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "scan.pdf"
@@ -1884,6 +1916,48 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_document_date, "2026-04-01")
         self.assertEqual(analysis.extracted_quantity, "1000")
         self.assertEqual(analysis.extracted_quantity_unit, "YDS")
+
+
+def _analyze_pymupdf_text(
+    text: str,
+    *,
+    saved_document_id: str,
+    filename: str,
+    file_sha256: str,
+):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        pdf_path = Path(temp_dir) / filename
+        pdf_path.write_bytes(b"fake ud pdf bytes")
+
+        class FakePage:
+            def get_text(self, mode: str) -> str:
+                self.last_mode = mode
+                return text
+
+        class FakeDocument:
+            def __iter__(self):
+                return iter([FakePage()])
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeFitz:
+            @staticmethod
+            def open(path: str) -> FakeDocument:
+                return FakeDocument()
+
+        with patch("project.documents.providers._load_pymupdf_module", return_value=FakeFitz()):
+            return PyMuPDFSavedDocumentAnalysisProvider().analyze(
+                saved_document=SavedDocument(
+                    saved_document_id=saved_document_id,
+                    mail_id="mail-1",
+                    attachment_name=filename,
+                    normalized_filename=filename,
+                    destination_path=str(pdf_path),
+                    file_sha256=file_sha256,
+                    save_decision="saved_new",
+                )
+            )
 
 
 if __name__ == "__main__":

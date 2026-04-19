@@ -154,6 +154,7 @@ Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
 - document-date extraction prefers UD/IP/EXP-specific date labels over LC/SC issue-date labels so export-family dates are not accepted as UD/IP/EXP evidence
+- text-layer UD/IP/EXP document-number extraction uses label-aware boundaries so buyer labels and neighboring LC/SC, date, and quantity labels are not captured into the document number
 - storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution
 - same-mail live-derived UD documents now hard-block with discrepancy code `ud_live_document_conflict` when required UD evidence disagrees across attachments
 - mixed-quality same-family UD documents still hard-block when any UD payload is missing required fields; selection/reporting uses the most complete UD payload only to keep allocation context deterministic and stable
