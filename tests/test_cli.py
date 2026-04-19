@@ -4774,6 +4774,54 @@ class CLITests(unittest.TestCase):
         self.assertFalse(mail_outcomes[0]["eligible_for_print"])
         self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
 
+    def test_validate_run_ud_ip_exp_rejects_manifest_with_unknown_document_kind(self) -> None:
+        exit_code, stderr = _run_validate_ud_ip_exp_with_payload_records(
+            [
+                {
+                    "entry_id": "entry-ud-001",
+                    "document_kind": "INV",
+                    "document_number": "INV-001",
+                    "document_date": "2026-04-01",
+                    "lc_sc_number": "LC-0043",
+                }
+            ]
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("unsupported document_kind", stderr)
+
+    def test_validate_run_ud_ip_exp_rejects_manifest_with_invalid_document_number(self) -> None:
+        exit_code, stderr = _run_validate_ud_ip_exp_with_payload_records(
+            [
+                {
+                    "entry_id": "entry-ud-001",
+                    "document_kind": "UD",
+                    "document_number": "invoice exp 9981",
+                    "document_date": "2026-04-01",
+                    "lc_sc_number": "LC-0043",
+                }
+            ]
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("invalid document_number", stderr)
+
+    def test_validate_run_ud_ip_exp_rejects_manifest_kind_number_mismatch(self) -> None:
+        exit_code, stderr = _run_validate_ud_ip_exp_with_payload_records(
+            [
+                {
+                    "entry_id": "entry-ud-001",
+                    "document_kind": "UD",
+                    "document_number": "IP-LC-0043-VINTAGE DENIM STUDIO LTD",
+                    "document_date": "2026-04-01",
+                    "lc_sc_number": "LC-0043",
+                }
+            ]
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("does not match document_number", stderr)
+
 
 def _write_cli_config(root: Path, *, workflow_year: int) -> Path:
     for name in ("reports", "runs", "backups", "workbooks"):
@@ -4801,6 +4849,66 @@ def _write_cli_config(root: Path, *, workflow_year: int) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def _run_validate_ud_ip_exp_with_payload_records(records: list[dict]) -> tuple[int, str]:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        config_path = _write_cli_config(root, workflow_year=datetime.datetime.now().year)
+        snapshot_path = root / "snapshot.json"
+        snapshot_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "entry_id": "entry-ud-001",
+                        "received_time": "2026-04-01T03:00:00Z",
+                        "subject_raw": "UD-LC-0043-ANANTA",
+                        "sender_address": "sender@example.com",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        workbook_path = root / "workbook.json"
+        workbook_path.write_text(
+            json.dumps(
+                {
+                    "sheet_name": "Sheet1",
+                    "headers": [
+                        {"column_index": 1, "text": "L/C & S/C No."},
+                        {"column_index": 2, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                        {"column_index": 3, "text": "UD No. & IP No."},
+                        {"column_index": 4, "text": "L/C Amnd No."},
+                        {"column_index": 5, "text": "L/C Amnd Date"},
+                    ],
+                    "rows": [
+                        {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": ""}},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        ud_payload_path = root / "ud-payloads.json"
+        ud_payload_path.write_text(json.dumps(records), encoding="utf-8")
+
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            exit_code = main(
+                [
+                    "validate-run",
+                    "ud_ip_exp",
+                    "--config",
+                    str(config_path),
+                    "--snapshot-json",
+                    str(snapshot_path),
+                    "--workbook-json",
+                    str(workbook_path),
+                    "--ud-payload-json",
+                    str(ud_payload_path),
+                ]
+            )
+        return exit_code, stderr_buffer.getvalue()
 
 
 def _read_jsonl(path: Path) -> list[dict]:
