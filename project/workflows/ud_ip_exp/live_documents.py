@@ -40,6 +40,8 @@ def prepare_live_ud_ip_exp_documents(
     provider: AttachmentContentProvider,
     analysis_provider: SavedDocumentAnalysisProvider,
     documents_override: list[UDIPEXPDocumentPayload] | None = None,
+    verified_family: ERPFamily | None = None,
+    require_verified_family: bool = False,
 ) -> UDIPEXPLiveDocumentPreparationResult:
     staging_directory = document_root / ".staging" / "ud_ip_exp" / run_id / mail.mail_id
     staging_directory.mkdir(parents=True, exist_ok=True)
@@ -88,11 +90,27 @@ def prepare_live_ud_ip_exp_documents(
                     discrepancies=list(staged_classified.discrepancies),
                 ),
             )
-    family = _resolve_family_from_documents(
-        documents=resolution_documents,
-        workbook_snapshot=workbook_snapshot,
-        document_evidence=document_evidence,
-    )
+    if verified_family is not None:
+        family = _validate_documents_against_verified_family(
+            verified_family=verified_family,
+            document_evidence=document_evidence,
+        )
+    elif require_verified_family:
+        family = DocumentSaveIssue(
+            code="document_storage_path_unresolved",
+            severity=FinalDecision.HARD_BLOCK,
+            message=(
+                "UD/IP/EXP attachment storage path requires email body file numbers "
+                "that resolve to one ERP LC/SC family."
+            ),
+            details={"document_evidence": document_evidence},
+        )
+    else:
+        family = _resolve_family_from_documents(
+            documents=resolution_documents,
+            workbook_snapshot=workbook_snapshot,
+            document_evidence=document_evidence,
+        )
     if isinstance(family, DocumentSaveIssue):
         _cleanup_directory(staging_directory)
         return UDIPEXPLiveDocumentPreparationResult(
@@ -130,6 +148,49 @@ def prepare_live_ud_ip_exp_documents(
         ),
         classified_documents=final_classified,
     )
+
+
+def _validate_documents_against_verified_family(
+    *,
+    verified_family: ERPFamily,
+    document_evidence: list[dict[str, object]],
+) -> ERPFamily | DocumentSaveIssue:
+    expected_lc_sc_number = _comparison_lc_sc_number(verified_family.lc_sc_number)
+    conflicting_evidence = [
+        evidence
+        for evidence in document_evidence
+        if _evidence_lc_sc_contradicts_family(
+            evidence=evidence,
+            expected_lc_sc_number=expected_lc_sc_number,
+        )
+    ]
+    if conflicting_evidence:
+        return DocumentSaveIssue(
+            code="document_storage_path_unresolved",
+            severity=FinalDecision.HARD_BLOCK,
+            message="UD/IP/EXP PDF evidence contradicts the ERP-derived LC/SC family for the mail.",
+            details={
+                "expected_lc_sc_number": verified_family.lc_sc_number,
+                "conflicting_document_evidence": conflicting_evidence,
+                "document_evidence": document_evidence,
+            },
+        )
+    return verified_family
+
+
+def _evidence_lc_sc_contradicts_family(
+    *,
+    evidence: dict[str, object],
+    expected_lc_sc_number: str,
+) -> bool:
+    raw_lc_sc_number = str(evidence.get("lc_sc_number") or "").strip()
+    if not raw_lc_sc_number:
+        return False
+    return _comparison_lc_sc_number(raw_lc_sc_number) != expected_lc_sc_number
+
+
+def _comparison_lc_sc_number(value: str) -> str:
+    return normalize_lc_sc_number(value) or value.strip().upper()
 
 
 def _save_mail_pdfs_to_directory(

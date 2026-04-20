@@ -600,17 +600,28 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 
 ### Inputs
 - Outlook folder: `working`; snapshot all messages in the folder when the CLI is triggered
+- Email body file numbers resolved through the ERP register report, using the same canonical file-number extraction and one-family consistency checks as `export_lc_sc`
 - PDF attachments for UD, EXP, and/or IP
 - Existing master workbook rows for the same LC/SC family
 
 ### Initial live-document validation boundary
-- live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation
-- live UD attachment saving/classification must hard-block if the derived attachments do not resolve to exactly one LC/SC family for the mail
+- the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
+- LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
+- live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
+- live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
 - when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
 - this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
+- live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
+- ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary future linkage inputs for UD PDF property extraction; the specific UD PDF extraction rule remains intentionally deferred until documented separately
 - until IP/EXP business rules are finalized, IP/EXP documents remain allowed only as explicit unresolved-policy hard-block evidence rather than a completed processing path
+
+### Batch execution behavior
+- blocked emails remain in `working`
+- successfully processed `ud_ip_exp` emails with new writes move using the same staged post-write/post-print movement model as `export_lc_sc`
+- print batches are built from successful `ud_ip_exp` mails in the active run snapshot, using all newly saved PDFs after the workbook write commit
+- duplicate-only/no-write movement behavior for `ud_ip_exp` follows the shared staged mail-move gates once validation succeeds and no print obligation exists
 
 ### Shared-column behavior
 - Column `UD No. & IP No.` stores UD/EXP/IP values together.

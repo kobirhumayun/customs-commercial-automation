@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from project.models import SavedDocument
 
 if TYPE_CHECKING:
+    from project.workflows.export_lc_sc.payloads import ExportMailPayload
     from project.workflows.ud_ip_exp.matching import UDAllocationResult
 
 
@@ -65,6 +66,7 @@ class UDIPEXPWorkflowPayload:
     documents: list[UDIPEXPDocumentPayload]
     saved_documents: list[SavedDocument] = field(default_factory=list)
     ud_allocation_result: UDAllocationResult | None = None
+    export_payload: ExportMailPayload | None = None
 
 
 def normalize_quantity_unit(unit: str) -> str:

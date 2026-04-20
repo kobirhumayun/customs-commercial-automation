@@ -13,6 +13,127 @@ RULE_PACK_ID = "ud_ip_exp.default"
 RULE_PACK_VERSION = "1.0.0"
 
 
+def evaluate_ud_file_number_present(context) -> RuleEvaluationResult:
+    payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    export_payload = payload.export_payload
+    if export_payload is None:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.file_number_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="ERP-family payload was not supplied for this isolated UD validation path.",
+        )
+    if export_payload.file_numbers:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.file_number_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="UD/IP/EXP mail body yielded canonical file numbers for ERP family resolution.",
+        )
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.file_number_present.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="UD/IP/EXP processing requires at least one canonical file number from the mail body.",
+        discrepancies=(
+            RuleDiscrepancy(
+                code="ud_file_number_missing",
+                severity=FinalDecision.HARD_BLOCK,
+                message="No canonical file numbers were extracted from the UD/IP/EXP mail body.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "body_text": context.mail.body_text,
+                },
+            ),
+        ),
+    )
+
+
+def evaluate_ud_erp_rows_present(context) -> RuleEvaluationResult:
+    payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    export_payload = payload.export_payload
+    if export_payload is None:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.erp_rows_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="ERP-family payload was not supplied for this isolated UD validation path.",
+        )
+    missing = [match.file_number for match in export_payload.erp_matches if match.canonical_row is None]
+    if not missing:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.erp_rows_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="All extracted UD/IP/EXP file numbers resolved to canonical ERP rows.",
+        )
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.erp_rows_present.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="Every extracted UD/IP/EXP file number must resolve to a canonical ERP row.",
+        discrepancies=(
+            RuleDiscrepancy(
+                code="ud_erp_row_missing",
+                severity=FinalDecision.HARD_BLOCK,
+                message="One or more extracted UD/IP/EXP file numbers did not resolve to ERP rows.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "missing_file_numbers": missing,
+                },
+            ),
+        ),
+    )
+
+
+def evaluate_ud_family_consistent(context) -> RuleEvaluationResult:
+    payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    export_payload = payload.export_payload
+    if export_payload is None:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.family_consistent.v1",
+            outcome=FinalDecision.PASS,
+            rationale="ERP-family payload was not supplied for this isolated UD validation path.",
+        )
+    canonical_rows = [match.canonical_row for match in export_payload.erp_matches if match.canonical_row is not None]
+    if not canonical_rows:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.family_consistent.v1",
+            outcome=FinalDecision.PASS,
+            rationale="UD/IP/EXP family consistency awaits ERP row resolution.",
+        )
+    if export_payload.verified_family is not None:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.family_consistent.v1",
+            outcome=FinalDecision.PASS,
+            rationale="Resolved UD/IP/EXP ERP rows belong to one LC/SC family.",
+        )
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.family_consistent.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="Resolved UD/IP/EXP ERP rows must belong to one LC/SC family.",
+        discrepancies=(
+            RuleDiscrepancy(
+                code="ud_family_inconsistent",
+                severity=FinalDecision.HARD_BLOCK,
+                message="Resolved UD/IP/EXP ERP rows do not share one LC/SC number, buyer, and LC/SC date.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "families": [
+                        {
+                            "file_number": match.file_number,
+                            "lc_sc_number": match.canonical_row.lc_sc_number if match.canonical_row else None,
+                            "buyer_name": match.canonical_row.buyer_name if match.canonical_row else None,
+                            "lc_sc_date": match.canonical_row.lc_sc_date if match.canonical_row else None,
+                        }
+                        for match in export_payload.erp_matches
+                    ],
+                },
+            ),
+        ),
+    )
+
+
 def evaluate_ud_document_present(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
     if _ud_documents(payload):
@@ -203,6 +324,21 @@ def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
 
 
 RULE_DEFINITIONS = (
+    RuleDefinition(
+        rule_id="ud_ip_exp.erp_rows_present.v1",
+        stage=RuleStage.WORKFLOW_STANDARD,
+        evaluator=evaluate_ud_erp_rows_present,
+    ),
+    RuleDefinition(
+        rule_id="ud_ip_exp.family_consistent.v1",
+        stage=RuleStage.WORKFLOW_STANDARD,
+        evaluator=evaluate_ud_family_consistent,
+    ),
+    RuleDefinition(
+        rule_id="ud_ip_exp.file_number_present.v1",
+        stage=RuleStage.WORKFLOW_STANDARD,
+        evaluator=evaluate_ud_file_number_present,
+    ),
     RuleDefinition(
         rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
         stage=RuleStage.WORKFLOW_STANDARD,

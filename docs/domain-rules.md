@@ -196,6 +196,9 @@ Decision rules:
 - Any partial family match is a hard block.
 - `Buyer Name` may contain an address separated by `\`; normalize by taking the buyer segment, trimming whitespace, and removing trailing periods.
 - Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
+- `ud_ip_exp` uses the same email-body file-number extraction, ERP row lookup, and one-family consistency contract as `export_lc_sc`; the email subject is not authoritative for any `ud_ip_exp` processing step.
+- For `ud_ip_exp`, ERP family fields selected from body file numbers drive attachment storage and workbook-family context. PDF-derived LC/SC values are supporting validation evidence and must hard-block if they contradict the ERP family.
+- ERP `Ship. Remarks`, together with the ERP LC/SC family context, is reserved as the primary future linkage input for UD PDF property extraction. The detailed extraction rule remains unresolved until documented separately.
 
 Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
 
@@ -402,6 +405,7 @@ The dashboard column is verification-only and should not be used to drive other 
 ## Outlook post-processing rule
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
+- Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
 - Successfully processed import-team emails move to `Import` only after batch workbook writes and printing complete.
 
 ## Open questions that remain intentionally unresolved

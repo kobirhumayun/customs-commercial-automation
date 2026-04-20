@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from project.erp import ERPRegisterRow
 from project.models import (
     FinalDecision,
     RunReport,
@@ -155,6 +156,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
             run_report=_run_report(rule_pack, [mail]),
             rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
             workbook_snapshot=_snapshot(
                 rows=[
                     WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
@@ -170,8 +172,9 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.staged_write_plan[0].row_index, 11)
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
-        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
-        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(validation_result.mail_outcomes[0].file_numbers_extracted, ["P/26/0042"])
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
         self.assertEqual(validation_result.mail_reports[0].ud_selection["final_decision"], "selected")
         self.assertEqual(validation_result.discrepancy_reports, [])
@@ -183,6 +186,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
             run_report=_run_report(rule_pack, [mail]),
             rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
             workbook_snapshot=_snapshot(
                 rows=[
                     WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
@@ -226,6 +230,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
             run_report=_run_report(rule_pack, [mail]),
             rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
             workbook_snapshot=_snapshot(rows=[]),
         )
 
@@ -245,6 +250,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
             run_report=_run_report(rule_pack, [first_mail, second_mail]),
             rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
             workbook_snapshot=_snapshot(
                 rows=[
                     WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
@@ -285,6 +291,7 @@ def _mail(entry_id: str, subject: str):
                 received_time="2026-04-01T03:00:00Z",
                 subject_raw=subject,
                 sender_address="sender@example.com",
+                body_text="Please process commercial file P/26/0042.",
             )
         ],
         state_timezone="Asia/Dhaka",
@@ -327,6 +334,24 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
         ],
         rows=rows,
     )
+
+
+class _ERPProvider:
+    def lookup_rows(self, *, file_numbers):
+        row = ERPRegisterRow(
+            file_number="P/26/0042",
+            lc_sc_number="LC-0043",
+            buyer_name="ANANTA GARMENTS LTD",
+            lc_sc_date="2026-01-10",
+            source_row_index=1,
+            lc_qty="1000",
+            lc_unit="YDS",
+        )
+        return {file_number: [row] if file_number == "P/26/0042" else [] for file_number in file_numbers}
+
+
+def _erp_provider():
+    return _ERPProvider()
 
 
 if __name__ == "__main__":

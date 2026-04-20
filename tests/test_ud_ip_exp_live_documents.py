@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.documents import PyMuPDFSavedDocumentAnalysisProvider, SavedDocumentAnalysis
+from project.erp import ERPRegisterRow
 from project.models import (
     FinalDecision,
     MailMovePhaseStatus,
@@ -107,14 +108,15 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
                 run_report=_run_report(rule_pack, [mail]),
                 rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(buyer_name="ERP BUYER LTD", lc_sc_date="2026-01-10"),
                 workbook_snapshot=_full_snapshot(
                     rows=[
                         WorkbookRow(
                             row_index=11,
                             values={
                                 1: "LC-0043",
-                                2: "ANANTA GARMENTS LTD",
-                                3: "2026-01-10",
+                                2: "WORKBOOK BUYER LTD",
+                                3: "2025-05-05",
                                 4: "1000 YDS",
                                 5: "",
                                 6: "",
@@ -133,13 +135,17 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
-        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
-        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
         self.assertEqual(len(validation_result.staged_write_plan), 1)
         self.assertEqual(validation_result.staged_write_plan[0].row_index, 11)
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[0]["document_type"],
             "ud_document",
+        )
+        self.assertIn(
+            "2026/ERP BUYER LTD/LC-0043/All Attachments/UD-LC-0043-ANANTA.pdf",
+            validation_result.mail_outcomes[0].saved_documents[0]["destination_path"].replace("\\", "/"),
         )
 
     def test_prepare_live_ud_ip_exp_documents_infers_lc_sc_from_document_number_when_field_missing(self) -> None:
@@ -359,6 +365,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
                 run_report=_run_report(rule_pack, [mail]),
                 rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
                 workbook_snapshot=_full_snapshot(
                     rows=[
                         WorkbookRow(
@@ -393,10 +400,10 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             if item["code"] == "document_storage_path_unresolved"
         )
         self.assertEqual(discrepancy["code"], "document_storage_path_unresolved")
-        self.assertEqual(discrepancy["details"]["lc_sc_numbers"], ["LC-0043", "LC-9999"])
+        self.assertEqual(discrepancy["details"]["expected_lc_sc_number"], "LC-0043")
         self.assertEqual(
-            [evidence["document_number"] for evidence in discrepancy["details"]["document_evidence"]],
-            ["UD-LC-0043-ONE", "UD-LC-9999-TWO"],
+            [evidence["document_number"] for evidence in discrepancy["details"]["conflicting_document_evidence"]],
+            ["UD-LC-9999-TWO"],
         )
 
     def test_prepare_live_ud_ip_exp_documents_hard_blocks_conflicting_ud_quantities_within_same_family(self) -> None:
@@ -506,6 +513,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
                 run_report=_run_report(rule_pack, [mail]),
                 rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
                 workbook_snapshot=_full_snapshot(
                     rows=[
                         WorkbookRow(
@@ -580,6 +588,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
                 run_report=_run_report(rule_pack, [mail]),
                 rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
                 workbook_snapshot=_full_snapshot(
                     rows=[
                         WorkbookRow(
@@ -670,6 +679,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                     descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
                     run_report=_run_report(rule_pack, [mail]),
                     rule_pack=rule_pack,
+                    erp_row_provider=_erp_provider(),
                     workbook_snapshot=_full_snapshot(
                         rows=[
                             WorkbookRow(
@@ -723,6 +733,7 @@ def _mail(entry_id: str, subject: str, *, attachments: list[dict] | None = None)
                 received_time="2026-04-01T03:00:00Z",
                 subject_raw=subject,
                 sender_address="sender@example.com",
+                body_text="Please process commercial file P/26/0042.",
                 attachments=[
                     SourceAttachmentRecord(attachment_name=attachment["attachment_name"])
                     for attachment in (attachments or [])
@@ -771,6 +782,28 @@ def _full_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
         ],
         rows=rows,
     )
+
+
+class _ERPProvider:
+    def __init__(self, *, buyer_name: str = "ANANTA GARMENTS LTD", lc_sc_date: str = "2026-01-10") -> None:
+        self.buyer_name = buyer_name
+        self.lc_sc_date = lc_sc_date
+
+    def lookup_rows(self, *, file_numbers):
+        row = ERPRegisterRow(
+            file_number="P/26/0042",
+            lc_sc_number="LC-0043",
+            buyer_name=self.buyer_name,
+            lc_sc_date=self.lc_sc_date,
+            source_row_index=1,
+            lc_qty="1000",
+            lc_unit="YDS",
+        )
+        return {file_number: [row] if file_number == "P/26/0042" else [] for file_number in file_numbers}
+
+
+def _erp_provider(*, buyer_name: str = "ANANTA GARMENTS LTD", lc_sc_date: str = "2026-01-10"):
+    return _ERPProvider(buyer_name=buyer_name, lc_sc_date=lc_sc_date)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,11 @@ Before implementation, read these files in order:
   - payload models, parsing helpers, workbook header mapping, deterministic UD allocation, staging, reporting, and rule-pack wiring are implemented
   - CLI validation accepts deterministic fixture payloads through `validate-run ud_ip_exp --ud-payload-json <path>`
   - live UD document preparation is implemented for `validate-run` when `--document-root` is used, including PDF save, saved-document analysis, workflow-local document classification, workbook-family storage-path resolution, and UD payload derivation from saved documents
+  - live `ud_ip_exp` family resolution now follows the released `export_lc_sc` model: extract canonical file numbers from the email body, resolve them through ERP rows, and require one LC/SC family before storage, validation, printing, or mail movement can proceed
+  - email subject extraction is not authoritative for `ud_ip_exp`; it must not drive family resolution, storage, validation, printing, or mail movement
   - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
   - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
-  - transport for `ud_ip_exp` remains intentionally disabled pending unresolved print/mail-move policy
+  - transport for `ud_ip_exp` is enabled using the same staged model as `export_lc_sc`: newly saved PDFs from successful mails are print-eligible after workbook write commit, and successful mails move only after required upstream gates complete
   - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
 
@@ -153,6 +155,8 @@ Current payload coverage:
 Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
+- email body file numbers plus ERP rows are the primary LC/SC-family source for `ud_ip_exp`; PDF-derived LC/SC evidence is supporting validation evidence and must not override the ERP family
+- ERP LC/SC family context and ERP `Ship. Remarks` are reserved as the primary future linkage inputs for UD PDF property extraction, while the detailed extraction rule remains deferred until the business rule is documented
 - document-date extraction prefers UD/IP/EXP-specific date labels over LC/SC issue-date labels so export-family dates are not accepted as UD/IP/EXP evidence
 - text-layer UD/IP/EXP document-number extraction uses label-aware boundaries so buyer labels and neighboring LC/SC, date, and quantity labels are not captured into the document number
 - storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution
@@ -225,12 +229,11 @@ Keep export behavior unchanged. Add tests proving `export_lc_sc` still passes.
 
 ### 7. Print and Mail Move
 
-Confirm whether UD/IP/EXP requires printing all newly saved PDFs, only selected document types, or no print. Until clarified, do not invent a different transport policy.
-
 Current implementation:
-- `ud_ip_exp` print and mail-move eligibility is intentionally disabled in validation output
-- CLI output includes explicit transport-policy status explaining the unresolved-policy block
-- no print/mail-move behavior should be added until the business rule is confirmed in durable docs
+- `ud_ip_exp` print and mail-move eligibility follows `export_lc_sc`
+- all newly saved PDFs for successful `ud_ip_exp` mails are print-eligible after the workbook write commit
+- successful `ud_ip_exp` mails follow the same staged post-write/post-print movement gate as `export_lc_sc`
+- IP/EXP document processing can still hard-block before transport because IP/EXP matching and write policies remain unresolved
 
 ## Deterministic Fixture Manifest
 
@@ -297,9 +300,8 @@ These must be answered or intentionally hard-blocked before production release:
 6. How should dates be stored if UD/IP/EXP has date columns?
 7. Are existing values in `UD No. & IP No.` appendable, replaceable, or hard-blocking?
 8. How should duplicate UD/IP/EXP values already present in a row be handled?
-9. Does UD/IP/EXP require print execution, or only save/write/mail-move?
-10. Should duplicate-only/no-write mails be moved, left in working, or reported only?
-11. What source/destination Outlook folders should production use for this workflow?
+9. Should duplicate-only/no-write `ud_ip_exp` mails move exactly like export duplicate-only mails after successful validation?
+10. What source/destination Outlook folders should production use for this workflow?
 
 Until answered, default to hard-block with comprehensive discrepancy reporting rather than guessing.
 
@@ -307,9 +309,8 @@ Until answered, default to hard-block with comprehensive discrepancy reporting r
 
 The next highest-value work is whichever of these the team wants to unblock first:
 1. Update this handoff and adjacent durable docs whenever the implementation boundary changes.
-2. Improve live UD extraction quality using deterministic saved-document analysis fixtures and hard-block reporting.
+2. Improve live UD extraction quality using deterministic saved-document analysis fixtures and hard-block reporting, especially around the future ERP LC/SC + `Ship. Remarks` linkage rule.
 3. Finalize IP/EXP business rules in docs, then replace the current unresolved-policy hard-block path with deterministic matching and staging logic.
-4. Finalize `ud_ip_exp` transport policy before enabling print/mail-move eligibility.
 
 ## Guardrails for New Sessions
 

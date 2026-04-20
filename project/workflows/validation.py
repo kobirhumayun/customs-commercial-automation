@@ -31,7 +31,7 @@ from project.workflows.export_lc_sc.document_classification import (
     classify_saved_export_documents,
 )
 from project.workflows.duplicate_handling import classify_write_disposition
-from project.workflows.export_lc_sc.payloads import ExportMailPayload
+from project.workflows.export_lc_sc.payloads import ExportMailPayload, build_export_mail_payload
 from project.workflows.export_lc_sc.staging import (
     ExportStagingDiscrepancy,
     ExportWriteStagingResult,
@@ -43,12 +43,6 @@ from project.workflows.ud_ip_exp.payloads import UDIPEXPWorkflowPayload
 from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider, select_preferred_ud_document
 from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
 from project.workflows.ud_ip_exp.live_documents import prepare_live_ud_ip_exp_documents
-
-
-UD_IP_EXP_TRANSPORT_POLICY_STATUS = "disabled_pending_policy"
-UD_IP_EXP_TRANSPORT_POLICY_REASON = (
-    "UD/IP/EXP print and mail-move policy remains unresolved; downstream transport eligibility is disabled."
-)
 
 
 @dataclass(slots=True, frozen=True)
@@ -94,6 +88,11 @@ def validate_run_snapshot(
     working_workbook_snapshot = workbook_snapshot
 
     for mail in run_report.mail_snapshot:
+        ud_family_payload = (
+            build_export_mail_payload(mail, erp_row_provider=erp_row_provider)
+            if descriptor.workflow_id == WorkflowId.UD_IP_EXP
+            else None
+        )
         workflow_documents = (
             ud_document_provider.get_documents(mail)
             if descriptor.workflow_id == WorkflowId.UD_IP_EXP and ud_document_provider is not None
@@ -108,6 +107,7 @@ def validate_run_snapshot(
                 document_root=document_root,
                 document_analysis_provider=document_analysis_provider,
                 workflow_documents=workflow_documents,
+                export_payload=ud_family_payload,
             )
             if descriptor.workflow_id == WorkflowId.UD_IP_EXP
             else (
@@ -126,6 +126,7 @@ def validate_run_snapshot(
             erp_row_provider=erp_row_provider,
             ud_document_provider=ud_document_provider,
             workflow_documents=workflow_documents,
+            ud_family_payload=ud_family_payload,
         )
         if descriptor.workflow_id != WorkflowId.UD_IP_EXP:
             document_save_result = _save_mail_documents_if_configured(
@@ -222,6 +223,7 @@ def _prepare_ud_ip_exp_documents_if_configured(
     document_root: Path | None,
     document_analysis_provider: SavedDocumentAnalysisProvider | None,
     workflow_documents: list | None,
+    export_payload: ExportMailPayload | None,
 ) -> tuple[DocumentSaveResult, ClassifiedDocumentSet, list | None]:
     if attachment_content_provider is None or document_root is None:
         return (
@@ -238,6 +240,8 @@ def _prepare_ud_ip_exp_documents_if_configured(
         provider=attachment_content_provider,
         analysis_provider=document_analysis_provider or NullSavedDocumentAnalysisProvider(),
         documents_override=list(workflow_documents or []),
+        verified_family=export_payload.verified_family if export_payload is not None else None,
+        require_verified_family=True,
     )
     return (
         prepared.document_save_result,
@@ -286,12 +290,6 @@ def _build_mail_outcome(
         ),
         staged_write_operations=staging_result.staged_write_operations,
     )
-    transport_allowed = descriptor.workflow_id != WorkflowId.UD_IP_EXP
-    transport_reason = (
-        [UD_IP_EXP_TRANSPORT_POLICY_REASON]
-        if allowed and descriptor.workflow_id == WorkflowId.UD_IP_EXP
-        else []
-    )
     return MailOutcomeRecord(
         run_id=run_report.run_id,
         mail_id=mail.mail_id,
@@ -304,16 +302,14 @@ def _build_mail_outcome(
             + list(document_classification_result.decision_reasons)
             + list(aggregated.decision_reasons)
             + list(staging_result.decision_reasons)
-            + transport_reason
         ),
         eligible_for_write=allowed and descriptor.write_capable and bool(staging_result.staged_write_operations),
         eligible_for_print=(
             allowed
-            and transport_allowed
             and descriptor.supports_print
             and write_disposition in {"new_writes_staged", "mixed_duplicate_and_new_writes"}
         ),
-        eligible_for_mail_move=allowed and transport_allowed,
+        eligible_for_mail_move=allowed,
         source_entry_id=mail.entry_id,
         subject_raw=mail.subject_raw,
         sender_address=mail.sender_address,
@@ -371,6 +367,7 @@ def _evaluate_mail_for_workflow(
     erp_row_provider: ERPRowProvider | None,
     ud_document_provider: UDDocumentPayloadProvider | None,
     workflow_documents: list | None = None,
+    ud_family_payload: ExportMailPayload | None = None,
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, object, dict | None]:
     if descriptor.workflow_id == WorkflowId.UD_IP_EXP:
         return _evaluate_ud_ip_exp_mail(
@@ -380,6 +377,7 @@ def _evaluate_mail_for_workflow(
             workbook_snapshot=workbook_snapshot,
             ud_document_provider=ud_document_provider,
             workflow_documents=workflow_documents,
+            export_payload=ud_family_payload,
         )
 
     context = WorkflowValidationContext(
@@ -417,6 +415,7 @@ def _evaluate_ud_ip_exp_mail(
     workbook_snapshot: WorkbookSnapshot | None,
     ud_document_provider: UDDocumentPayloadProvider | None,
     workflow_documents: list | None = None,
+    export_payload: ExportMailPayload | None = None,
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, UDIPEXPWriteStagingResult, dict | None]:
     documents = list(workflow_documents or [])
     if not documents and ud_document_provider is not None:
@@ -434,6 +433,7 @@ def _evaluate_ud_ip_exp_mail(
             documents=documents,
             saved_documents=[],
             state_timezone=run_report.state_timezone,
+            export_payload=export_payload,
         )
         context = WorkflowValidationContext(
             run_id=run_report.run_id,
@@ -447,7 +447,7 @@ def _evaluate_ud_ip_exp_mail(
         )
         return context, assembly.rule_evaluation, assembly.staging_result, assembly.ud_selection
 
-    workflow_payload = UDIPEXPWorkflowPayload(documents=documents)
+    workflow_payload = UDIPEXPWorkflowPayload(documents=documents, export_payload=export_payload)
     context = WorkflowValidationContext(
         run_id=run_report.run_id,
         workflow_id=run_report.workflow_id,
@@ -725,8 +725,9 @@ def _classify_saved_documents_for_workflow(
 
 
 def _extract_file_numbers(descriptor: WorkflowDescriptor, workflow_payload: object | None) -> list[str]:
-    if descriptor.workflow_id.value != "export_lc_sc":
-        return []
-    if not isinstance(workflow_payload, ExportMailPayload):
-        return []
-    return list(workflow_payload.file_numbers)
+    if descriptor.workflow_id == WorkflowId.EXPORT_LC_SC and isinstance(workflow_payload, ExportMailPayload):
+        return list(workflow_payload.file_numbers)
+    if descriptor.workflow_id == WorkflowId.UD_IP_EXP and isinstance(workflow_payload, UDIPEXPWorkflowPayload):
+        if workflow_payload.export_payload is not None:
+            return list(workflow_payload.export_payload.file_numbers)
+    return []

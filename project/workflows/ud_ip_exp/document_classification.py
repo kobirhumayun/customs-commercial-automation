@@ -68,7 +68,7 @@ def classify_saved_ud_ip_exp_documents(
             clause_provenance=analysis.clause_provenance,
             document_type=_document_type(document_kind),
             classification_reason=_classification_reason(document_kind),
-            print_eligible=False,
+            print_eligible=saved_document.save_decision == "saved_new",
         )
         annotated_documents.append(annotated_document)
         decision_reasons.append(

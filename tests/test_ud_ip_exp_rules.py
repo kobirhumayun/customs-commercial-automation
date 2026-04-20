@@ -3,8 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 import unittest
 
+from project.erp import ERPRegisterRow
 from project.models import FinalDecision, WorkflowId
 from project.rules import evaluate_rule_pack, load_rule_pack
+from project.workflows.export_lc_sc.payloads import ExportFileNumberMatch, ExportMailPayload
 from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
@@ -30,6 +32,9 @@ class UDIPEXPRuleTests(unittest.TestCase):
             [
                 "core.mail.sender_present.v1",
                 "core.mail.subject_present.v1",
+                "ud_ip_exp.erp_rows_present.v1",
+                "ud_ip_exp.family_consistent.v1",
+                "ud_ip_exp.file_number_present.v1",
                 "ud_ip_exp.ip_exp_policy_resolved.v1",
                 "ud_ip_exp.ud_allocation_selected.v1",
                 "ud_ip_exp.ud_document_present.v1",
@@ -172,6 +177,115 @@ class UDIPEXPRuleTests(unittest.TestCase):
             "EXP: EXP-001\nIP: IP-002",
         )
 
+    def test_rule_pack_hard_blocks_missing_body_file_number_when_erp_family_payload_is_supplied(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        payload = UDIPEXPWorkflowPayload(
+            documents=[_ud_document()],
+            ud_allocation_result=allocate_ud_rows(
+                required_quantity=Decimal("1000"),
+                quantity_unit="YDS",
+                candidate_rows=[
+                    UDCandidateRow(
+                        row_index=11,
+                        lc_sc_number="LC-0043",
+                        quantity=Decimal("1000"),
+                        quantity_unit="YDS",
+                    )
+                ],
+            ),
+            export_payload=ExportMailPayload(
+                parsed_subject=None,
+                file_numbers=[],
+                erp_matches=[],
+                verified_family=None,
+                attachments_in_order=[],
+            ),
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertIn("ud_file_number_missing", [item.code for item in result.discrepancies])
+
+    def test_rule_pack_hard_blocks_missing_erp_row_for_body_file_number(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        payload = UDIPEXPWorkflowPayload(
+            documents=[_ud_document()],
+            ud_allocation_result=allocate_ud_rows(
+                required_quantity=Decimal("1000"),
+                quantity_unit="YDS",
+                candidate_rows=[
+                    UDCandidateRow(
+                        row_index=11,
+                        lc_sc_number="LC-0043",
+                        quantity=Decimal("1000"),
+                        quantity_unit="YDS",
+                    )
+                ],
+            ),
+            export_payload=ExportMailPayload(
+                parsed_subject=None,
+                file_numbers=["P/26/0042"],
+                erp_matches=[
+                    ExportFileNumberMatch(
+                        file_number="P/26/0042",
+                        canonical_row=None,
+                        matched_rows=[],
+                    )
+                ],
+                verified_family=None,
+                attachments_in_order=[],
+            ),
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertIn("ud_erp_row_missing", [item.code for item in result.discrepancies])
+
+    def test_rule_pack_hard_blocks_inconsistent_erp_family_for_body_file_numbers(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        first_row = _erp_row(file_number="P/26/0042", lc_sc_number="LC-0043")
+        second_row = _erp_row(file_number="P/26/0043", lc_sc_number="LC-0099")
+        payload = UDIPEXPWorkflowPayload(
+            documents=[_ud_document()],
+            ud_allocation_result=allocate_ud_rows(
+                required_quantity=Decimal("1000"),
+                quantity_unit="YDS",
+                candidate_rows=[
+                    UDCandidateRow(
+                        row_index=11,
+                        lc_sc_number="LC-0043",
+                        quantity=Decimal("1000"),
+                        quantity_unit="YDS",
+                    )
+                ],
+            ),
+            export_payload=ExportMailPayload(
+                parsed_subject=None,
+                file_numbers=["P/26/0042", "P/26/0043"],
+                erp_matches=[
+                    ExportFileNumberMatch(
+                        file_number="P/26/0042",
+                        canonical_row=first_row,
+                        matched_rows=[first_row],
+                    ),
+                    ExportFileNumberMatch(
+                        file_number="P/26/0043",
+                        canonical_row=second_row,
+                        matched_rows=[second_row],
+                    ),
+                ],
+                verified_family=None,
+                attachments_in_order=[],
+            ),
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertIn("ud_family_inconsistent", [item.code for item in result.discrepancies])
+
 
 def _ud_document() -> UDDocumentPayload:
     return UDDocumentPayload(
@@ -203,6 +317,18 @@ def _context(payload: UDIPEXPWorkflowPayload) -> WorkflowValidationContext:
         operator_context=None,
         mail=mail,
         workflow_payload=payload,
+    )
+
+
+def _erp_row(*, file_number: str, lc_sc_number: str) -> ERPRegisterRow:
+    return ERPRegisterRow(
+        file_number=file_number,
+        lc_sc_number=lc_sc_number,
+        buyer_name="ANANTA GARMENTS LTD",
+        lc_sc_date="2026-01-10",
+        source_row_index=1,
+        lc_qty="1000",
+        lc_unit="YDS",
     )
 
 

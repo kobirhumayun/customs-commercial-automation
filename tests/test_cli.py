@@ -4532,6 +4532,7 @@ class CLITests(unittest.TestCase):
                             "received_time": "2026-04-01T03:00:00Z",
                             "subject_raw": "UD-LC-0043-ANANTA",
                             "sender_address": "sender@example.com",
+                            "body_text": "Please process commercial file P/26/0042.",
                         }
                     ]
                 ),
@@ -4572,6 +4573,7 @@ class CLITests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            erp_json_path = _write_ud_erp_json(root)
 
             buffer = io.StringIO()
             with redirect_stdout(buffer):
@@ -4587,6 +4589,8 @@ class CLITests(unittest.TestCase):
                         str(workbook_path),
                         "--ud-payload-json",
                         str(ud_payload_path),
+                        "--erp-json",
+                        str(erp_json_path),
                     ]
                 )
             payload = json.loads(buffer.getvalue())
@@ -4596,16 +4600,12 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["workflow_id"], "ud_ip_exp")
         self.assertEqual(payload["summary"], {"pass": 1, "warning": 0, "hard_block": 0})
         self.assertEqual(payload["staged_write_operation_count"], 1)
-        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
-        self.assertIn("mail-move policy remains unresolved", payload["transport_policy"]["reason"])
+        self.assertNotIn("transport_policy", payload)
         self.assertEqual(mail_outcomes[0]["ud_selection"]["selected_candidate_id"], "11")
         self.assertTrue(mail_outcomes[0]["eligible_for_write"])
-        self.assertFalse(mail_outcomes[0]["eligible_for_print"])
-        self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
-        self.assertIn(
-            "mail-move policy remains unresolved",
-            "\n".join(mail_outcomes[0]["decision_reasons"]),
-        )
+        self.assertTrue(mail_outcomes[0]["eligible_for_print"])
+        self.assertTrue(mail_outcomes[0]["eligible_for_mail_move"])
+        self.assertEqual(mail_outcomes[0]["file_numbers_extracted"], ["P/26/0042"])
 
     def test_validate_run_ud_ip_exp_without_ud_payload_manifest_hard_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4620,6 +4620,7 @@ class CLITests(unittest.TestCase):
                             "received_time": "2026-04-01T03:00:00Z",
                             "subject_raw": "UD-LC-0043-ANANTA",
                             "sender_address": "sender@example.com",
+                            "body_text": "Please process commercial file P/26/0042.",
                         }
                     ]
                 ),
@@ -4642,6 +4643,7 @@ class CLITests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            erp_json_path = _write_ud_erp_json(root)
 
             buffer = io.StringIO()
             with redirect_stdout(buffer):
@@ -4655,6 +4657,8 @@ class CLITests(unittest.TestCase):
                         str(snapshot_path),
                         "--workbook-json",
                         str(workbook_path),
+                        "--erp-json",
+                        str(erp_json_path),
                     ]
                 )
             payload = json.loads(buffer.getvalue())
@@ -4663,7 +4667,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["summary"], {"pass": 0, "warning": 0, "hard_block": 1})
         self.assertEqual(payload["staged_write_operation_count"], 0)
-        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
+        self.assertNotIn("transport_policy", payload)
         self.assertEqual(
             [item["code"] for item in discrepancies],
             ["ud_allocation_unresolved", "ud_required_document_missing"],
@@ -4682,6 +4686,7 @@ class CLITests(unittest.TestCase):
                             "received_time": "2026-04-01T03:00:00Z",
                             "subject_raw": "UD-LC-0043-ANANTA",
                             "sender_address": "sender@example.com",
+                            "body_text": "Please process commercial file P/26/0042.",
                         }
                     ]
                 ),
@@ -4737,6 +4742,7 @@ class CLITests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            erp_json_path = _write_ud_erp_json(root)
 
             buffer = io.StringIO()
             with redirect_stdout(buffer):
@@ -4752,6 +4758,8 @@ class CLITests(unittest.TestCase):
                         str(workbook_path),
                         "--ud-payload-json",
                         str(ud_payload_path),
+                        "--erp-json",
+                        str(erp_json_path),
                     ]
                 )
             payload = json.loads(buffer.getvalue())
@@ -4762,7 +4770,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["summary"], {"pass": 0, "warning": 0, "hard_block": 1})
         self.assertEqual(payload["staged_write_operation_count"], 0)
-        self.assertEqual(payload["transport_policy"]["status"], "disabled_pending_policy")
+        self.assertNotIn("transport_policy", payload)
         self.assertEqual([item["code"] for item in discrepancies], ["ip_exp_policy_unresolved"])
         self.assertEqual(
             discrepancies[0]["details"]["proposed_shared_column_value"],
@@ -4849,6 +4857,28 @@ def _write_cli_config(root: Path, *, workflow_year: int) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def _write_ud_erp_json(root: Path) -> Path:
+    erp_json_path = root / "ud-erp.json"
+    erp_json_path.write_text(
+        json.dumps(
+            [
+                {
+                    "file_number": "P/26/0042",
+                    "lc_sc_number": "LC-0043",
+                    "buyer_name": "ANANTA GARMENTS LTD",
+                    "lc_sc_date": "2026-01-10",
+                    "source_row_index": 1,
+                    "lc_qty": "1000",
+                    "lc_unit": "YDS",
+                    "ship_remarks": "UD linkage pending confirmed extraction rule",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return erp_json_path
 
 
 def _run_validate_ud_ip_exp_with_payload_records(records: list[dict]) -> tuple[int, str]:
