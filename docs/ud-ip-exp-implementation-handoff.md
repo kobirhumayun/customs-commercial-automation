@@ -27,6 +27,7 @@ Before implementation, read these files in order:
   - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
   - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
   - transport for `ud_ip_exp` is enabled using the same staged model as `export_lc_sc`: newly saved PDFs from successful mails are print-eligible after workbook write commit, and successful mails move only after required upstream gates complete
+  - transport integration is covered by tests proving live UD validation saves into the ERP-derived export-family folder, print planning includes newly saved UD PDFs after the committed write gate, mail moves hard-block before print completion, and mail moves complete after print completion
   - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
 

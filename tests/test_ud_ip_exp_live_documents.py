@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,10 +15,15 @@ from project.models import (
     RunReport,
     WorkflowId,
     WritePhaseStatus,
+    MailProcessingStatus,
 )
+from project.outlook import SimulatedMailMoveProvider
 from project.rules import load_rule_pack
+from project.storage import create_run_artifact_layout
 from project.storage import SimulatedAttachmentContentProvider
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
+from project.workflows.mail_moves import execute_mail_moves
+from project.workflows.print_planning import plan_print_batches
 from project.workflows.registry import get_workflow_descriptor
 from project.workflows.snapshot import SourceAttachmentRecord, SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import prepare_live_ud_ip_exp_documents
@@ -147,6 +153,109 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             "2026/ERP BUYER LTD/LC-0043/All Attachments/UD-LC-0043-ANANTA.pdf",
             validation_result.mail_outcomes[0].saved_documents[0]["destination_path"].replace("\\", "/"),
         )
+
+    def test_live_ud_documents_plan_print_and_mail_move_after_shared_transport_gates(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail(
+            "entry-live-transport-001",
+            "Subject intentionally ignored for family",
+            attachments=[{"attachment_name": "UD-LC-0043-ANANTA.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-0043",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [mail]),
+                rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(buyer_name="ERP TRANSPORT BUYER LTD"),
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "WORKBOOK BUYER SHOULD NOT DRIVE STORAGE",
+                                3: "2025-05-05",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        )
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud transport\n"}
+                ),
+                document_root=root / "documents",
+                document_analysis_provider=Provider(),
+            )
+            committed_report = replace(
+                validation_result.run_report,
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                resolved_source_folder_entry_id="src-folder",
+                resolved_destination_folder_entry_id="dst-folder",
+                folder_resolution_mode="entry_id",
+            )
+            planning_result = plan_print_batches(
+                run_report=committed_report,
+                mail_outcomes=validation_result.mail_outcomes,
+                staged_write_plan=validation_result.staged_write_plan,
+            )
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id=WorkflowId.UD_IP_EXP.value,
+                run_id=committed_report.run_id,
+            )
+            blocked_report, blocked_outcomes, _blocked_moves, blocked_discrepancies = execute_mail_moves(
+                run_report=planning_result.run_report,
+                mail_outcomes=planning_result.mail_outcomes,
+                artifact_paths=artifact_paths,
+                provider=SimulatedMailMoveProvider(),
+            )
+            completed_print_report = replace(
+                planning_result.run_report,
+                print_phase_status=PrintPhaseStatus.COMPLETED,
+            )
+            moved_report, moved_outcomes, move_operations, move_discrepancies = execute_mail_moves(
+                run_report=completed_print_report,
+                mail_outcomes=planning_result.mail_outcomes,
+                artifact_paths=artifact_paths,
+                provider=SimulatedMailMoveProvider(),
+            )
+
+        saved_document = validation_result.mail_outcomes[0].saved_documents[0]
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertTrue(saved_document["print_eligible"])
+        self.assertIn(
+            "2026/ERP TRANSPORT BUYER LTD/LC-0043/All Attachments/UD-LC-0043-ANANTA.pdf",
+            saved_document["destination_path"].replace("\\", "/"),
+        )
+        self.assertEqual(planning_result.run_report.print_phase_status, PrintPhaseStatus.PLANNED)
+        self.assertEqual(len(planning_result.print_batches), 1)
+        self.assertEqual(planning_result.print_batches[0].document_paths, [saved_document["destination_path"]])
+        self.assertEqual(blocked_report.mail_move_phase_status, MailMovePhaseStatus.HARD_BLOCKED)
+        self.assertEqual(blocked_discrepancies[0].code, "mail_move_gate_unsatisfied")
+        self.assertFalse(blocked_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(moved_report.mail_move_phase_status, MailMovePhaseStatus.COMPLETED)
+        self.assertEqual(moved_outcomes[0].processing_status, MailProcessingStatus.MOVED)
+        self.assertEqual(move_discrepancies, [])
+        self.assertEqual(len(move_operations), 1)
 
     def test_prepare_live_ud_ip_exp_documents_infers_lc_sc_from_document_number_when_field_missing(self) -> None:
         mail = _mail(
