@@ -28,7 +28,8 @@ from project.models import (
     WriteOperation,
     WritePhaseStatus,
 )
-from project.storage import create_run_artifact_layout
+from project.storage import SimulatedAttachmentContentProvider, create_run_artifact_layout
+from project.workflows.snapshot import SourceAttachmentRecord, SourceEmailRecord, build_email_snapshot
 from project.workflows.document_verification import DocumentManualVerificationResult
 from project.workflows.registry import WORKFLOW_REGISTRY
 from project.workbook import WorkbookHeader
@@ -4782,6 +4783,155 @@ class CLITests(unittest.TestCase):
         self.assertFalse(mail_outcomes[0]["eligible_for_print"])
         self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
 
+    def test_ud_ip_exp_cli_artifacts_flow_into_print_and_mail_move_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_cli_config(root, workflow_year=datetime.datetime.now().year)
+            workbook_path = _write_ud_workbook_json(root)
+            erp_json_path = _write_ud_erp_json(root)
+            analysis_json_path = _write_ud_saved_document_analysis_json(root)
+            document_root = root / "documents"
+            fake_snapshot = build_email_snapshot(
+                [
+                    SourceEmailRecord(
+                        entry_id="entry-ud-live-001",
+                        received_time="2026-04-01T03:00:00Z",
+                        subject_raw="Subject ignored for UD family",
+                        sender_address="sender@example.com",
+                        body_text="Please process commercial file P/26/0042.",
+                        attachments=[
+                            SourceAttachmentRecord(
+                                attachment_name="UD-LC-0043-ANANTA.pdf",
+                                content_type="application/pdf",
+                            )
+                        ],
+                    )
+                ],
+                state_timezone="Asia/Dhaka",
+            )
+
+            class FakeSnapshotProvider:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def load_snapshot(self, *, state_timezone):
+                    return fake_snapshot
+
+            attachment_provider = SimulatedAttachmentContentProvider(
+                content_by_key={("entry-ud-live-001", 0): b"%PDF-1.4\nud cli artifact flow\n"}
+            )
+
+            validate_buffer = io.StringIO()
+            with patch("project.cli.Win32ComMailSnapshotProvider", FakeSnapshotProvider):
+                with patch("project.cli.Win32ComAttachmentContentProvider", return_value=attachment_provider):
+                    with redirect_stdout(validate_buffer):
+                        validate_exit_code = main(
+                            [
+                                "validate-run",
+                                "ud_ip_exp",
+                                "--config",
+                                str(config_path),
+                                "--live-outlook-snapshot",
+                                "--document-root",
+                                str(document_root),
+                                "--workbook-json",
+                                str(workbook_path),
+                                "--erp-json",
+                                str(erp_json_path),
+                                "--document-analysis-json",
+                                str(analysis_json_path),
+                            ]
+                        )
+            validate_payload = json.loads(validate_buffer.getvalue())
+            artifact_root = Path(validate_payload["artifact_root"])
+            run_metadata_path = artifact_root / "run_metadata.json"
+            mail_outcomes_path = artifact_root / "mail_outcomes.jsonl"
+            mail_outcomes = _read_jsonl(mail_outcomes_path)
+
+            _update_run_metadata(
+                run_metadata_path,
+                write_phase_status="committed",
+                mail_move_phase_status="not_started",
+            )
+            plan_buffer = io.StringIO()
+            with redirect_stdout(plan_buffer):
+                plan_exit_code = main(
+                    [
+                        "plan-print",
+                        "ud_ip_exp",
+                        "--config",
+                        str(config_path),
+                        "--run-id",
+                        validate_payload["run_id"],
+                    ]
+                )
+            plan_payload = json.loads(plan_buffer.getvalue())
+            print_plan = json.loads((artifact_root / "print_plan.json").read_text(encoding="utf-8"))
+            planned_run_metadata_text = run_metadata_path.read_text(encoding="utf-8")
+            planned_mail_outcomes_text = mail_outcomes_path.read_text(encoding="utf-8")
+
+            blocked_move_buffer = io.StringIO()
+            with redirect_stdout(blocked_move_buffer):
+                blocked_move_exit_code = main(
+                    [
+                        "execute-mail-moves",
+                        "ud_ip_exp",
+                        "--config",
+                        str(config_path),
+                        "--run-id",
+                        validate_payload["run_id"],
+                        "--simulate",
+                    ]
+                )
+            blocked_move_payload = json.loads(blocked_move_buffer.getvalue())
+            blocked_discrepancies = _read_jsonl(artifact_root / "discrepancies.jsonl")
+
+            run_metadata_path.write_text(planned_run_metadata_text, encoding="utf-8")
+            mail_outcomes_path.write_text(planned_mail_outcomes_text, encoding="utf-8")
+            _update_run_metadata(
+                run_metadata_path,
+                print_phase_status="completed",
+                mail_move_phase_status="not_started",
+            )
+            completed_move_buffer = io.StringIO()
+            with redirect_stdout(completed_move_buffer):
+                completed_move_exit_code = main(
+                    [
+                        "execute-mail-moves",
+                        "ud_ip_exp",
+                        "--config",
+                        str(config_path),
+                        "--run-id",
+                        validate_payload["run_id"],
+                        "--simulate",
+                    ]
+                )
+            completed_move_payload = json.loads(completed_move_buffer.getvalue())
+            moved_outcomes = _read_jsonl(mail_outcomes_path)
+            marker_files = list((artifact_root / "mail_move_markers").glob("*.json"))
+
+        saved_document_path = mail_outcomes[0]["saved_documents"][0]["destination_path"].replace("\\", "/")
+        self.assertEqual(validate_exit_code, 0)
+        self.assertEqual(validate_payload["summary"], {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(mail_outcomes[0]["file_numbers_extracted"], ["P/26/0042"])
+        self.assertTrue(mail_outcomes[0]["saved_documents"][0]["print_eligible"])
+        self.assertTrue(mail_outcomes[0]["eligible_for_print"])
+        self.assertTrue(mail_outcomes[0]["eligible_for_mail_move"])
+        self.assertIn("2026/ANANTA GARMENTS LTD/LC-0043/All Attachments/UD-LC-0043-ANANTA.pdf", saved_document_path)
+        self.assertEqual(plan_exit_code, 0)
+        self.assertEqual(plan_payload["print_phase_status"], "planned")
+        self.assertEqual(plan_payload["print_group_count"], 1)
+        self.assertEqual(print_plan["print_groups"][0]["document_paths"], [mail_outcomes[0]["saved_documents"][0]["destination_path"]])
+        self.assertEqual(blocked_move_exit_code, 0)
+        self.assertEqual(blocked_move_payload["mail_move_phase_status"], "hard_blocked")
+        self.assertEqual(blocked_move_payload["discrepancy_count"], 1)
+        self.assertEqual(blocked_discrepancies[-1]["code"], "mail_move_gate_unsatisfied")
+        self.assertEqual(completed_move_exit_code, 0)
+        self.assertEqual(completed_move_payload["mail_move_phase_status"], "completed")
+        self.assertEqual(completed_move_payload["mail_move_operation_count"], 1)
+        self.assertEqual(moved_outcomes[0]["processing_status"], "moved")
+        self.assertEqual(len(marker_files), 1)
+
     def test_validate_run_ud_ip_exp_rejects_manifest_with_unknown_document_kind(self) -> None:
         exit_code, stderr = _run_validate_ud_ip_exp_with_payload_records(
             [
@@ -4879,6 +5029,68 @@ def _write_ud_erp_json(root: Path) -> Path:
         encoding="utf-8",
     )
     return erp_json_path
+
+
+def _write_ud_workbook_json(root: Path) -> Path:
+    workbook_path = root / "ud-workbook.json"
+    workbook_path.write_text(
+        json.dumps(
+            {
+                "sheet_name": "Sheet1",
+                "headers": [
+                    {"column_index": 1, "text": "L/C & S/C No."},
+                    {"column_index": 2, "text": "Name of Buyers"},
+                    {"column_index": 3, "text": "LC Issue Date"},
+                    {"column_index": 4, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                    {"column_index": 5, "text": "UD No. & IP No."},
+                    {"column_index": 6, "text": "L/C Amnd No."},
+                    {"column_index": 7, "text": "L/C Amnd Date"},
+                ],
+                "rows": [
+                    {
+                        "row_index": 11,
+                        "values": {
+                            "1": "LC-0043",
+                            "2": "WORKBOOK BUYER SHOULD NOT DRIVE STORAGE",
+                            "3": "2025-05-05",
+                            "4": "1000 YDS",
+                            "5": "",
+                            "6": "",
+                            "7": "",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return workbook_path
+
+
+def _write_ud_saved_document_analysis_json(root: Path) -> Path:
+    analysis_path = root / "ud-document-analysis.json"
+    analysis_path.write_text(
+        json.dumps(
+            [
+                {
+                    "normalized_filename": "UD-LC-0043-ANANTA.pdf",
+                    "document_number": "UD-LC-0043-ANANTA",
+                    "document_date": "2026-04-01",
+                    "lc_sc_number": "LC-0043",
+                    "quantity": "1000",
+                    "quantity_unit": "YDS",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return analysis_path
+
+
+def _update_run_metadata(path: Path, **updates: str) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.update(updates)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _run_validate_ud_ip_exp_with_payload_records(records: list[dict]) -> tuple[int, str]:
