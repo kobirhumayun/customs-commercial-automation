@@ -261,12 +261,12 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         base_mail = _mail_with_body_file(
             "entry-structured-base-0434",
-            file_number="P/26/0434",
+            file_number="P/26/7001",
             attachment_name="UD-LC-0434-NALIN TEX LTD.pdf",
         )
         amendment_mail = _mail_with_body_file(
             "entry-structured-amd-0935",
-            file_number="P/26/0935",
+            file_number="P/26/8002",
             attachment_name="UD-LC-0935-A.K.M KNIT WEAR LTD_AMD_01.pdf",
         )
 
@@ -307,8 +307,8 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
 
         self.assertEqual(validation_result.run_report.summary, {"pass": 2, "warning": 0, "hard_block": 0})
         self.assertEqual(len(validation_result.staged_write_plan), 6)
-        self.assertEqual(validation_result.mail_outcomes[0].file_numbers_extracted, ["P/26/0434"])
-        self.assertEqual(validation_result.mail_outcomes[1].file_numbers_extracted, ["P/26/0935"])
+        self.assertEqual(validation_result.mail_outcomes[0].file_numbers_extracted, ["P/26/7001"])
+        self.assertEqual(validation_result.mail_outcomes[1].file_numbers_extracted, ["P/26/8002"])
         self.assertEqual(
             [
                 (operation.row_index, operation.column_key, operation.expected_post_write_value)
@@ -1055,16 +1055,16 @@ def _erp_provider(*, buyer_name: str = "ANANTA GARMENTS LTD", lc_sc_date: str = 
 class _StructuredERPProvider:
     def lookup_rows(self, *, file_numbers):
         rows = {
-            "P/26/0434": ERPRegisterRow(
-                file_number="P/26/0434",
+            "P/26/7001": ERPRegisterRow(
+                file_number="P/26/7001",
                 lc_sc_number="1345260400434",
                 buyer_name="NALIN TEX LTD",
                 lc_sc_date="2026-03-16",
                 source_row_index=43,
                 folder_buyer_name="NALIN TEX LTD",
             ),
-            "P/26/0935": ERPRegisterRow(
-                file_number="P/26/0935",
+            "P/26/8002": ERPRegisterRow(
+                file_number="P/26/8002",
                 lc_sc_number="201260400935",
                 buyer_name="A.K.M. KNIT WEAR LTD",
                 lc_sc_date="2026-03-09",
