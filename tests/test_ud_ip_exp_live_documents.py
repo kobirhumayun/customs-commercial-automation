@@ -257,6 +257,83 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(move_discrepancies, [])
         self.assertEqual(len(move_operations), 1)
 
+    def test_validate_run_snapshot_uses_email_file_number_erp_context_for_structured_ud_pdfs(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        base_mail = _mail_with_body_file(
+            "entry-structured-base-0434",
+            file_number="P/26/0434",
+            attachment_name="UD-LC-0434-NALIN TEX LTD.pdf",
+        )
+        amendment_mail = _mail_with_body_file(
+            "entry-structured-amd-0935",
+            file_number="P/26/0935",
+            attachment_name="UD-LC-0935-A.K.M KNIT WEAR LTD_AMD_01.pdf",
+        )
+
+        class FallbackProvider:
+            def analyze(self, *, saved_document):
+                raise AssertionError(
+                    f"Structured extraction should handle {saved_document.normalized_filename} without fallback."
+                )
+
+        def raw_report_loader(*, saved_document, mode="layered", **_kwargs):
+            self.assertEqual(mode, "layered")
+            if saved_document.normalized_filename == "UD-LC-0434-NALIN TEX LTD.pdf":
+                return _base_structured_report()
+            if saved_document.normalized_filename == "UD-LC-0935-A.K.M KNIT WEAR LTD_AMD_01.pdf":
+                return _amendment_structured_report()
+            raise AssertionError(f"Unexpected saved document: {saved_document.normalized_filename}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "project.workflows.ud_ip_exp.structured_extraction.extract_saved_document_raw_report",
+                side_effect=raw_report_loader,
+            ):
+                validation_result = validate_run_snapshot(
+                    descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                    run_report=_run_report(rule_pack, [base_mail, amendment_mail]),
+                    rule_pack=rule_pack,
+                    erp_row_provider=_structured_erp_provider(),
+                    workbook_snapshot=_structured_workbook_snapshot(),
+                    attachment_content_provider=SimulatedAttachmentContentProvider(
+                        content_by_key={
+                            (base_mail.entry_id, 0): b"%PDF-1.4\nstructured base ud\n",
+                            (amendment_mail.entry_id, 0): b"%PDF-1.4\nstructured amendment ud\n",
+                        }
+                    ),
+                    document_root=Path(temp_dir),
+                    document_analysis_provider=FallbackProvider(),
+                )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 2, "warning": 0, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 6)
+        self.assertEqual(validation_result.mail_outcomes[0].file_numbers_extracted, ["P/26/0434"])
+        self.assertEqual(validation_result.mail_outcomes[1].file_numbers_extracted, ["P/26/0935"])
+        self.assertEqual(
+            [
+                (operation.row_index, operation.column_key, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+            ],
+            [
+                (11, "ud_ip_shared", "BGMEA/DHK/UD/2026/5483/003"),
+                (11, "ud_ip_date", "31/03/2026"),
+                (11, "ud_recv_date", "01/04/2026"),
+                (21, "ud_ip_shared", "BGMEA/DHK/AM/2026/3420/004-010"),
+                (21, "ud_ip_date", "12/04/2026"),
+                (21, "ud_recv_date", "01/04/2026"),
+            ],
+        )
+        self.assertEqual(
+            validation_result.mail_outcomes[0].saved_documents[0]["extracted_lc_sc_number"],
+            "1345260400434",
+        )
+        self.assertEqual(
+            validation_result.mail_outcomes[1].saved_documents[0]["extracted_lc_sc_number"],
+            "201260400935",
+        )
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[1].eligible_for_mail_move)
+
     def test_prepare_live_ud_ip_exp_documents_infers_lc_sc_from_document_number_when_field_missing(self) -> None:
         mail = _mail(
             "entry-live-002",
@@ -853,6 +930,22 @@ def _mail(entry_id: str, subject: str, *, attachments: list[dict] | None = None)
     )[0]
 
 
+def _mail_with_body_file(entry_id: str, *, file_number: str, attachment_name: str):
+    return build_email_snapshot(
+        [
+            SourceEmailRecord(
+                entry_id=entry_id,
+                received_time="2026-04-01T03:00:00Z",
+                subject_raw="Subject intentionally ignored for UD/IP/EXP",
+                sender_address="sender@example.com",
+                body_text=f"Please process commercial file {file_number}.",
+                attachments=[SourceAttachmentRecord(attachment_name=attachment_name)],
+            )
+        ],
+        state_timezone="Asia/Dhaka",
+    )[0]
+
+
 def _run_report(rule_pack, mails):
     return RunReport(
         run_id="run-live-001",
@@ -893,6 +986,50 @@ def _full_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
     )
 
 
+def _structured_workbook_snapshot() -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
+        ],
+        rows=[
+            WorkbookRow(
+                row_index=11,
+                values={
+                    1: "1345260400434",
+                    2: "6633 YDS",
+                    3: "",
+                    4: "",
+                    5: "",
+                    6: "17375.80",
+                    7: "",
+                    8: "",
+                },
+            ),
+            WorkbookRow(
+                row_index=21,
+                values={
+                    1: "201260400935",
+                    2: "21390 YDS",
+                    3: "",
+                    4: "",
+                    5: "",
+                    6: "69734.70",
+                    7: "",
+                    8: "",
+                },
+            ),
+        ],
+    )
+
+
 class _ERPProvider:
     def __init__(self, *, buyer_name: str = "ANANTA GARMENTS LTD", lc_sc_date: str = "2026-01-10") -> None:
         self.buyer_name = buyer_name
@@ -913,6 +1050,128 @@ class _ERPProvider:
 
 def _erp_provider(*, buyer_name: str = "ANANTA GARMENTS LTD", lc_sc_date: str = "2026-01-10"):
     return _ERPProvider(buyer_name=buyer_name, lc_sc_date=lc_sc_date)
+
+
+class _StructuredERPProvider:
+    def lookup_rows(self, *, file_numbers):
+        rows = {
+            "P/26/0434": ERPRegisterRow(
+                file_number="P/26/0434",
+                lc_sc_number="1345260400434",
+                buyer_name="NALIN TEX LTD",
+                lc_sc_date="2026-03-16",
+                source_row_index=43,
+                folder_buyer_name="NALIN TEX LTD",
+            ),
+            "P/26/0935": ERPRegisterRow(
+                file_number="P/26/0935",
+                lc_sc_number="201260400935",
+                buyer_name="A.K.M. KNIT WEAR LTD",
+                lc_sc_date="2026-03-09",
+                source_row_index=93,
+                folder_buyer_name="A.K.M. KNIT WEAR LTD",
+            ),
+        }
+        return {
+            file_number: [rows[file_number]] if file_number in rows else []
+            for file_number in file_numbers
+        }
+
+
+def _structured_erp_provider():
+    return _StructuredERPProvider()
+
+
+def _base_structured_report() -> dict:
+    return {
+        "combined_text": "UD Authenticating Authority",
+        "pages": [
+            {
+                "page_number": 1,
+                "searchable_text": "UD Authenticating Authority",
+                "tables": [
+                    {"table_index": 1, "rows": [["01.", "Name"]]},
+                    {
+                        "table_index": 2,
+                        "rows": [
+                            ["03. Application No", "2603310081", "Date", "2026-03-31"],
+                            [
+                                "04. UD No (For office use only)",
+                                "BGMEA/DHK/UD/2026/5483/003",
+                                "Date",
+                                "2026-03-31",
+                            ],
+                        ],
+                    },
+                    {
+                        "table_index": 3,
+                        "rows": [
+                            ["SL No", "32. Import L/C No.", "33. Date", "34. Value", "Used Value", "35. Currency"],
+                            ["1", "1345260400434", "2026-03-16", "17375.8", "17375.8", "USD"],
+                        ],
+                    },
+                    {
+                        "table_index": 4,
+                        "rows": [
+                            ["Fabric Description", "Qty", "Unit", "Net Weight", "Unit", "Country", "Supplierinfo"],
+                            ["DENIM", "1300", "YRD", "0", "KGM", "Bangladesh", "PIONEER DENIM LIMITED"],
+                            ["DENIM", "5333", "YRD", "0", "KGM", "Bangladesh", "DO"],
+                            ["Total", "6633", "YRD", "", "", "", ""],
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def _amendment_structured_report() -> dict:
+    return {
+        "combined_text": "Amendment Authenticating Authority",
+        "pages": [
+            {
+                "page_number": 1,
+                "searchable_text": "Amendment Authenticating Authority",
+                "tables": [
+                    {"table_index": 1, "rows": [["01.", "Name"]]},
+                    {
+                        "table_index": 2,
+                        "rows": [
+                            ["UD No.: BGMEA/DHK/UD/2026/3420/004", "Date", "2026-01-18"],
+                            [
+                                "Amendment no. (For office use only)",
+                                "BGMEA/DHK/AM/2026/3420/004-010",
+                                "Date",
+                                "2026-04-12",
+                            ],
+                        ],
+                    },
+                    {
+                        "table_index": 3,
+                        "rows": [
+                            [
+                                "SL No",
+                                "Back-to-Back LC/Sight/Usance",
+                                "Date",
+                                "Value",
+                                "Increased/Decreased",
+                                "Total Value",
+                            ],
+                            ["7", "201260400935", "2026-03-09", "USD 89,675.00", "USD 69,734.70", "USD 159,409.70"],
+                        ],
+                    },
+                    {
+                        "table_index": 4,
+                        "rows": [
+                            ["Fabric/Yarn Description", "Qty", "Unit", "Net Weight", "Unit", "Country Name", "Supplier Info"],
+                            ["DENIM", "410", "YRD", "0", "KGM", "Bangladesh", "PIONEER DENIM LIMITED"],
+                            ["DENIM", "20980", "YRD", "0", "KGM", "Bangladesh", "DO"],
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ def extract_structured_ud_analysis(
         extracted_document_date=document_date,
         extracted_document_date_confidence=1.0 if document_date else None,
         extracted_document_subtype=document_subtype,
-        extracted_lc_sc_number=lc_row["matched_identifier"] if lc_row else None,
+        extracted_lc_sc_number=lc_row["lc_sc_number"] if lc_row else None,
         extracted_lc_sc_confidence=1.0 if lc_row else None,
         extracted_lc_sc_date=lc_row["date"] if lc_row else None,
         extracted_lc_sc_value=lc_row["value"] if lc_row else None,
@@ -162,6 +162,7 @@ def _extract_lc_table_row(
         match = _find_lc_table_row_for_identifier(
             tables=target_tables,
             exact_identifier=exact_identifier,
+            context=context,
             value_column=value_column,
         )
         if match is not None:
@@ -173,6 +174,7 @@ def _find_lc_table_row_for_identifier(
     *,
     tables: list[dict[str, Any]],
     exact_identifier: str,
+    context: StructuredUDExtractionContext,
     value_column: int,
 ) -> dict[str, Any] | None:
     for table in tables:
@@ -190,6 +192,7 @@ def _find_lc_table_row_for_identifier(
                 continue
             return {
                 "matched_identifier": exact_identifier,
+                "lc_sc_number": context.erp_lc_sc_number.strip(),
                 "date": normalize_lc_sc_date(raw_date),
                 "value": _format_decimal(amount),
                 "currency": currency,

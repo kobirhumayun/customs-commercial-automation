@@ -41,7 +41,8 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(analysis.extracted_lc_sc_number, "SHIP-REMARKS-0434")
+        self.assertEqual(analysis.extracted_lc_sc_number, "1345260400434")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["matched_identifier"], "SHIP-REMARKS-0434")
         self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-17")
         self.assertEqual(analysis.extracted_lc_sc_value, "999")
 
