@@ -4,8 +4,10 @@ from decimal import Decimal
 import unittest
 
 from project.models import FinalDecision, WorkflowId
+from project.erp import ERPRegisterRow
 from project.rules import load_rule_pack
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
+from project.workflows.export_lc_sc.payloads import ExportFileNumberMatch, ExportMailPayload
 from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
@@ -106,6 +108,50 @@ class UDIPEXPValidationAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(result.staging_result.staged_write_operations, [])
 
+    def test_assemble_structured_ud_validation_uses_erp_lc_date_value_and_writes_dates(self) -> None:
+        result = assemble_ud_validation(
+            run_id="run-1",
+            mail=_mail(),
+            rule_pack=load_rule_pack(WorkflowId.UD_IP_EXP),
+            ud_document=_structured_ud_document(lc_sc_date="2026-03-16", lc_sc_value="17375.80"),
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "1345260400434", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "10000", 7: "", 8: ""}),
+                    WorkbookRow(row_index=12, values={1: "1345260400434", 2: "2000 YDS", 3: "", 4: "", 5: "", 6: "7375.80", 7: "", 8: ""}),
+                ]
+            ),
+            export_payload=_export_payload(),
+            ud_receive_date="2026-04-22",
+        )
+
+        self.assertEqual(result.rule_evaluation.final_decision, FinalDecision.PASS)
+        self.assertEqual(result.workflow_payload.ud_allocation_result.selected_candidate_id, "11-12")
+        self.assertEqual(
+            [(operation.row_index, operation.column_key, operation.expected_post_write_value) for operation in result.staging_result.staged_write_operations],
+            [
+                (11, "ud_ip_shared", "BGMEA/DHK/UD/2026/5483/003"),
+                (11, "ud_ip_date", "31/03/2026"),
+                (11, "ud_recv_date", "22/04/2026"),
+                (12, "ud_ip_shared", "BGMEA/DHK/UD/2026/5483/003"),
+                (12, "ud_ip_date", "31/03/2026"),
+                (12, "ud_recv_date", "22/04/2026"),
+            ],
+        )
+
+    def test_assemble_structured_ud_validation_hard_blocks_lc_date_mismatch(self) -> None:
+        result = assemble_ud_validation(
+            run_id="run-1",
+            mail=_mail(),
+            rule_pack=load_rule_pack(WorkflowId.UD_IP_EXP),
+            ud_document=_structured_ud_document(lc_sc_date="2026-03-17", lc_sc_value="17375.80"),
+            workbook_snapshot=_structured_snapshot(rows=[]),
+            export_payload=_export_payload(),
+            ud_receive_date="2026-04-22",
+        )
+
+        self.assertEqual(result.rule_evaluation.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual(result.workflow_payload.ud_allocation_result.discrepancy_code, "ud_lc_date_mismatch")
+
 
 def _ud_document(*, quantity: Decimal | None) -> UDDocumentPayload:
     return UDDocumentPayload(
@@ -113,6 +159,36 @@ def _ud_document(*, quantity: Decimal | None) -> UDDocumentPayload:
         document_date=DocumentExtractionField("2026-04-01"),
         lc_sc_number=DocumentExtractionField("LC-0043"),
         quantity=UDIPEXPQuantity(amount=quantity, unit="YDS") if quantity is not None else None,
+    )
+
+
+def _structured_ud_document(*, lc_sc_date: str, lc_sc_value: str) -> UDDocumentPayload:
+    return UDDocumentPayload(
+        document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+        document_date=DocumentExtractionField("2026-03-31"),
+        lc_sc_number=DocumentExtractionField("1345260400434"),
+        lc_sc_date=DocumentExtractionField(lc_sc_date),
+        lc_sc_value=DocumentExtractionField(lc_sc_value),
+        quantity=UDIPEXPQuantity(amount=Decimal("3050"), unit="YDS"),
+        quantity_by_unit={"YDS": Decimal("3050")},
+    )
+
+
+def _export_payload() -> ExportMailPayload:
+    row = ERPRegisterRow(
+        file_number="P/26/0434",
+        lc_sc_number="1345260400434",
+        buyer_name="NALIN TEX LTD",
+        lc_sc_date="2026-03-16",
+        source_row_index=7,
+        ship_remarks="",
+    )
+    return ExportMailPayload(
+        parsed_subject=None,
+        file_numbers=["P/26/0434"],
+        erp_matches=[ExportFileNumberMatch(file_number="P/26/0434", canonical_row=row, matched_rows=[row])],
+        verified_family=row.family,
+        attachments_in_order=[],
     )
 
 
@@ -139,6 +215,23 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
             WorkbookHeader(column_index=3, text="UD No. & IP No."),
             WorkbookHeader(column_index=4, text="L/C Amnd No."),
             WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+        ],
+        rows=rows,
+    )
+
+
+def _structured_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
         ],
         rows=rows,
     )

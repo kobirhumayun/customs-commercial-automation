@@ -23,6 +23,10 @@ from project.workflows.ud_ip_exp.document_classification import (
     classify_saved_ud_ip_exp_documents,
 )
 from project.workflows.ud_ip_exp.payloads import UDIPEXPDocumentPayload
+from project.workflows.ud_ip_exp.structured_extraction import (
+    StructuredUDExtractionContext,
+    StructuredUDSavedDocumentAnalysisProvider,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,6 +45,7 @@ def prepare_live_ud_ip_exp_documents(
     analysis_provider: SavedDocumentAnalysisProvider,
     documents_override: list[UDIPEXPDocumentPayload] | None = None,
     verified_family: ERPFamily | None = None,
+    export_payload=None,
     require_verified_family: bool = False,
 ) -> UDIPEXPLiveDocumentPreparationResult:
     staging_directory = document_root / ".staging" / "ud_ip_exp" / run_id / mail.mail_id
@@ -62,6 +67,10 @@ def prepare_live_ud_ip_exp_documents(
             ),
         )
 
+    analysis_provider = _structured_analysis_provider(
+        analysis_provider=analysis_provider,
+        export_payload=export_payload,
+    )
     staged_classified = classify_saved_ud_ip_exp_documents(
         saved_documents=staged_result.saved_documents,
         analysis_provider=analysis_provider,
@@ -176,6 +185,28 @@ def _validate_documents_against_verified_family(
             },
         )
     return verified_family
+
+
+def _structured_analysis_provider(
+    *,
+    analysis_provider: SavedDocumentAnalysisProvider,
+    export_payload,
+) -> SavedDocumentAnalysisProvider:
+    if export_payload is None:
+        return analysis_provider
+    canonical_row = next(
+        (match.canonical_row for match in export_payload.erp_matches if match.canonical_row is not None),
+        None,
+    )
+    if canonical_row is None:
+        return analysis_provider
+    return StructuredUDSavedDocumentAnalysisProvider(
+        base_provider=analysis_provider,
+        context=StructuredUDExtractionContext(
+            erp_lc_sc_number=canonical_row.lc_sc_number,
+            erp_ship_remarks=canonical_row.ship_remarks,
+        ),
+    )
 
 
 def _evidence_lc_sc_contradicts_family(

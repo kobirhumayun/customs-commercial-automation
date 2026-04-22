@@ -27,6 +27,10 @@ _ZERO_WIDTH = {
 
 def normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
     normalized = _apply_shared_identifier_primitives(raw_value)
+    bgmea_match = re.fullmatch(r"BGMEA/DHK/(UD|AM)/.+", normalized)
+    if bgmea_match is not None:
+        return normalized
+
     match = _PREFIX_RE.match(normalized)
     if match is None:
         return None
@@ -43,6 +47,9 @@ def normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
 
 
 def document_kind_from_number(canonical_document_number: str) -> UDIPEXPDocumentKind | None:
+    normalized = canonical_document_number.strip().upper()
+    if "/UD/" in normalized or "/AM/" in normalized:
+        return UDIPEXPDocumentKind.UD
     prefix = canonical_document_number.split("-", 1)[0].strip().upper()
     try:
         return UDIPEXPDocumentKind(prefix)

@@ -54,6 +54,46 @@ class UDIPEXPStagingTests(unittest.TestCase):
             )
         )
 
+    def test_stage_structured_ud_operations_writes_ud_and_receive_dates(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
+            ]
+        )
+        allocation = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            candidate_rows=[
+                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
+            ],
+        )
+        ud_document = UDDocumentPayload(
+            document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+            document_date=DocumentExtractionField("2026-03-31"),
+            lc_sc_number=DocumentExtractionField("LC-0043"),
+            lc_sc_value=DocumentExtractionField("1000"),
+            quantity_by_unit={"YDS": Decimal("1050")},
+        )
+
+        result = stage_ud_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            ud_document=ud_document,
+            allocation_result=allocation,
+            workbook_snapshot=snapshot,
+            ud_receive_date="2026-04-22",
+        )
+
+        self.assertEqual(result.discrepancies, [])
+        self.assertEqual(
+            [(operation.column_key, operation.expected_post_write_value) for operation in result.staged_write_operations],
+            [
+                ("ud_ip_shared", "BGMEA/DHK/UD/2026/5483/003"),
+                ("ud_ip_date", "31/03/2026"),
+                ("ud_recv_date", "22/04/2026"),
+            ],
+        )
+
     def test_stage_ud_shared_column_operations_blocks_unselected_allocation(self) -> None:
         allocation = allocate_ud_rows(
             required_quantity=Decimal("1000"),
@@ -219,6 +259,23 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
             WorkbookHeader(column_index=3, text="UD No. & IP No."),
             WorkbookHeader(column_index=4, text="L/C Amnd No."),
             WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+        ],
+        rows=rows,
+    )
+
+
+def _structured_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
         ],
         rows=rows,
     )

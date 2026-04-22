@@ -18,6 +18,7 @@ from project.workflows.ud_ip_exp.payloads import (
     UDIPEXPDocumentKind,
     UDIPEXPDocumentPayload,
     UDIPEXPQuantity,
+    normalize_quantity_unit,
 )
 
 
@@ -90,6 +91,10 @@ def _payload_from_manifest_item(item: dict, index: int) -> UDIPEXPDocumentPayloa
             amount=Decimal(str(item["quantity"])),
             unit=str(item.get("quantity_unit", "YDS")),
         )
+    quantity_by_unit = {
+        normalize_quantity_unit(str(unit)): Decimal(str(amount))
+        for unit, amount in dict(item.get("quantity_by_unit") or {}).items()
+    }
     document_number = _canonical_manifest_document_number(
         value=item["document_number"],
         document_kind=_manifest_document_kind(item.get("document_kind", "UD"), index),
@@ -121,7 +126,29 @@ def _payload_from_manifest_item(item: dict, index: int) -> UDIPEXPDocumentPayloa
             confidence=_optional_float(item.get("lc_sc_number_confidence")),
             provenance=_optional_dict(item.get("lc_sc_number_provenance")),
         ),
+        lc_sc_date=(
+            DocumentExtractionField(
+                value=str(item["lc_sc_date"]),
+                provenance=_optional_dict(item.get("lc_sc_date_provenance")),
+            )
+            if item.get("lc_sc_date") is not None
+            else None
+        ),
+        lc_sc_value=(
+            DocumentExtractionField(
+                value=str(item["lc_sc_value"]),
+                provenance=_optional_dict(item.get("lc_sc_value_provenance")),
+            )
+            if item.get("lc_sc_value") is not None
+            else None
+        ),
+        lc_sc_value_currency=(
+            str(item["lc_sc_value_currency"])
+            if item.get("lc_sc_value_currency") is not None
+            else None
+        ),
         quantity=quantity,
+        quantity_by_unit=quantity_by_unit,
         source_saved_document_id=(
             str(item["source_saved_document_id"])
             if item.get("source_saved_document_id") is not None
@@ -178,8 +205,10 @@ def select_preferred_ud_document(documents: list[UDIPEXPDocumentPayload]) -> UDD
     return selected
 
 
-def _ud_document_completeness_key(document: UDDocumentPayload) -> tuple[int, int, int]:
+def _ud_document_completeness_key(document: UDDocumentPayload) -> tuple[int, int, int, int, int]:
     return (
+        1 if document.lc_sc_value is not None and str(document.lc_sc_value.value).strip() else 0,
+        1 if bool(document.quantity_by_unit) else 0,
         1 if document.quantity is not None else 0,
         1 if document.document_date is not None and str(document.document_date.value).strip() else 0,
         1 if str(document.lc_sc_number.value).strip() else 0,

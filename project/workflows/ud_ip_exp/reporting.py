@@ -38,7 +38,7 @@ def _candidate_report(candidate: UDAllocationCandidate) -> dict[str, Any]:
 
 def _score_keys_report(score_keys: dict[str, Any]) -> dict[str, Any]:
     blank_priority = score_keys.get("blank_field_priority_key", {})
-    return {
+    report = {
         "row_index_key": list(score_keys.get("row_index_key", [])),
         "amendment_recency_key": [
             list(item)
@@ -50,6 +50,15 @@ def _score_keys_report(score_keys: dict[str, Any]) -> dict[str, Any]:
         },
         "stable_candidate_id_key": score_keys.get("stable_candidate_id_key"),
     }
+    for key in (
+        "lc_sc_value",
+        "workbook_value_sum",
+        "ud_quantity_by_unit",
+        "workbook_quantity_by_unit",
+    ):
+        if key in score_keys:
+            report[key] = score_keys[key]
+    return report
 
 
 def _selection_final_decision(allocation_result: UDAllocationResult) -> str:

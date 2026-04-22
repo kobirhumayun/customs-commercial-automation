@@ -176,6 +176,13 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
             missing_fields.append("lc_sc_number")
         if document.quantity is None:
             missing_fields.append("quantity")
+        if _is_structured_bgmea_ud(document):
+            if document.lc_sc_date is None or not document.lc_sc_date.value.strip():
+                missing_fields.append("lc_sc_date")
+            if document.lc_sc_value is None or not document.lc_sc_value.value.strip():
+                missing_fields.append("lc_sc_value")
+            if not document.quantity_by_unit:
+                missing_fields.append("quantity_by_unit")
         if missing_fields:
             missing_by_document.append(
                 {
@@ -317,10 +324,21 @@ def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
         "document_number": document.document_number.value,
         "document_date": document.document_date.value if document.document_date is not None else None,
         "lc_sc_number": document.lc_sc_number.value,
+        "lc_sc_date": document.lc_sc_date.value if document.lc_sc_date is not None else None,
+        "lc_sc_value": document.lc_sc_value.value if document.lc_sc_value is not None else None,
         "quantity": str(document.quantity.amount) if document.quantity is not None else None,
         "quantity_unit": document.quantity.unit if document.quantity is not None else None,
+        "quantity_by_unit": {
+            unit: str(amount)
+            for unit, amount in document.quantity_by_unit.items()
+        },
         "source_saved_document_id": document.source_saved_document_id,
     }
+
+
+def _is_structured_bgmea_ud(document: UDIPEXPDocumentPayload) -> bool:
+    value = document.document_number.value.upper()
+    return "/UD/" in value or "/AM/" in value
 
 
 RULE_DEFINITIONS = (

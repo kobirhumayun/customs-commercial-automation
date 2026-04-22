@@ -61,7 +61,11 @@ UD_IP_EXP_HEADER_SPECS = (
     HeaderMappingSpec("ud_ip_shared", "UD No. & IP No."),
 )
 
-UD_IP_EXP_OPTIONAL_HEADER_SPECS = ()
+UD_IP_EXP_OPTIONAL_HEADER_SPECS = (
+    HeaderMappingSpec("export_amount", "Amount", required_column_index=6),
+    HeaderMappingSpec("ud_ip_date", "UD & IP Date"),
+    HeaderMappingSpec("ud_recv_date", "UD Recv. Date"),
+)
 
 UD_IP_EXP_STORAGE_HEADER_SPECS = (
     HeaderMappingSpec(

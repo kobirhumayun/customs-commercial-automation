@@ -609,12 +609,18 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
 - live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
+- structured Base UD PDFs are identified by `UD Authenticating Authority` on page 1; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority` on page 1
+- for structured Base UD and UD Amendment PDFs, the UD/AM number and UD/AM date come from page 1 table index 1, row index 1, columns 1 and 3 respectively
+- structured UD LC/SC table extraction must match rows by exact ERP `Ship. Remarks` when present/found, otherwise exact ERP `LC No.`; ERP values are sourced from the email-body file number lookup
+- the extracted UD LC/SC table date must match the ERP LC/SC date before workbook writes are allowed
+- the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
+- structured UD quantity extraction must aggregate rows for supplier `PIONEER DENIM LIMITED` or `PIONEER DENIM LTD`, applying supplier `DO` fill-down in the supplier column before filtering
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
 - when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
 - this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
 - live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
-- ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary future linkage inputs for UD PDF property extraction; the specific UD PDF extraction rule remains intentionally deferred until documented separately
+- ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - until IP/EXP business rules are finalized, IP/EXP documents remain allowed only as explicit unresolved-policy hard-block evidence rather than a completed processing path
 
 ### Batch execution behavior
@@ -632,12 +638,16 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - Multiple entries are line-break separated.
 
 ### UD allocation logic
-- extract UD number, date, LC/SC number, quantity, quantity unit, and relevant values
-- find candidate rows for the LC/SC family
-- select the first occurrence of each required row value, even when combinations are non-sequential
-- maintain a multiset/bag of remaining values so duplicates are handled correctly
-- write UD number to matched rows only if quantity rules are satisfied
-- ignore excess quantity only when excess is at least 50 yards/meters; otherwise hard-block
+- extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
+- filter workbook rows to the ERP LC/SC family and exclude rows where `UD No. & IP No.` is already populated
+- sort candidate workbook rows by row index ascending
+- starting from the first blank-UD row, sum workbook `Amount` column 6 until it matches the extracted UD LC/SC value numerically within tolerance
+- the matched contiguous row range is the only target row group for the mail
+- sum workbook quantities for only that target row group by unit
+- compare each workbook unit total against the corresponding UD supplier quantity total
+- pass quantity validation only when UD quantity equals workbook quantity or the UD excess is at least 50 yards/meters; hard-block when UD quantity is less than workbook quantity or excess is greater than zero but below 50
+- write the UD/AM number, UD/AM date, and current workflow receive date to matched rows only if value and quantity rules are satisfied
+- `UD & IP Date` is written from the UD/AM document date as `DD/MM/YYYY`; `UD Recv. Date` is written as the current workflow date in the same format
 
 #### UD row-combination candidate scoring and tie-break order (normative)
 When more than one valid row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:

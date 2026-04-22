@@ -86,6 +86,10 @@ Every discrepancy payload should include:
 | `ud_required_document_missing` | `hard_block` | ud_ip_exp | No UD document payload was available for deterministic UD processing. |
 | `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
+| `ud_lc_date_mismatch` | `hard_block` | ud_ip_exp | Structured UD/AM LC table date did not match the ERP LC/SC date. |
+| `ud_lc_value_match_unresolved` | `hard_block` | ud_ip_exp | Structured UD/AM LC value did not identify a contiguous blank-UD workbook row group. |
+| `ud_quantity_below_workbook` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity was less than the selected workbook quantity for a unit. |
+| `ud_quantity_excess_below_threshold` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity exceeded workbook quantity by less than the required 50-unit threshold. |
 | `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row already has a non-blank shared-column value and append/duplicate behavior is not yet business-confirmed. |
 | `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | IP/EXP matching, date-column, total-check, or shared-column update policy remains unresolved, so staging is blocked with document evidence. |
 

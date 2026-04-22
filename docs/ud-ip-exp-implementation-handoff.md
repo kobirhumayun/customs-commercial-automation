@@ -157,7 +157,10 @@ Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
 - email body file numbers plus ERP rows are the primary LC/SC-family source for `ud_ip_exp`; PDF-derived LC/SC evidence is supporting validation evidence and must not override the ERP family
-- ERP LC/SC family context and ERP `Ship. Remarks` are reserved as the primary future linkage inputs for UD PDF property extraction, while the detailed extraction rule remains deferred until the business rule is documented
+- ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
+- structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
+- structured UD/AM extraction now requires page-1 table-based UD/AM number/date extraction, exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
+- selected structured UD/AM rows write three fields when blank: `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; date writes use `DD/MM/YYYY`
 - document-date extraction prefers UD/IP/EXP-specific date labels over LC/SC issue-date labels so export-family dates are not accepted as UD/IP/EXP evidence
 - text-layer UD/IP/EXP document-number extraction uses label-aware boundaries so buyer labels and neighboring LC/SC, date, and quantity labels are not captured into the document number
 - storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution

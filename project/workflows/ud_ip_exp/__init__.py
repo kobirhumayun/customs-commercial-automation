@@ -4,6 +4,7 @@ from project.workflows.ud_ip_exp.matching import (
     UDAllocationCandidate,
     UDAllocationResult,
     UDCandidateRow,
+    allocate_structured_ud_rows,
     allocate_ud_rows,
     collect_ud_candidate_rows,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "UDIPEXPStagingDiscrepancy",
     "UDIPEXPWriteStagingResult",
     "allocate_ud_rows",
+    "allocate_structured_ud_rows",
     "build_ud_selection_report",
     "classify_saved_ud_ip_exp_documents",
     "collect_ud_candidate_rows",

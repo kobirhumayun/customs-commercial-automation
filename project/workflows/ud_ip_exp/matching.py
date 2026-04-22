@@ -10,6 +10,7 @@ from project.workbook import WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
 from project.workflows.ud_ip_exp.payloads import normalize_quantity_unit
 
 DEFAULT_UD_EXCESS_THRESHOLD = Decimal("50")
+DEFAULT_UD_VALUE_TOLERANCE = Decimal("0.01")
 
 
 @dataclass(slots=True, frozen=True)
@@ -18,6 +19,7 @@ class UDCandidateRow:
     lc_sc_number: str
     quantity: Decimal
     quantity_unit: str
+    export_amount: Decimal | None = None
     ud_ip_shared_value: str = ""
     lc_amnd_no: str = ""
     lc_amnd_date: str = ""
@@ -201,6 +203,138 @@ def allocate_ud_rows(
     )
 
 
+def allocate_structured_ud_rows(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    lc_sc_number: str,
+    lc_sc_value: Decimal | int | str,
+    quantity_by_unit: dict[str, Decimal | int | str],
+    header_mapping: dict[str, int] | None = None,
+    value_tolerance: Decimal = DEFAULT_UD_VALUE_TOLERANCE,
+    excess_threshold: Decimal = DEFAULT_UD_EXCESS_THRESHOLD,
+) -> UDAllocationResult:
+    mapping = header_mapping or resolve_ud_ip_exp_header_mapping(workbook_snapshot)
+    if mapping is None or "export_amount" not in mapping:
+        return UDAllocationResult(
+            required_quantity="",
+            quantity_unit="",
+            candidate_count=0,
+            candidates=[],
+            final_decision="hard_block",
+            final_decision_reason="workbook_header_mapping_invalid",
+            discrepancy_code="workbook_header_mapping_invalid",
+        )
+
+    target_value = Decimal(str(lc_sc_value))
+    expected_lc_sc = _normalize_match_text(lc_sc_number)
+    eligible_rows = [
+        row
+        for row in sorted(workbook_snapshot.rows, key=lambda item: item.row_index)
+        if _normalize_match_text(row.values.get(mapping["lc_sc_no"], "")) == expected_lc_sc
+        and not row.values.get(mapping["ud_ip_shared"], "").strip()
+    ]
+    selected_rows: list[UDCandidateRow] = []
+    running_value = Decimal("0")
+    for workbook_row in eligible_rows:
+        amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
+        if amount is None:
+            break
+        quantity = _parse_quantity(workbook_row.values.get(mapping["quantity_fabrics"], "")) or Decimal("0")
+        quantity_unit = _parse_quantity_unit(workbook_row.values.get(mapping["quantity_fabrics"], "")) or ""
+        selected_rows.append(
+            UDCandidateRow(
+                row_index=workbook_row.row_index,
+                lc_sc_number=workbook_row.values.get(mapping["lc_sc_no"], ""),
+                quantity=quantity,
+                quantity_unit=quantity_unit,
+                export_amount=amount,
+                ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
+                lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
+                lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
+            )
+        )
+        running_value += amount
+        if abs(running_value - target_value) <= value_tolerance:
+            break
+        if running_value > target_value + value_tolerance:
+            break
+
+    if not selected_rows or abs(running_value - target_value) > value_tolerance:
+        return UDAllocationResult(
+            required_quantity="",
+            quantity_unit="",
+            candidate_count=0,
+            candidates=[],
+            final_decision="hard_block",
+            final_decision_reason="ud_lc_value_match_unresolved",
+            discrepancy_code="ud_lc_value_match_unresolved",
+        )
+
+    quantity_totals = _quantity_totals_by_unit(selected_rows)
+    normalized_ud_quantities = {
+        normalize_quantity_unit(unit): Decimal(str(amount))
+        for unit, amount in quantity_by_unit.items()
+    }
+    if not quantity_totals:
+        candidate = _structured_candidate(
+            selected_rows=selected_rows,
+            workbook_value_sum=running_value,
+            lc_sc_value=target_value,
+            workbook_quantities=quantity_totals,
+            ud_quantities=normalized_ud_quantities,
+            selected=False,
+            rejection_reason="ud_quantity_below_workbook",
+        )
+        return UDAllocationResult(
+            required_quantity=_format_quantity_map(normalized_ud_quantities),
+            quantity_unit="MULTI",
+            candidate_count=1,
+            candidates=[candidate],
+            final_decision="hard_block",
+            final_decision_reason="ud_quantity_below_workbook",
+            discrepancy_code="ud_quantity_below_workbook",
+        )
+    quantity_error = _structured_quantity_error(
+        workbook_quantities=quantity_totals,
+        ud_quantities=normalized_ud_quantities,
+        excess_threshold=excess_threshold,
+    )
+    candidate = _structured_candidate(
+        selected_rows=selected_rows,
+        workbook_value_sum=running_value,
+        lc_sc_value=target_value,
+        workbook_quantities=quantity_totals,
+        ud_quantities=normalized_ud_quantities,
+        selected=quantity_error is None,
+        rejection_reason=quantity_error,
+    )
+    if quantity_error is not None:
+        code = (
+            "ud_quantity_below_workbook"
+            if quantity_error == "ud_quantity_below_workbook"
+            else "ud_quantity_excess_below_threshold"
+        )
+        return UDAllocationResult(
+            required_quantity=_format_quantity_map(normalized_ud_quantities),
+            quantity_unit="MULTI",
+            candidate_count=1,
+            candidates=[candidate],
+            final_decision="hard_block",
+            final_decision_reason=quantity_error,
+            discrepancy_code=code,
+        )
+
+    return UDAllocationResult(
+        required_quantity=_format_quantity_map(normalized_ud_quantities),
+        quantity_unit="MULTI",
+        candidate_count=1,
+        candidates=[candidate],
+        final_decision="selected",
+        final_decision_reason="selected_structured_lc_value_and_quantity",
+        selected_candidate_id=candidate.candidate_id,
+    )
+
+
 def _build_allocation_candidates(
     *,
     required_quantity: Decimal,
@@ -306,14 +440,8 @@ def _normalize_match_text(value: str) -> str:
 
 
 def _parse_quantity(value: str) -> Decimal | None:
-    normalized = value.strip().replace(",", "")
-    token = ""
-    for character in normalized:
-        if character.isdigit() or character == ".":
-            token += character
-        elif token:
-            break
-    if not token:
+    token = _leading_decimal_token(value)
+    if token is None:
         return None
     try:
         return Decimal(token)
@@ -323,10 +451,123 @@ def _parse_quantity(value: str) -> Decimal | None:
 
 def _parse_quantity_unit(value: str) -> str | None:
     normalized = value.upper()
-    for token in ("YDS", "YD", "YARD", "YARDS", "MTR", "METER", "METERS", "METRE", "METRES"):
+    for token in ("YDS", "YRD", "YRDS", "YD", "YARD", "YARDS", "MTR", "MTRS", "METER", "METERS", "METRE", "METRES"):
         if token in normalized:
             return normalize_quantity_unit(token)
     return None
+
+
+def _parse_decimal(value: str) -> Decimal | None:
+    token = _leading_decimal_token(value)
+    if token is None:
+        return None
+    try:
+        return Decimal(token)
+    except InvalidOperation:
+        return None
+
+
+def _leading_decimal_token(value: str) -> str | None:
+    normalized = value.strip().replace(",", "")
+    token = ""
+    for character in normalized:
+        if character.isdigit() or character == "." or (character == "-" and not token):
+            token += character
+        elif token:
+            break
+    return token if token and token not in {"-", "."} else None
+
+
+def _quantity_totals_by_unit(rows: list[UDCandidateRow]) -> dict[str, Decimal]:
+    totals: dict[str, Decimal] = {}
+    for row in rows:
+        if row.quantity <= 0 or not row.quantity_unit:
+            continue
+        totals[row.quantity_unit] = totals.get(row.quantity_unit, Decimal("0")) + row.quantity
+    return totals
+
+
+def _structured_quantity_error(
+    *,
+    workbook_quantities: dict[str, Decimal],
+    ud_quantities: dict[str, Decimal],
+    excess_threshold: Decimal,
+) -> str | None:
+    for unit, workbook_quantity in sorted(workbook_quantities.items()):
+        ud_quantity = ud_quantities.get(unit)
+        if ud_quantity is None or ud_quantity < workbook_quantity:
+            return "ud_quantity_below_workbook"
+        excess = ud_quantity - workbook_quantity
+        if Decimal("0") < excess < excess_threshold:
+            return "ud_quantity_excess_below_threshold"
+    return None
+
+
+def _structured_candidate(
+    *,
+    selected_rows: list[UDCandidateRow],
+    workbook_value_sum: Decimal,
+    lc_sc_value: Decimal,
+    workbook_quantities: dict[str, Decimal],
+    ud_quantities: dict[str, Decimal],
+    selected: bool,
+    rejection_reason: str | None,
+) -> UDAllocationCandidate:
+    row_indexes = [row.row_index for row in selected_rows]
+    candidate_id = "-".join(str(row_index) for row_index in row_indexes)
+    blank_count = sum(1 for row in selected_rows if not row.ud_ip_shared_value.strip())
+    return UDAllocationCandidate(
+        candidate_id=candidate_id,
+        row_indexes=row_indexes,
+        matched_quantities=[
+            f"{unit}:{_format_decimal(amount)}"
+            for unit, amount in sorted(workbook_quantities.items())
+        ],
+        quantity_sum=_format_quantity_map(workbook_quantities),
+        ignored_excess_quantity=_format_quantity_excess(
+            workbook_quantities=workbook_quantities,
+            ud_quantities=ud_quantities,
+        ),
+        score_keys={
+            "row_index_key": row_indexes,
+            "amendment_recency_key": [
+                _amendment_recency_key(row)
+                for row in sorted(selected_rows, key=lambda item: item.row_index)
+            ],
+            "blank_field_priority_key": {
+                "blank_target_count_desc": -blank_count,
+                "nonblank_optional_count_asc": 0,
+            },
+            "stable_candidate_id_key": candidate_id,
+            "lc_sc_value": _format_decimal(lc_sc_value),
+            "workbook_value_sum": _format_decimal(workbook_value_sum),
+            "ud_quantity_by_unit": _format_quantity_map(ud_quantities),
+            "workbook_quantity_by_unit": _format_quantity_map(workbook_quantities),
+        },
+        prewrite_blank_targets_count=blank_count,
+        prewrite_nonblank_optional_count=0,
+        selected=selected,
+        rejection_reason=rejection_reason,
+    )
+
+
+def _format_quantity_map(values: dict[str, Decimal]) -> str:
+    return "; ".join(
+        f"{unit}:{_format_decimal(amount)}"
+        for unit, amount in sorted(values.items())
+    )
+
+
+def _format_quantity_excess(
+    *,
+    workbook_quantities: dict[str, Decimal],
+    ud_quantities: dict[str, Decimal],
+) -> str:
+    excess_by_unit = {
+        unit: ud_quantities.get(unit, Decimal("0")) - amount
+        for unit, amount in workbook_quantities.items()
+    }
+    return _format_quantity_map(excess_by_unit)
 
 
 def _format_decimal(value: Decimal) -> str:

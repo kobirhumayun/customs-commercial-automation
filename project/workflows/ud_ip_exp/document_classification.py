@@ -53,8 +53,13 @@ def classify_saved_ud_ip_exp_documents(
             extracted_document_number_confidence=analysis.extracted_document_number_confidence,
             extracted_document_date=analysis.extracted_document_date,
             extracted_document_date_confidence=analysis.extracted_document_date_confidence,
+            extracted_document_subtype=analysis.extracted_document_subtype,
+            extracted_lc_sc_date=analysis.extracted_lc_sc_date,
+            extracted_lc_sc_value=analysis.extracted_lc_sc_value,
+            extracted_lc_sc_value_currency=analysis.extracted_lc_sc_value_currency,
             extracted_quantity=analysis.extracted_quantity,
             extracted_quantity_unit=analysis.extracted_quantity_unit,
+            extracted_quantity_by_unit=analysis.extracted_quantity_by_unit,
             extracted_amendment_number=analysis.extracted_amendment_number,
             clause_related_lc_sc_number=analysis.clause_related_lc_sc_number,
             clause_excerpt=analysis.clause_excerpt,
@@ -63,6 +68,8 @@ def classify_saved_ud_ip_exp_documents(
             extracted_pi_provenance=analysis.extracted_pi_provenance,
             extracted_document_number_provenance=analysis.extracted_document_number_provenance,
             extracted_document_date_provenance=analysis.extracted_document_date_provenance,
+            extracted_lc_sc_date_provenance=analysis.extracted_lc_sc_date_provenance,
+            extracted_lc_sc_value_provenance=analysis.extracted_lc_sc_value_provenance,
             extracted_quantity_provenance=analysis.extracted_quantity_provenance,
             extracted_amendment_provenance=analysis.extracted_amendment_provenance,
             clause_provenance=analysis.clause_provenance,
@@ -129,6 +136,10 @@ def _build_payload(
             amount=Decimal(saved_document.extracted_quantity),
             unit=saved_document.extracted_quantity_unit,
         )
+    quantity_by_unit = {
+        key: Decimal(str(value))
+        for key, value in (saved_document.extracted_quantity_by_unit or {}).items()
+    }
 
     lc_sc_number = normalize_lc_sc_number(saved_document.extracted_lc_sc_number or "") or _lc_sc_number_from_document_number(
         saved_document.extracted_document_number
@@ -153,7 +164,25 @@ def _build_payload(
             confidence=saved_document.extracted_lc_sc_confidence,
             provenance=dict(saved_document.extracted_lc_sc_provenance or {}),
         ),
+        lc_sc_date=(
+            DocumentExtractionField(
+                value=saved_document.extracted_lc_sc_date,
+                provenance=dict(saved_document.extracted_lc_sc_date_provenance or {}),
+            )
+            if saved_document.extracted_lc_sc_date
+            else None
+        ),
+        lc_sc_value=(
+            DocumentExtractionField(
+                value=saved_document.extracted_lc_sc_value,
+                provenance=dict(saved_document.extracted_lc_sc_value_provenance or {}),
+            )
+            if saved_document.extracted_lc_sc_value
+            else None
+        ),
+        lc_sc_value_currency=saved_document.extracted_lc_sc_value_currency,
         quantity=quantity,
+        quantity_by_unit=quantity_by_unit,
         source_saved_document_id=saved_document.saved_document_id,
     )
 

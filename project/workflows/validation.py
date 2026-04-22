@@ -241,6 +241,7 @@ def _prepare_ud_ip_exp_documents_if_configured(
         analysis_provider=document_analysis_provider or NullSavedDocumentAnalysisProvider(),
         documents_override=list(workflow_documents or []),
         verified_family=export_payload.verified_family if export_payload is not None else None,
+        export_payload=export_payload,
         require_verified_family=True,
     )
     return (
@@ -422,7 +423,7 @@ def _evaluate_ud_ip_exp_mail(
         documents = ud_document_provider.get_documents(mail)
     ud_document = select_preferred_ud_document(documents)
     if ud_document is not None:
-        from project.workflows.ud_ip_exp.validation import assemble_ud_validation
+        from project.workflows.ud_ip_exp.validation import assemble_ud_validation, workflow_date_from_started_at
 
         assembly = assemble_ud_validation(
             run_id=run_report.run_id,
@@ -434,6 +435,10 @@ def _evaluate_ud_ip_exp_mail(
             saved_documents=[],
             state_timezone=run_report.state_timezone,
             export_payload=export_payload,
+            ud_receive_date=workflow_date_from_started_at(
+                run_report.started_at_utc,
+                state_timezone=run_report.state_timezone,
+            ),
         )
         context = WorkflowValidationContext(
             run_id=run_report.run_id,

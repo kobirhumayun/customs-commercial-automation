@@ -4,7 +4,12 @@ from decimal import Decimal
 import unittest
 
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
-from project.workflows.ud_ip_exp import UDCandidateRow, allocate_ud_rows, collect_ud_candidate_rows
+from project.workflows.ud_ip_exp import (
+    UDCandidateRow,
+    allocate_structured_ud_rows,
+    allocate_ud_rows,
+    collect_ud_candidate_rows,
+)
 
 
 class UDIPEXPMatchingTests(unittest.TestCase):
@@ -137,6 +142,56 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision, "hard_block")
         self.assertEqual(result.discrepancy_code, "ud_candidate_tie_after_full_tiebreak")
 
+    def test_allocate_structured_ud_rows_selects_contiguous_value_group_then_checks_quantity(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(row_index=11, values={1: "1345260400434", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "10000"}),
+                WorkbookRow(row_index=12, values={1: "1345260400434", 2: "2000 YDS", 3: "", 4: "", 5: "", 6: "7375.80"}),
+                WorkbookRow(row_index=13, values={1: "1345260400434", 2: "500 YDS", 3: "", 4: "", 5: "", 6: "99"}),
+            ]
+        )
+
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=snapshot,
+            lc_sc_number="1345260400434",
+            lc_sc_value=Decimal("17375.80"),
+            quantity_by_unit={"YDS": Decimal("3050")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "11-12")
+        self.assertEqual(result.candidates[0].score_keys["workbook_value_sum"], "17375.8")
+
+    def test_allocate_structured_ud_rows_hard_blocks_when_value_group_not_found(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "999"}),
+                ]
+            ),
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("1000"),
+            quantity_by_unit={"YDS": Decimal("1100")},
+        )
+
+        self.assertEqual(result.final_decision, "hard_block")
+        self.assertEqual(result.discrepancy_code, "ud_lc_value_match_unresolved")
+
+    def test_allocate_structured_ud_rows_hard_blocks_quantity_excess_below_threshold(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "1000"}),
+                ]
+            ),
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("1000"),
+            quantity_by_unit={"YDS": Decimal("1049")},
+        )
+
+        self.assertEqual(result.final_decision, "hard_block")
+        self.assertEqual(result.discrepancy_code, "ud_quantity_excess_below_threshold")
+
 
 def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
     snapshot = WorkbookSnapshot(
@@ -154,6 +209,23 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
     if self_mapping is None:
         raise AssertionError("UD/IP/EXP header fixture should resolve")
     return snapshot
+
+
+def _structured_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
+        ],
+        rows=rows,
+    )
 
 
 if __name__ == "__main__":

@@ -198,7 +198,7 @@ Decision rules:
 - Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
 - `ud_ip_exp` uses the same email-body file-number extraction, ERP row lookup, and one-family consistency contract as `export_lc_sc`; the email subject is not authoritative for any `ud_ip_exp` processing step.
 - For `ud_ip_exp`, ERP family fields selected from body file numbers drive attachment storage and workbook-family context. PDF-derived LC/SC values are supporting validation evidence and must hard-block if they contradict the ERP family.
-- ERP `Ship. Remarks`, together with the ERP LC/SC family context, is reserved as the primary future linkage input for UD PDF property extraction. The detailed extraction rule remains unresolved until documented separately.
+- ERP `Ship. Remarks`, together with the ERP LC/SC family context, is the primary linkage input for structured Base UD and UD Amendment PDF property extraction.
 
 Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
 
@@ -245,6 +245,9 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
 | `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; ERP row value may be blank; target blank |
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
+| `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows; source UD/AM document date formatted `DD/MM/YYYY` |
+| `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows; source current workflow date formatted `DD/MM/YYYY` |
+| `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by contiguous sequential sum |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
@@ -283,7 +286,21 @@ Column `UD No. & IP No.` stores:
 - multiple values separated by line breaks
 
 ## UD candidate combination determinism rule
-When multiple valid UD row combinations satisfy the same extracted quantity, selection must be deterministic and fully reportable.
+For structured Base UD and UD Amendment PDFs, target rows are selected by the value-first contiguous row rule below. The older quantity-combination rule remains available only for deterministic legacy payloads that do not carry structured UD LC value evidence.
+
+### Structured UD value-first row selection
+- Email body file number selects the canonical ERP row and therefore the ERP LC/SC family, ERP `LC No.`, ERP `Ship. Remarks`, and ERP LC/SC date.
+- The structured UD/AM PDF LC table must match a row by exact ERP `Ship. Remarks` when found; if not found or blank, exact ERP `LC No.` may be used.
+- The matched UD/AM LC table date must equal the ERP LC/SC date after date parsing.
+- The matched UD/AM LC table value is compared numerically to the sum of workbook `Amount` column 6.
+- Candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.
+- Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
+- Workbook quantities in the selected group are summed by unit and compared against structured UD supplier quantities for `PIONEER DENIM LIMITED` / `PIONEER DENIM LTD`.
+- Quantity validation passes only when UD quantity equals workbook quantity or UD excess is at least 50 yards/meters. UD quantity below workbook quantity or excess above zero but below 50 is a hard block.
+- Selected rows receive `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; all target cells must be blank before write.
+
+### Legacy UD quantity-combination rule
+When multiple valid legacy UD row combinations satisfy the same extracted quantity, selection must be deterministic and fully reportable.
 
 ### Tie-break key order (normative)
 Apply keys in this exact order:

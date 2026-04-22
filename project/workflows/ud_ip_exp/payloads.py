@@ -41,7 +41,11 @@ class UDIPEXPDocumentPayload:
     document_number: DocumentExtractionField
     document_date: DocumentExtractionField | None
     lc_sc_number: DocumentExtractionField
+    lc_sc_date: DocumentExtractionField | None = None
+    lc_sc_value: DocumentExtractionField | None = None
+    lc_sc_value_currency: str | None = None
     quantity: UDIPEXPQuantity | None = None
+    quantity_by_unit: dict[str, Decimal] = field(default_factory=dict)
     source_saved_document_id: str | None = None
     field_confidence_thresholds: dict[str, float] = field(default_factory=dict)
 
@@ -71,9 +75,9 @@ class UDIPEXPWorkflowPayload:
 
 def normalize_quantity_unit(unit: str) -> str:
     normalized = unit.strip().upper()
-    if normalized in {"YD", "YARD", "YARDS"}:
+    if normalized in {"YD", "YDS", "YRD", "YRDS", "YARD", "YARDS"}:
         return "YDS"
-    if normalized in {"METER", "METERS", "METRE", "METRES"}:
+    if normalized in {"MTR", "MTRS", "METER", "METERS", "METRE", "METRES"}:
         return "MTR"
     return normalized
 

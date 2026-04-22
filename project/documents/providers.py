@@ -84,8 +84,13 @@ class SavedDocumentAnalysis:
     extracted_document_number_confidence: float | None = None
     extracted_document_date: str | None = None
     extracted_document_date_confidence: float | None = None
+    extracted_document_subtype: str | None = None
+    extracted_lc_sc_date: str | None = None
+    extracted_lc_sc_value: str | None = None
+    extracted_lc_sc_value_currency: str | None = None
     extracted_quantity: str | None = None
     extracted_quantity_unit: str | None = None
+    extracted_quantity_by_unit: dict[str, str] | None = None
     extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
@@ -94,6 +99,8 @@ class SavedDocumentAnalysis:
     extracted_pi_provenance: dict[str, object] | None = None
     extracted_document_number_provenance: dict[str, object] | None = None
     extracted_document_date_provenance: dict[str, object] | None = None
+    extracted_lc_sc_date_provenance: dict[str, object] | None = None
+    extracted_lc_sc_value_provenance: dict[str, object] | None = None
     extracted_quantity_provenance: dict[str, object] | None = None
     extracted_amendment_provenance: dict[str, object] | None = None
     clause_provenance: dict[str, object] | None = None
@@ -182,8 +189,13 @@ class JsonManifestSavedDocumentAnalysisProvider:
         extracted_document_number_confidence = _optional_float(match.get("document_number_confidence"))
         extracted_document_date = _optional_canonical_date(match.get("document_date"))
         extracted_document_date_confidence = _optional_float(match.get("document_date_confidence"))
+        extracted_document_subtype = _optional_string(match.get("document_subtype"))
+        extracted_lc_sc_date = _optional_canonical_date(match.get("lc_sc_date"))
+        extracted_lc_sc_value = _optional_quantity(match.get("lc_sc_value"))
+        extracted_lc_sc_value_currency = _optional_string(match.get("lc_sc_value_currency"))
         extracted_quantity = _optional_quantity(match.get("quantity"))
         extracted_quantity_unit = _optional_quantity_unit(match.get("quantity_unit"))
+        extracted_quantity_by_unit = _optional_quantity_by_unit(match.get("quantity_by_unit"))
         extracted_lc_sc_number = _optional_string(match.get("extracted_lc_sc_number")) or _optional_string(
             match.get("lc_sc_number")
         )
@@ -207,8 +219,13 @@ class JsonManifestSavedDocumentAnalysisProvider:
             extracted_document_number_confidence=extracted_document_number_confidence,
             extracted_document_date=extracted_document_date,
             extracted_document_date_confidence=extracted_document_date_confidence,
+            extracted_document_subtype=extracted_document_subtype,
+            extracted_lc_sc_date=extracted_lc_sc_date,
+            extracted_lc_sc_value=extracted_lc_sc_value,
+            extracted_lc_sc_value_currency=extracted_lc_sc_value_currency,
             extracted_quantity=extracted_quantity,
             extracted_quantity_unit=extracted_quantity_unit,
+            extracted_quantity_by_unit=extracted_quantity_by_unit,
             extracted_amendment_number=extracted_amendment_number,
             clause_related_lc_sc_number=clause_related_lc_sc_number,
             clause_excerpt=clause_excerpt,
@@ -250,6 +267,18 @@ class JsonManifestSavedDocumentAnalysisProvider:
                 default_confidence=extracted_document_date_confidence,
             )
             if extracted_document_date
+            else None,
+            extracted_lc_sc_date_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="lc_sc_date",
+            )
+            if extracted_lc_sc_date
+            else None,
+            extracted_lc_sc_value_provenance=_manifest_field_provenance(
+                record=match,
+                field_name="lc_sc_value",
+            )
+            if extracted_lc_sc_value
             else None,
             extracted_quantity_provenance=_manifest_field_provenance(
                 record=match,
@@ -524,6 +553,21 @@ def _optional_quantity_unit(value: object) -> str | None:
     if raw_value is None:
         return None
     return _normalize_quantity_unit(raw_value)
+
+
+def _optional_quantity_by_unit(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Saved-document analysis manifest quantity_by_unit must be an object when present.")
+    quantities: dict[str, str] = {}
+    for unit, amount in value.items():
+        normalized_unit = _optional_quantity_unit(str(unit))
+        normalized_amount = _optional_quantity(str(amount))
+        if normalized_unit is None or normalized_amount is None:
+            continue
+        quantities[normalized_unit] = normalized_amount
+    return quantities or None
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -1671,6 +1715,8 @@ def _normalize_pi_number(raw_value: str) -> str | None:
 
 def _normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
     normalized = _apply_ud_ip_exp_identifier_primitives(raw_value)
+    if re.fullmatch(r"BGMEA/DHK/(UD|AM)/.+", normalized):
+        return normalized
     match = _UD_IP_EXP_PREFIX_RE.match(normalized)
     if match is None:
         return None
@@ -1783,7 +1829,7 @@ def _clean_ud_ip_exp_identifier_char(character: str) -> str:
 
 def _normalize_quantity_unit(raw_value: str) -> str:
     normalized = raw_value.strip().upper()
-    if normalized in {"YD", "YARD", "YARDS"}:
+    if normalized in {"YD", "YDS", "YRD", "YRDS", "YARD", "YARDS"}:
         return "YDS"
     if normalized in {"MTR", "MTRS", "METER", "METERS", "METRE", "METRES"}:
         return "MTR"
@@ -1838,8 +1884,15 @@ def _merge_analysis(primary: SavedDocumentAnalysis, secondary: SavedDocumentAnal
         extracted_document_date_confidence=(
             primary.extracted_document_date_confidence or secondary.extracted_document_date_confidence
         ),
+        extracted_document_subtype=primary.extracted_document_subtype or secondary.extracted_document_subtype,
+        extracted_lc_sc_date=primary.extracted_lc_sc_date or secondary.extracted_lc_sc_date,
+        extracted_lc_sc_value=primary.extracted_lc_sc_value or secondary.extracted_lc_sc_value,
+        extracted_lc_sc_value_currency=(
+            primary.extracted_lc_sc_value_currency or secondary.extracted_lc_sc_value_currency
+        ),
         extracted_quantity=primary.extracted_quantity or secondary.extracted_quantity,
         extracted_quantity_unit=primary.extracted_quantity_unit or secondary.extracted_quantity_unit,
+        extracted_quantity_by_unit=primary.extracted_quantity_by_unit or secondary.extracted_quantity_by_unit,
         extracted_amendment_number=primary.extracted_amendment_number or secondary.extracted_amendment_number,
         clause_related_lc_sc_number=primary.clause_related_lc_sc_number or secondary.clause_related_lc_sc_number,
         clause_excerpt=primary.clause_excerpt or secondary.clause_excerpt,
@@ -1851,6 +1904,12 @@ def _merge_analysis(primary: SavedDocumentAnalysis, secondary: SavedDocumentAnal
         ),
         extracted_document_date_provenance=(
             primary.extracted_document_date_provenance or secondary.extracted_document_date_provenance
+        ),
+        extracted_lc_sc_date_provenance=(
+            primary.extracted_lc_sc_date_provenance or secondary.extracted_lc_sc_date_provenance
+        ),
+        extracted_lc_sc_value_provenance=(
+            primary.extracted_lc_sc_value_provenance or secondary.extracted_lc_sc_value_provenance
         ),
         extracted_quantity_provenance=(
             primary.extracted_quantity_provenance or secondary.extracted_quantity_provenance
