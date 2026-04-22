@@ -289,6 +289,9 @@ def _iter_pages(report: dict[str, Any]) -> list[dict[str, Any]]:
     raw_pages = report.get("pages", [])
     if isinstance(raw_pages, list):
         pages.extend(page for page in raw_pages if isinstance(page, dict))
+    if any(page.get("tables") for page in pages):
+        return pages
+
     categories = report.get("categories", {})
     if isinstance(categories, dict):
         for category in ("table", "img2table"):
@@ -296,7 +299,10 @@ def _iter_pages(report: dict[str, Any]) -> list[dict[str, Any]]:
             if isinstance(raw_category, dict):
                 raw_category_pages = raw_category.get("pages", [])
                 if isinstance(raw_category_pages, list):
-                    pages.extend(page for page in raw_category_pages if isinstance(page, dict))
+                    category_pages = [page for page in raw_category_pages if isinstance(page, dict)]
+                    if any(page.get("tables") for page in category_pages):
+                        return category_pages
+                    pages.extend(category_pages)
     seen: set[tuple[int, int]] = set()
     unique_pages: list[dict[str, Any]] = []
     for page in pages:

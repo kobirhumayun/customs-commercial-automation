@@ -45,6 +45,28 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-17")
         self.assertEqual(analysis.extracted_lc_sc_value, "999")
 
+    def test_layered_category_fallback_does_not_double_count_table_and_img2table(self) -> None:
+        table_report = _base_report()
+        category_page = table_report["pages"][0]
+        report = {
+            "combined_text": "UD Authenticating Authority",
+            "pages": [{"page_number": 1, "searchable_text": "UD Authenticating Authority"}],
+            "categories": {
+                "table": {"pages": [category_page]},
+                "img2table": {"pages": [category_page]},
+            },
+        }
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="1345260400434",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "6633"})
+
     def test_extracts_amendment_properties_from_layered_tables(self) -> None:
         analysis = extract_structured_ud_analysis(
             report=_amendment_report(),
