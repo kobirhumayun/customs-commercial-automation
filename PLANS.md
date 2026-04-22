@@ -59,7 +59,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - Use `docs/ud-ip-exp-implementation-handoff.md` as the implementation handoff before coding this workflow.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
-- Combination-based UD allocation logic.
+- Structured UD/AM value-first row selection by ERP-linked PDF LC value, with legacy combination-based UD allocation retained only for non-structured deterministic payloads.
 - Ordered shared-column writing rules for UD/EXP/IP values and dates.
 - Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).
 - Human-review routing is explicitly deferred to a later phase after recurring issue categories are formalized.

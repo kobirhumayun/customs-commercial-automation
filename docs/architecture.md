@@ -201,8 +201,14 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Shares intake, storage, and parsing services with export workflow.
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
-- Extraction pipeline captures document numbers, dates, LC/SC references, quantities, and units.
-- Matching engine locates candidate workbook rows and applies UD combination logic or IP/EXP total matching rules.
+- Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.
+- Structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`.
+- Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
+- Structured UD validation requires the extracted LC/SC date to match ERP `LC DT.`, then selects blank-UD workbook rows by a contiguous ascending-row sum of workbook `Amount` column 6 matching the extracted UD/AM value.
+- Structured UD quantity validation aggregates Pioneer Denim supplier rows by unit and compares only against the value-selected workbook row group.
+- Successful structured UD writes stage `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; dates are written as `DD/MM/YYYY`.
+- Legacy UD payloads without structured value evidence may still use the older deterministic quantity-combination allocation path.
+- IP/EXP processing remains blocked until business rules are finalized in durable docs.
 - Shared workbook column `UD No. & IP No.` stores UD values directly and EXP/IP values with ordered prefixes.
 - Write is blocked if matching rules are incomplete, contradictory, or leave unresolved discrepancies under the defined thresholds.
 

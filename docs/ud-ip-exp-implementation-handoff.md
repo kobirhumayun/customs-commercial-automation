@@ -313,7 +313,7 @@ Until answered, default to hard-block with comprehensive discrepancy reporting r
 
 The next highest-value work is whichever of these the team wants to unblock first:
 1. Update this handoff and adjacent durable docs whenever the implementation boundary changes.
-2. Improve live UD extraction quality using deterministic saved-document analysis fixtures and hard-block reporting, especially around the future ERP LC/SC + `Ship. Remarks` linkage rule.
+2. Continue improving live UD extraction quality with deterministic saved-document analysis fixtures and hard-block reporting inside the confirmed ERP LC/SC + `Ship. Remarks` linkage rule.
 3. Finalize IP/EXP business rules in docs, then replace the current unresolved-policy hard-block path with deterministic matching and staging logic.
 
 ## Guardrails for New Sessions
