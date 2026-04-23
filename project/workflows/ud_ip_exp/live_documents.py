@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,11 @@ from project.workflows.ud_ip_exp.payloads import UDIPEXPDocumentPayload
 from project.workflows.ud_ip_exp.structured_extraction import (
     StructuredUDExtractionContext,
     StructuredUDSavedDocumentAnalysisProvider,
+)
+
+_FILENAME_LC_SC_SUFFIX_PATTERN = re.compile(
+    r"(?:^|[^A-Z0-9])UD[-_\s]*(?:LC|SC)[-_\s]*(?P<suffix>[A-Z0-9]+)",
+    re.IGNORECASE,
 )
 
 
@@ -184,6 +190,24 @@ def _validate_documents_against_verified_family(
                 "document_evidence": document_evidence,
             },
         )
+    filename_suffix_mismatches = _filename_suffix_mismatches_verified_family(
+        expected_lc_sc_number=verified_family.lc_sc_number,
+        document_evidence=document_evidence,
+    )
+    if filename_suffix_mismatches:
+        return DocumentSaveIssue(
+            code="ud_filename_lc_suffix_mismatch",
+            severity=FinalDecision.HARD_BLOCK,
+            message=(
+                "UD/IP/EXP attachment filename LC/SC suffix contradicts the ERP-derived "
+                "LC/SC family for the mail."
+            ),
+            details={
+                "expected_lc_sc_number": verified_family.lc_sc_number,
+                "mismatched_filename_suffixes": filename_suffix_mismatches,
+                "document_evidence": document_evidence,
+            },
+        )
     return verified_family
 
 
@@ -222,6 +246,45 @@ def _evidence_lc_sc_contradicts_family(
 
 def _comparison_lc_sc_number(value: str) -> str:
     return normalize_lc_sc_number(value) or value.strip().upper()
+
+
+def _filename_suffix_mismatches_verified_family(
+    *,
+    expected_lc_sc_number: str,
+    document_evidence: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    expected_suffix_target = _alnum_upper(expected_lc_sc_number)
+    if not expected_suffix_target:
+        return []
+    mismatches: list[dict[str, str]] = []
+    for evidence in document_evidence:
+        normalized_filename = str(evidence.get("normalized_filename") or "").strip()
+        filename_suffix = _extract_filename_lc_sc_suffix(normalized_filename)
+        if filename_suffix is None:
+            continue
+        suffix_target = _alnum_upper(filename_suffix)
+        if suffix_target and not expected_suffix_target.endswith(suffix_target):
+            mismatches.append(
+                {
+                    "attachment_name": str(evidence.get("attachment_name") or ""),
+                    "normalized_filename": normalized_filename,
+                    "filename_suffix": filename_suffix,
+                    "expected_lc_sc_number": expected_lc_sc_number,
+                }
+            )
+    return mismatches
+
+
+def _extract_filename_lc_sc_suffix(normalized_filename: str) -> str | None:
+    match = _FILENAME_LC_SC_SUFFIX_PATTERN.search(normalized_filename)
+    if match is None:
+        return None
+    suffix = match.group("suffix").strip()
+    return suffix or None
+
+
+def _alnum_upper(value: str) -> str:
+    return "".join(character for character in value.upper() if character.isalnum())
 
 
 def _save_mail_pdfs_to_directory(

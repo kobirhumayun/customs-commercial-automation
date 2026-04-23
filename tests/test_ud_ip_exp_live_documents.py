@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.documents import PyMuPDFSavedDocumentAnalysisProvider, SavedDocumentAnalysis
-from project.erp import ERPRegisterRow
+from project.erp import ERPFamily, ERPRegisterRow
 from project.models import (
     FinalDecision,
     MailMovePhaseStatus,
@@ -88,6 +88,103 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(
             result.classified_documents.documents[0].source_saved_document_id,
             result.document_save_result.saved_documents[0].saved_document_id,
+        )
+
+    def test_prepare_live_ud_ip_exp_documents_hard_blocks_filename_suffix_mismatch_with_erp_family(self) -> None:
+        mail = _mail(
+            "entry-live-filename-mismatch",
+            "Subject ignored for UD/IP/EXP",
+            attachments=[{"attachment_name": "UD-LC-0043-RENAMED-WRONG.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-0043-RENAMED-WRONG",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-9999",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-filename-mismatch",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud renamed wrong\n"}
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-9999",
+                    buyer_name="ANANTA GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                    folder_buyer_name="ANANTA GARMENTS LTD",
+                ),
+            )
+
+        self.assertEqual(len(result.document_save_result.issues), 1)
+        issue = result.document_save_result.issues[0]
+        self.assertEqual(issue.code, "ud_filename_lc_suffix_mismatch")
+        self.assertEqual(issue.details["expected_lc_sc_number"], "LC-9999")
+        self.assertEqual(
+            issue.details["mismatched_filename_suffixes"],
+            [
+                {
+                    "attachment_name": "UD-LC-0043-RENAMED-WRONG.pdf",
+                    "normalized_filename": "UD-LC-0043-RENAMED-WRONG.pdf",
+                    "filename_suffix": "0043",
+                    "expected_lc_sc_number": "LC-9999",
+                }
+            ],
+        )
+        self.assertEqual(issue.details["document_evidence"][0]["lc_sc_number"], "LC-9999")
+
+    def test_prepare_live_ud_ip_exp_documents_does_not_require_filename_suffix_when_absent(self) -> None:
+        mail = _mail(
+            "entry-live-no-filename-suffix",
+            "Subject ignored for UD/IP/EXP",
+            attachments=[{"attachment_name": "buyer-ud-document.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-9999-ANANTA",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-9999",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-no-filename-suffix",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud no filename suffix\n"}
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-9999",
+                    buyer_name="ANANTA GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                    folder_buyer_name="ANANTA GARMENTS LTD",
+                ),
+            )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(len(result.document_save_result.saved_documents), 1)
+        self.assertTrue(
+            result.document_save_result.saved_documents[0].destination_path.replace("\\", "/").endswith(
+                "2026/ANANTA GARMENTS LTD/LC-9999/All Attachments/buyer-ud-document.pdf"
+            )
         )
 
     def test_validate_run_snapshot_uses_live_ud_saved_document_analysis(self) -> None:

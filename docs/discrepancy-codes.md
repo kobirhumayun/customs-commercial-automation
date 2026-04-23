@@ -83,6 +83,7 @@ Every discrepancy payload should include:
 | `ud_file_number_missing` | `hard_block` | ud_ip_exp | UD/IP/EXP mail body did not yield any canonical file numbers for ERP family resolution. |
 | `ud_erp_row_missing` | `hard_block` | ud_ip_exp | One or more extracted UD/IP/EXP file numbers did not resolve to a canonical ERP row. |
 | `ud_family_inconsistent` | `hard_block` | ud_ip_exp | Resolved ERP rows for extracted UD/IP/EXP file numbers did not belong to one LC/SC family. |
+| `ud_filename_lc_suffix_mismatch` | `hard_block` | ud_ip_exp | A UD/IP/EXP attachment filename explicitly carrying a `UD-LC-...` or `UD-SC-...` suffix does not agree with the ERP-derived LC/SC family suffix. |
 | `ud_required_document_missing` | `hard_block` | ud_ip_exp | No UD document payload was available for deterministic UD processing. |
 | `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |

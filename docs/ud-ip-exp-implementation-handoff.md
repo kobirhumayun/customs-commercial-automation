@@ -24,6 +24,7 @@ Before implementation, read these files in order:
   - live UD document preparation is implemented for `validate-run` when `--document-root` is used, including PDF save, saved-document analysis, workflow-local document classification, workbook-family storage-path resolution, and UD payload derivation from saved documents
   - live `ud_ip_exp` family resolution now follows the released `export_lc_sc` model: extract canonical file numbers from the email body, resolve them through ERP rows, and require one LC/SC family before storage, validation, printing, or mail movement can proceed
   - email subject extraction is not authoritative for `ud_ip_exp`; it must not drive family resolution, storage, validation, printing, or mail movement
+  - explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is implemented as a sanity guard against the ERP LC/SC selected from email-body file numbers; mismatches hard-block with discrepancy code `ud_filename_lc_suffix_mismatch`, and filename suffixes are never used for lookup or row selection
   - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
   - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
   - transport for `ud_ip_exp` is enabled using the same staged model as `export_lc_sc`: newly saved PDFs from successful mails are print-eligible after workbook write commit, and successful mails move only after required upstream gates complete
@@ -157,6 +158,7 @@ Current live-extraction boundary:
 - saved-document analysis now carries UD/IP/EXP-oriented fields including document number, document date, quantity, quantity unit, and provenance
 - live extraction remains heuristic and deterministic; unsupported or incomplete extraction still resolves to hard-block through the rule/staging path
 - email body file numbers plus ERP rows are the primary LC/SC-family source for `ud_ip_exp`; PDF-derived LC/SC evidence is supporting validation evidence and must not override the ERP family
+- explicit UD-LC/UD-SC attachment filename suffixes are supporting validation evidence only and must agree with the ERP LC/SC suffix when present
 - ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
 - structured UD/AM extraction now requires page-1 table-based UD/AM number/date extraction, exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows

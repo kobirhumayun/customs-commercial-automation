@@ -202,6 +202,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
 - Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.
+- Explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is a guardrail only: it must agree with the ERP-derived LC/SC suffix, and it must never replace email-body file-number plus ERP family resolution.
 - Structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`.
 - Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
 - Structured UD validation requires the extracted LC/SC date to match ERP `LC DT.`, then selects blank-UD workbook rows by a contiguous ascending-row sum of workbook `Amount` column 6 matching the extracted UD/AM value.

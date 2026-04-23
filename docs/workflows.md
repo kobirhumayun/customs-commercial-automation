@@ -609,6 +609,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
 - live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
+- if a live UD/IP/EXP attachment filename explicitly follows `UD-LC-<suffix>` or `UD-SC-<suffix>`, that suffix is a sanity check only and must match the end of the ERP-derived LC/SC number; mismatch hard-blocks with attachment-level evidence, while filenames without that explicit pattern are not used for lookup
 - structured Base UD PDFs are identified by `UD Authenticating Authority` on page 1; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority` on page 1
 - for structured Base UD and UD Amendment PDFs, the UD/AM number and UD/AM date come from page 1 table index 1, row index 1, columns 1 and 3 respectively
 - structured UD LC/SC table extraction must match rows by exact ERP `Ship. Remarks` when present/found, otherwise exact ERP `LC No.`; ERP values are sourced from the email-body file number lookup

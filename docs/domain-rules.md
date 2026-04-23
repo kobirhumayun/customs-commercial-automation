@@ -198,6 +198,7 @@ Decision rules:
 - Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
 - `ud_ip_exp` uses the same email-body file-number extraction, ERP row lookup, and one-family consistency contract as `export_lc_sc`; the email subject is not authoritative for any `ud_ip_exp` processing step.
 - For `ud_ip_exp`, ERP family fields selected from body file numbers drive attachment storage and workbook-family context. PDF-derived LC/SC values are supporting validation evidence and must hard-block if they contradict the ERP family.
+- For `ud_ip_exp`, an explicit attachment filename pattern `UD-LC-<suffix>` or `UD-SC-<suffix>` is supporting validation evidence only. The suffix must match the end of the ERP LC/SC number selected by the email-body file number lookup; a mismatch hard-blocks as a likely renamed-against-wrong-family file. Filename suffixes must not be used to select the ERP row, workbook family, or UD LC table row.
 - ERP `Ship. Remarks`, together with the ERP LC/SC family context, is the primary linkage input for structured Base UD and UD Amendment PDF property extraction.
 
 Example (canonical selection): if two true-equivalent ERP rows for `P/26/0042` are found at row 118 and row 241, row 118 is canonical and row 241 cannot replace it for pathing, workbook mapping, or reporting metadata.
