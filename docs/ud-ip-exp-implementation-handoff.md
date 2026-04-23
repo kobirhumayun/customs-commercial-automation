@@ -164,6 +164,7 @@ Current live-extraction boundary:
 - ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
 - structured UD/AM extraction now requires page-1 table-based UD/AM number/date extraction, exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
+- ERP `LC No.` row matching is exact first, then may compare only after removing leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, internal spaces and all other characters remain unchanged, and `Ship. Remarks` remains exact-only
 - structured UD/AM quantity validation uses the workbook `Quantity of Fabrics (Yds/Mtr)` cell number format as the unit source: `#,###.00 "Mtr"` means `MTR`; any other number format defaults to `YDS`
 - selected structured UD/AM rows write three fields when blank: `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; date writes use `DD/MM/YYYY`
 - document-date extraction prefers UD/IP/EXP-specific date labels over LC/SC issue-date labels so export-family dates are not accepted as UD/IP/EXP evidence

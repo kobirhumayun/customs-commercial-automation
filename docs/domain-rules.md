@@ -292,7 +292,8 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 
 ### Structured UD value-first row selection
 - Email body file number selects the canonical ERP row and therefore the ERP LC/SC family, ERP `LC No.`, ERP `Ship. Remarks`, and ERP LC/SC date.
-- The structured UD/AM PDF LC table must match a row by exact ERP `Ship. Remarks` when found; if not found or blank, exact ERP `LC No.` may be used.
+- The structured UD/AM PDF LC table must match a row by exact ERP `Ship. Remarks` when found; if not found or blank, ERP `LC No.` may be used.
+- ERP `LC No.` matching is exact first. If exact matching fails, the only permitted fallback is to strip zeros from the left side of the ERP/table LC strings and compare those results. Leading and trailing spaces around compared values may be trimmed, but internal spaces must remain unchanged. No dashes, slashes, punctuation, internal zeros, or other characters may be modified, and this fallback does not apply to `Ship. Remarks`.
 - The matched UD/AM LC table date must equal the ERP LC/SC date after date parsing.
 - The matched UD/AM LC table value is compared numerically to the sum of workbook `Amount` column 6.
 - Candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.

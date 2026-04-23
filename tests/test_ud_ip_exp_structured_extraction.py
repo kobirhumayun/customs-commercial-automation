@@ -46,6 +46,77 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-17")
         self.assertEqual(analysis.extracted_lc_sc_value, "999")
 
+    def test_lc_number_match_allows_only_left_zero_stripping(self) -> None:
+        analysis = extract_structured_ud_analysis(
+            report=_amendment_report(),
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="0000201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis.extracted_lc_sc_number, "0000201260400935")
+        self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-09")
+        self.assertEqual(analysis.extracted_lc_sc_value, "69734.7")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["matched_identifier"], "0000201260400935")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["table_identifier"], "201260400935")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["match_strategy"], "leading_zero_stripped")
+
+    def test_lc_number_match_trims_only_outer_spaces(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][2]["rows"][1][1] = "  201260400935  "
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="0000201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis.extracted_lc_sc_number, "0000201260400935")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["table_identifier"], "201260400935")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["match_strategy"], "leading_zero_stripped")
+
+    def test_lc_number_match_does_not_change_internal_spaces(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][2]["rows"][1][1] = "201 260400935"
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="0000201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertIsNone(analysis.extracted_lc_sc_number)
+        self.assertIsNone(analysis.extracted_lc_sc_date)
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
+    def test_ship_remarks_match_does_not_strip_left_zeros(self) -> None:
+        report = _base_report()
+        report["pages"][0]["tables"][2]["rows"] = [
+            ["SL No", "32. Import L/C No.", "33. Date", "34. Value", "Used Value", "35. Currency"],
+            ["1", "12345", "2026-03-16", "17375.8", "17375.8", "USD"],
+        ]
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="99999",
+                erp_ship_remarks="00012345",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertIsNone(analysis.extracted_lc_sc_number)
+        self.assertIsNone(analysis.extracted_lc_sc_date)
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
     def test_layered_category_fallback_does_not_double_count_table_and_img2table(self) -> None:
         table_report = _base_report()
         category_page = table_report["pages"][0]

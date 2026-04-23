@@ -60,6 +60,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
 - Structured UD/AM value-first row selection by ERP-linked PDF LC value, with legacy combination-based UD allocation retained only for non-structured deterministic payloads.
+- Structured UD/AM LC row matching keeps `Ship. Remarks` exact-only and permits ERP `LC No.` fallback matching only by stripping leading zeros from the left side; leading/trailing spaces may be trimmed, but internal spaces and all other characters remain unchanged.
 - Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and `<digits>-EXP*` PDFs.
 - Explicit UD-LC/UD-SC attachment filename suffixes validated only as sanity evidence against the ERP-derived LC/SC family, never as lookup input.
 - Ordered shared-column writing rules for UD/EXP/IP values and dates.

@@ -144,8 +144,12 @@ def _extract_lc_table_row(
     header_needle = "BACK-TO-BACK" if document_subtype == "ud_amendment" else "IMPORT L/C NO"
     value_column = 4 if document_subtype == "ud_amendment" else 3
     priority_identifiers = [
-        value
-        for value in (context.erp_ship_remarks.strip(), context.erp_lc_sc_number.strip())
+        ("ship_remarks", value)
+        for value in (context.erp_ship_remarks.strip(),)
+        if value
+    ] + [
+        ("lc_sc_number", value)
+        for value in (context.erp_lc_sc_number.strip(),)
         if value
     ]
     target_tables = []
@@ -158,10 +162,11 @@ def _extract_lc_table_row(
             continue
         target_tables.append(table)
 
-    for exact_identifier in priority_identifiers:
+    for identifier_source, exact_identifier in priority_identifiers:
         match = _find_lc_table_row_for_identifier(
             tables=target_tables,
             exact_identifier=exact_identifier,
+            identifier_source=identifier_source,
             context=context,
             value_column=value_column,
         )
@@ -174,6 +179,7 @@ def _find_lc_table_row_for_identifier(
     *,
     tables: list[dict[str, Any]],
     exact_identifier: str,
+    identifier_source: str,
     context: StructuredUDExtractionContext,
     value_column: int,
 ) -> dict[str, Any] | None:
@@ -182,8 +188,13 @@ def _find_lc_table_row_for_identifier(
         for row_index, row in enumerate(rows[1:], start=1):
             if len(row) <= value_column:
                 continue
-            identifier = _clean_cell(row[1] if len(row) > 1 else "")
-            if exact_identifier != identifier:
+            identifier = _clean_identifier_cell(row[1] if len(row) > 1 else "")
+            match_strategy = _identifier_match_strategy(
+                expected=exact_identifier,
+                actual=identifier,
+                identifier_source=identifier_source,
+            )
+            if match_strategy is None:
                 continue
             raw_date = _clean_cell(row[2] if len(row) > 2 else "")
             raw_value = _clean_cell(row[value_column])
@@ -201,10 +212,30 @@ def _find_lc_table_row_for_identifier(
                     "table_index": table["table_index"],
                     "row_index": row_index,
                     "matched_identifier": exact_identifier,
+                    "table_identifier": identifier,
+                    "identifier_source": identifier_source,
+                    "match_strategy": match_strategy,
                     "extraction_method": "structured_table",
                 },
             }
     return None
+
+
+def _identifier_match_strategy(*, expected: str, actual: str, identifier_source: str) -> str | None:
+    if expected == actual:
+        return "exact"
+    if identifier_source != "lc_sc_number":
+        return None
+    if not expected or not actual:
+        return None
+    if _strip_left_zeros(expected) == _strip_left_zeros(actual):
+        return "leading_zero_stripped"
+    return None
+
+
+def _strip_left_zeros(value: str) -> str:
+    stripped = value.lstrip("0")
+    return stripped if stripped else "0"
 
 
 def _extract_supplier_quantities(
@@ -277,7 +308,7 @@ def _iter_tables(report: dict[str, Any]) -> list[dict[str, Any]]:
                     "page_number": page_number,
                     "table_index": int(table.get("table_index", fallback_index) or fallback_index),
                     "rows": [
-                        [_clean_cell(cell) for cell in row]
+                        [_raw_cell(cell) for cell in row]
                         for row in rows
                         if isinstance(row, list)
                     ],
@@ -334,6 +365,14 @@ def _page_text(report: dict[str, Any], *, page_number: int) -> str:
 
 def _clean_cell(value: object) -> str:
     return " ".join(str(value or "").replace("\ufffe", " ").split())
+
+
+def _clean_identifier_cell(value: object) -> str:
+    return _raw_cell(value).strip()
+
+
+def _raw_cell(value: object) -> str:
+    return str(value or "").replace("\ufffe", " ")
 
 
 def _extract_bgmea_number(value: str, target_token: str) -> str | None:
