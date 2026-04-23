@@ -619,6 +619,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
 - structured UD quantity extraction must aggregate rows for supplier `PIONEER DENIM LIMITED` or `PIONEER DENIM LTD`, applying supplier `DO` fill-down in the supplier column before filtering
 - structured UD quantity validation derives the workbook quantity unit from the `Quantity of Fabrics (Yds/Mtr)` cell number format: `#,###.00 "Mtr"` means `MTR`, and all other formats default to `YDS`
+- batch validation must preserve row number formats when advancing the in-memory workbook snapshot after staged writes, so later mails in the same run keep the workbook-authored `MTR`/`YDS` quantity-unit evidence
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
 - when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
 - this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes

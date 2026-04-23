@@ -300,6 +300,7 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - Candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
 - Structured UD validation must identify the workbook quantity unit from the workbook cell number format for `Quantity of Fabrics (Yds/Mtr)`: if the format is `#,###.00 "Mtr"`, the unit is `MTR`; otherwise the unit defaults to `YDS`. This mirrors the export workflow, which writes MTR quantities by applying that number format.
+- During a multi-mail run, in-memory workbook snapshot advancement after staged writes must preserve row number formats so later mails still evaluate quantity units from the original workbook-authored evidence.
 - Workbook quantities in the selected group are summed by unit and compared against structured UD supplier quantities for `PIONEER DENIM LIMITED` / `PIONEER DENIM LTD`.
 - Quantity validation passes only when UD quantity equals workbook quantity or UD excess is at least 50 yards/meters. UD quantity below workbook quantity or excess above zero but below 50 is a hard block.
 - Selected rows receive `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; all target cells must be blank before write.

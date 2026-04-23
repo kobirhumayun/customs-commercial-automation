@@ -34,6 +34,9 @@
   - one-print-group live print submission
   - post-print mail move
 - The committed workbook row was row `372`, with `UD No. & IP No.` = `BGMEA/DHK/AM/2026/4148/017-018`, `UD & IP Date` = `13/04/2026`, and `UD Recv. Date` = `23/04/2026`.
+- A later two-mail live proof run, `run-20260423T094320Z-ud_ip_exp-9474d4c6`, completed with `pass = 2`, `hard_block = 0`, six committed workbook writes, two moved mails, and zero discrepancies.
+- The later live proof covered the structured UD Amendment zero-`Increased/Decreased` rule for row `402`, where the amendment row's `Value` column was used, and a Base UD MTR quantity case for row `475`, where workbook quantity number formats remained authoritative across the batch.
+- `ud_ip_exp` structured UD writes populate `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; both date columns use `DD/MM/YYYY`.
 - IP/EXP completion rules remain intentionally unresolved and continue to hard-block until durable business rules are finalized.
 
 ### Printing behavior
