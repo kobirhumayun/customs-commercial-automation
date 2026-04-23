@@ -24,6 +24,18 @@
 - stable document storage under one canonical family path per LC/SC:
   `Year / Buyer Name / LC-or-SC Number / All Attachments`
 
+### UD/IP/EXP live UD slice
+- The `ud_ip_exp` UD-only path has completed a live end-to-end run for a newly saved structured UD Amendment PDF.
+- Live proof run: `run-20260423T080206Z-ud_ip_exp-610790f2`.
+- The run completed:
+  - ERP lookup from email-body file number
+  - structured UD Amendment extraction
+  - workbook commit
+  - one-print-group live print submission
+  - post-print mail move
+- The committed workbook row was row `372`, with `UD No. & IP No.` = `BGMEA/DHK/AM/2026/4148/017-018`, `UD & IP Date` = `13/04/2026`, and `UD Recv. Date` = `23/04/2026`.
+- IP/EXP completion rules remain intentionally unresolved and continue to hard-block until durable business rules are finalized.
+
 ### Printing behavior
 - phase 1 print completion means deterministic silent submission order completed
 - phase 1 does not wait for or verify physical paper completion
@@ -48,6 +60,8 @@
   - `write = committed`
   - `print = completed`
   - `mail move = completed`
+- for `ud_ip_exp`, the bundled one-click launcher is:
+  `scripts/run_ud_ip_exp_live_cycle.cmd`
 
 ### Out of scope for this release
 - scheduler/orchestrator service

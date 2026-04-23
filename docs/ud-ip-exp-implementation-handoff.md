@@ -31,6 +31,8 @@ Before implementation, read these files in order:
   - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
   - transport for `ud_ip_exp` is enabled using the same staged model as `export_lc_sc`: newly saved PDFs from successful mails are print-eligible after workbook write commit, and successful mails move only after required upstream gates complete
   - transport integration is covered by orchestration and CLI-artifact tests proving live UD validation saves into the ERP-derived export-family folder, print planning includes newly saved UD PDFs after the committed write gate, mail moves hard-block before print completion, and mail moves complete after print completion
+  - live UD-only end-to-end proof is complete for a newly saved structured UD Amendment PDF: run `run-20260423T080206Z-ud_ip_exp-610790f2` committed row 372, submitted one print group, and completed the post-print mail move with zero discrepancies
+  - a one-click Windows launcher is available at `scripts/run_ud_ip_exp_live_cycle.cmd`; it reuses the shared `scripts/run_live_cycle.ps1` staged sequence
   - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
 - Phase: `PLANS.md` Phase 3.
 

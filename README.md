@@ -120,6 +120,8 @@ For daily use on Windows, operators can launch the full happy-path cycle with th
   `scripts/run_live_cycle.ps1`
 - one-click `export_lc_sc` launcher:
   `scripts/run_export_lc_sc_live_cycle.cmd`
+- one-click `ud_ip_exp` launcher:
+  `scripts/run_ud_ip_exp_live_cycle.cmd`
 
 The launcher performs:
 - `report-live-readiness`
@@ -140,11 +142,17 @@ If a run stops, use this read-only explanation command first. It shows the prima
 uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
 ```
 
+For `ud_ip_exp`, use the same diagnostic command with the workflow id changed:
+
+```powershell
+uv run python -m project explain-run-failure ud_ip_exp --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+```
+
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
 
 ```powershell
-$WORKFLOW = "export_lc_sc"
+$WORKFLOW = "export_lc_sc" # or "ud_ip_exp"
 $CONFIG = "D:\customs-automation\export_lc_sc.toml"
 $DOCROOT = "D:\customs-automation\documents-live-click"
 ```
