@@ -147,7 +147,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         mail = _mail(
             "entry-live-no-filename-suffix",
             "Subject ignored for UD/IP/EXP",
-            attachments=[{"attachment_name": "buyer-ud-document.pdf"}],
+            attachments=[{"attachment_name": "UD-document.pdf"}],
         )
 
         class Provider:
@@ -183,8 +183,68 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(len(result.document_save_result.saved_documents), 1)
         self.assertTrue(
             result.document_save_result.saved_documents[0].destination_path.replace("\\", "/").endswith(
-                "2026/ANANTA GARMENTS LTD/LC-9999/All Attachments/buyer-ud-document.pdf"
+                "2026/ANANTA GARMENTS LTD/LC-9999/All Attachments/UD-document.pdf"
             )
+        )
+
+    def test_prepare_live_ud_ip_exp_documents_saves_only_strictly_named_ud_ip_exp_pdfs(self) -> None:
+        mail = _mail(
+            "entry-live-strict-reader",
+            "UD strict reader",
+            attachments=[
+                {"attachment_name": "PDL-26-1755.pdf"},
+                {"attachment_name": "UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf"},
+                {"attachment_name": "LC-0113-ANANTA CASUAL WEAR LTD.pdf"},
+            ],
+        )
+        test_case = self
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                test_case.assertEqual(saved_document.normalized_filename, "UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf")
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="UD-LC-0113-ANANTA CASUAL WEAR LTD",
+                    extracted_document_date="2026-04-19",
+                    extracted_lc_sc_number="LC-0113",
+                    extracted_quantity="26548",
+                    extracted_quantity_unit="MTR",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-strict-reader",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (mail.entry_id, 0): b"%PDF-1.4\npi\n",
+                        (mail.entry_id, 1): b"%PDF-1.4\nud\n",
+                        (mail.entry_id, 2): b"%PDF-1.4\nlc\n",
+                    }
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-0113",
+                    buyer_name="ANANTA CASUAL WEAR LTD",
+                    lc_sc_date="2026-04-15",
+                    folder_buyer_name="ANANTA CASUAL WEAR LTD",
+                ),
+            )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(
+            [document.normalized_filename for document in result.document_save_result.saved_documents],
+            ["UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf"],
+        )
+        self.assertIn(
+            "Skipped attachment PDL-26-1755.pdf because its filename does not match UD/IP/EXP naming conventions.",
+            result.document_save_result.decision_reasons,
+        )
+        self.assertIn(
+            "Skipped attachment LC-0113-ANANTA CASUAL WEAR LTD.pdf because its filename does not match UD/IP/EXP naming conventions.",
+            result.document_save_result.decision_reasons,
         )
 
     def test_validate_run_snapshot_uses_live_ud_saved_document_analysis(self) -> None:

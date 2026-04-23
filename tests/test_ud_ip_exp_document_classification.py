@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import unittest
+
+from project.documents import SavedDocumentAnalysis
+from project.models import SavedDocument
+from project.workflows.ud_ip_exp.document_classification import classify_saved_ud_ip_exp_documents
+
+
+class UDIPEXPDocumentClassificationTests(unittest.TestCase):
+    def test_non_matching_filename_is_skipped_without_document_analysis(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="saved-pi",
+            mail_id="mail-1",
+            attachment_name="PDL-26-1755.pdf",
+            normalized_filename="PDL-26-1755.pdf",
+            destination_path="D:/docs/PDL-26-1755.pdf",
+            file_sha256="a" * 64,
+            save_decision="saved_new",
+            attachment_index=0,
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                raise AssertionError("Non-matching filenames should be skipped before OCR analysis.")
+
+        result = classify_saved_ud_ip_exp_documents(
+            saved_documents=[saved_document],
+            analysis_provider=Provider(),
+        )
+
+        self.assertEqual(result.documents, [])
+        self.assertEqual(result.saved_documents[0].document_type, "supporting_pdf")
+        self.assertEqual(
+            result.saved_documents[0].classification_reason,
+            "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped.",
+        )
+        self.assertIsNone(result.saved_documents[0].extracted_document_number)
+
+    def test_matching_ip_filename_uses_filename_when_ocr_identifier_is_low_confidence(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="saved-ip",
+            mail_id="mail-1",
+            attachment_name="IP-LC-0113-ANANTA.pdf",
+            normalized_filename="IP-LC-0113-ANANTA.pdf",
+            destination_path="D:/docs/IP-LC-0113-ANANTA.pdf",
+            file_sha256="b" * 64,
+            save_decision="saved_new",
+            attachment_index=0,
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="ocr_text",
+                    extracted_document_number="IP-AED-UR-TO-ND-TOY-GT-SEMICON",
+                    extracted_document_number_confidence=0.3775,
+                )
+
+        result = classify_saved_ud_ip_exp_documents(
+            saved_documents=[saved_document],
+            analysis_provider=Provider(),
+        )
+
+        self.assertEqual(len(result.documents), 1)
+        self.assertEqual(result.saved_documents[0].document_type, "ip_document")
+        self.assertEqual(result.saved_documents[0].extracted_document_number, "IP-LC-0113-ANANTA")
+
+
+if __name__ == "__main__":
+    unittest.main()

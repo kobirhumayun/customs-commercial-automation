@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
+import re
 
 from project.documents.providers import NullSavedDocumentAnalysisProvider, SavedDocumentAnalysisProvider
 from project.erp.normalization import normalize_lc_sc_number
@@ -18,6 +19,13 @@ from project.workflows.ud_ip_exp.payloads import (
     UDIPEXPDocumentPayload,
     UDIPEXPQuantity,
 )
+
+_REQUIRED_DOCUMENT_NUMBER_CONFIDENCE = {
+    UDIPEXPDocumentKind.UD: 0.97,
+    UDIPEXPDocumentKind.IP: 0.97,
+    UDIPEXPDocumentKind.EXP: 0.97,
+}
+_EXP_FILENAME_RE = re.compile(r"^\d+-EXP", re.IGNORECASE)
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,9 +47,30 @@ def classify_saved_ud_ip_exp_documents(
     decision_reasons: list[str] = []
 
     for saved_document in saved_documents:
+        filename_kind = document_kind_from_filename(saved_document.normalized_filename)
+        if filename_kind is None:
+            annotated_documents.append(
+                replace(
+                    saved_document,
+                    document_type="supporting_pdf",
+                    classification_reason=(
+                        "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped."
+                    ),
+                    print_eligible=False,
+                )
+            )
+            decision_reasons.append(
+                f"Skipped saved document {saved_document.normalized_filename} because its filename does not match UD/IP/EXP naming conventions."
+            )
+            continue
+
         analysis = provider.analyze(saved_document=saved_document)
-        document_number = analysis.extracted_document_number or _document_number_from_filename(saved_document)
-        document_kind = document_kind_from_number(document_number) if document_number is not None else None
+        document_number = _classification_document_number(
+            saved_document=saved_document,
+            analysis=analysis,
+            filename_kind=filename_kind,
+        )
+        document_kind = filename_kind
         annotated_document = replace(
             saved_document,
             analysis_basis=analysis.analysis_basis,
@@ -94,7 +123,59 @@ def classify_saved_ud_ip_exp_documents(
 
 
 def _document_number_from_filename(saved_document: SavedDocument) -> str | None:
-    return normalize_ud_ip_exp_document_number(Path(saved_document.normalized_filename).stem)
+    filename_kind = document_kind_from_filename(saved_document.normalized_filename)
+    if filename_kind is None:
+        return None
+    stem = Path(saved_document.normalized_filename).stem
+    normalized = normalize_ud_ip_exp_document_number(stem)
+    if normalized is not None:
+        return normalized
+    if filename_kind == UDIPEXPDocumentKind.EXP:
+        return f"EXP-{stem.upper()}"
+    return None
+
+
+def is_processable_ud_ip_exp_filename(normalized_filename: str) -> bool:
+    return document_kind_from_filename(normalized_filename) is not None
+
+
+def document_kind_from_filename(normalized_filename: str) -> UDIPEXPDocumentKind | None:
+    filename = Path(normalized_filename).name.strip()
+    upper_filename = filename.upper()
+    if upper_filename.startswith("UD-"):
+        return UDIPEXPDocumentKind.UD
+    if upper_filename.startswith("IP-"):
+        return UDIPEXPDocumentKind.IP
+    if _EXP_FILENAME_RE.match(filename):
+        return UDIPEXPDocumentKind.EXP
+    return None
+
+
+def _classification_document_number(
+    *,
+    saved_document: SavedDocument,
+    analysis,
+    filename_kind: UDIPEXPDocumentKind,
+) -> str | None:
+    analyzed_number = analysis.extracted_document_number
+    analyzed_kind = document_kind_from_number(analyzed_number) if analyzed_number else None
+    if analyzed_kind == filename_kind and _document_number_confidence_is_acceptable(
+        document_kind=analyzed_kind,
+        confidence=analysis.extracted_document_number_confidence,
+    ):
+        return analyzed_number
+    return _document_number_from_filename(saved_document)
+
+
+def _document_number_confidence_is_acceptable(
+    *,
+    document_kind: UDIPEXPDocumentKind | None,
+    confidence: float | None,
+) -> bool:
+    if document_kind is None:
+        return False
+    threshold = _REQUIRED_DOCUMENT_NUMBER_CONFIDENCE[document_kind]
+    return confidence is None or confidence >= threshold
 
 
 def _document_type(document_kind: UDIPEXPDocumentKind | None) -> str:

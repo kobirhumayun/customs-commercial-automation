@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True, frozen=True)
@@ -13,6 +13,7 @@ class WorkbookHeader:
 class WorkbookRow:
     row_index: int
     values: dict[int, str]
+    number_formats: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)

@@ -607,6 +607,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 ### Initial live-document validation boundary
 - the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
+- the live `ud_ip_exp` reader processes only PDFs whose filenames begin `UD-`, begin `IP-`, or begin with one or more digits followed by `-EXP`; all other PDFs are skipped before UD/IP/EXP document analysis
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
 - live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
 - if a live UD/IP/EXP attachment filename explicitly follows `UD-LC-<suffix>` or `UD-SC-<suffix>`, that suffix is a sanity check only and must match the end of the ERP-derived LC/SC number; mismatch hard-blocks with attachment-level evidence, while filenames without that explicit pattern are not used for lookup
@@ -616,6 +617,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - the extracted UD LC/SC table date must match the ERP LC/SC date before workbook writes are allowed
 - the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
 - structured UD quantity extraction must aggregate rows for supplier `PIONEER DENIM LIMITED` or `PIONEER DENIM LTD`, applying supplier `DO` fill-down in the supplier column before filtering
+- structured UD quantity validation derives the workbook quantity unit from the `Quantity of Fabrics (Yds/Mtr)` cell number format: `#,###.00 "Mtr"` means `MTR`, and all other formats default to `YDS`
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
 - when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
 - this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
@@ -645,6 +647,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - starting from the first blank-UD row, sum workbook `Amount` column 6 until it matches the extracted UD LC/SC value numerically within tolerance
 - the matched contiguous row range is the only target row group for the mail
 - sum workbook quantities for only that target row group by unit
+- derive workbook quantity units for the selected target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
 - compare each workbook unit total against the corresponding UD supplier quantity total
 - pass quantity validation only when UD quantity equals workbook quantity or the UD excess is at least 50 yards/meters; hard-block when UD quantity is less than workbook quantity or excess is greater than zero but below 50
 - write the UD/AM number, UD/AM date, and current workflow receive date to matched rows only if value and quantity rules are satisfied

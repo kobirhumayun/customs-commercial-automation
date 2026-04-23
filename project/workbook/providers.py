@@ -8,6 +8,8 @@ from typing import Protocol
 
 from project.workbook.models import WorkbookHeader, WorkbookRow, WorkbookSnapshot
 
+_PER_CELL_NUMBER_FORMAT_HEADERS = {"Quantity of Fabrics (Yds/Mtr)"}
+
 
 class WorkbookSnapshotProvider(Protocol):
     def load_snapshot(self) -> WorkbookSnapshot | None:
@@ -49,6 +51,7 @@ class JsonManifestWorkbookSnapshotProvider:
             WorkbookRow(
                 row_index=_require_int(item, "row_index", "row"),
                 values=_parse_row_values(item.get("values")),
+                number_formats=_parse_row_values(item.get("number_formats", {})),
             )
             for item in rows_payload
         ]
@@ -124,27 +127,48 @@ def _build_snapshot_from_book(book) -> WorkbookSnapshot:
         for index, value in enumerate(header_values, start=1)
         if str(value or "").strip()
     ]
+    per_cell_number_format_columns = {
+        header.column_index
+        for header in headers
+        if header.text in _PER_CELL_NUMBER_FORMAT_HEADERS
+    }
 
     rows: list[WorkbookRow] = []
     if last_row >= 3:
-        body_values = sheet.range((3, 1), (last_row, last_column)).value
-        if body_values is None:
-            body_matrix: list[list[object]] = []
-        elif last_row == 3 and not isinstance(body_values, list):
-            body_matrix = [[body_values]]
-        elif body_values and isinstance(body_values, list) and body_values and not isinstance(body_values[0], list):
-            body_matrix = [body_values]
-        else:
-            body_matrix = body_values or []
+        body_range = sheet.range((3, 1), (last_row, last_column))
+        body_matrix = _coerce_range_matrix(body_range.value, row_count=last_row - 2)
+        number_format_matrix = _coerce_range_matrix(getattr(body_range, "number_format", None), row_count=last_row - 2)
 
         for row_offset, row_values in enumerate(body_matrix, start=3):
             values = {
                 column_index: _stringify_cell(cell_value)
                 for column_index, cell_value in enumerate(row_values, start=1)
             }
-            rows.append(WorkbookRow(row_index=row_offset, values=values))
+            number_formats = {
+                column_index: _stringify_cell(number_format)
+                for column_index, number_format in enumerate(
+                    number_format_matrix[row_offset - 3] if row_offset - 3 < len(number_format_matrix) else [],
+                    start=1,
+                )
+                if _stringify_cell(number_format)
+            }
+            for column_index in per_cell_number_format_columns:
+                number_format = _stringify_cell(sheet.range((row_offset, column_index)).number_format)
+                if number_format:
+                    number_formats[column_index] = number_format
+            rows.append(WorkbookRow(row_index=row_offset, values=values, number_formats=number_formats))
 
     return WorkbookSnapshot(sheet_name=sheet.name, headers=headers, rows=rows)
+
+
+def _coerce_range_matrix(value: object, *, row_count: int) -> list[list[object]]:
+    if value is None:
+        return []
+    if row_count == 1 and not isinstance(value, list):
+        return [[value]]
+    if isinstance(value, list) and value and not isinstance(value[0], list):
+        return [value]
+    return value or []
 
 
 def _stringify_cell(value: object) -> str:

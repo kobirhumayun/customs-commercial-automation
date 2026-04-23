@@ -202,11 +202,13 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
 - Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.
+- The UD/IP/EXP document reader is filename-gated: only PDFs beginning `UD-`, beginning `IP-`, or beginning with one or more digits followed by `-EXP` are processed as UD/IP/EXP documents.
 - Explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is a guardrail only: it must agree with the ERP-derived LC/SC suffix, and it must never replace email-body file-number plus ERP family resolution.
 - Structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`.
 - Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
 - Structured UD validation requires the extracted LC/SC date to match ERP `LC DT.`, then selects blank-UD workbook rows by a contiguous ascending-row sum of workbook `Amount` column 6 matching the extracted UD/AM value.
 - Structured UD quantity validation aggregates Pioneer Denim supplier rows by unit and compares only against the value-selected workbook row group.
+- Workbook quantity units for structured UD validation come from the workbook quantity cell number format: `#,###.00 "Mtr"` means `MTR`; other formats default to `YDS`.
 - Successful structured UD writes stage `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; dates are written as `DD/MM/YYYY`.
 - Legacy UD payloads without structured value evidence may still use the older deterministic quantity-combination allocation path.
 - IP/EXP processing remains blocked until business rules are finalized in durable docs.

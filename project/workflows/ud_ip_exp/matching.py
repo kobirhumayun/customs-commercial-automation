@@ -11,6 +11,7 @@ from project.workflows.ud_ip_exp.payloads import normalize_quantity_unit
 
 DEFAULT_UD_EXCESS_THRESHOLD = Decimal("50")
 DEFAULT_UD_VALUE_TOLERANCE = Decimal("0.01")
+MTR_QUANTITY_NUMBER_FORMAT = '#,###.00 "Mtr"'
 
 
 @dataclass(slots=True, frozen=True)
@@ -79,7 +80,7 @@ def collect_ud_candidate_rows(
         parsed_quantity = _parse_quantity(raw_quantity)
         if parsed_quantity is None:
             continue
-        parsed_unit = _parse_quantity_unit(raw_quantity) or requested_unit
+        parsed_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
         if parsed_unit != requested_unit:
             continue
 
@@ -239,8 +240,9 @@ def allocate_structured_ud_rows(
         amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
         if amount is None:
             break
-        quantity = _parse_quantity(workbook_row.values.get(mapping["quantity_fabrics"], "")) or Decimal("0")
-        quantity_unit = _parse_quantity_unit(workbook_row.values.get(mapping["quantity_fabrics"], "")) or ""
+        raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
+        quantity = _parse_quantity(raw_quantity) or Decimal("0")
+        quantity_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
         selected_rows.append(
             UDCandidateRow(
                 row_index=workbook_row.row_index,
@@ -455,6 +457,24 @@ def _parse_quantity_unit(value: str) -> str | None:
         if token in normalized:
             return normalize_quantity_unit(token)
     return None
+
+
+def _workbook_quantity_unit(
+    workbook_row,
+    quantity_column_index: int,
+    raw_quantity: str,
+) -> str:
+    if quantity_column_index in workbook_row.number_formats:
+        return (
+            "MTR"
+            if _is_mtr_quantity_number_format(workbook_row.number_formats.get(quantity_column_index, ""))
+            else "YDS"
+        )
+    return _parse_quantity_unit(raw_quantity) or "YDS"
+
+
+def _is_mtr_quantity_number_format(number_format: str) -> bool:
+    return number_format.strip().upper() == MTR_QUANTITY_NUMBER_FORMAT.upper()
 
 
 def _parse_decimal(value: str) -> Decimal | None:

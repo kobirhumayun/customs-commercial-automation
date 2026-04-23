@@ -22,6 +22,7 @@ from project.workbook import WorkbookRow, WorkbookSnapshot, resolve_ud_ip_exp_st
 from project.workflows.ud_ip_exp.document_classification import (
     ClassifiedUDIPEXPDocumentSet,
     classify_saved_ud_ip_exp_documents,
+    is_processable_ud_ip_exp_filename,
 )
 from project.workflows.ud_ip_exp.payloads import UDIPEXPDocumentPayload
 from project.workflows.ud_ip_exp.structured_extraction import (
@@ -301,8 +302,18 @@ def _save_mail_pdfs_to_directory(
         for attachment in sorted(mail.attachments, key=lambda item: item.attachment_index)
         if attachment.normalized_filename.lower().endswith(".pdf")
     ]
-
+    processable_pdf_attachments = [
+        attachment
+        for attachment in pdf_attachments
+        if is_processable_ud_ip_exp_filename(attachment.normalized_filename)
+    ]
     for attachment in pdf_attachments:
+        if attachment not in processable_pdf_attachments:
+            decision_reasons.append(
+                f"Skipped attachment {attachment.normalized_filename} because its filename does not match UD/IP/EXP naming conventions."
+            )
+
+    for attachment in processable_pdf_attachments:
         destination_path = destination_directory / attachment.normalized_filename
         duplicate_in_mail = attachment.normalized_filename in seen_normalized_filenames
         existed_before = destination_path.exists()

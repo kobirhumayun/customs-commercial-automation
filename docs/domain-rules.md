@@ -198,6 +198,7 @@ Decision rules:
 - Mail-subject and PDF comparisons against ERP are advisory only until separately codified; ERP rows selected by extracted file numbers are the final phase-1 source for workbook values and folder path construction.
 - `ud_ip_exp` uses the same email-body file-number extraction, ERP row lookup, and one-family consistency contract as `export_lc_sc`; the email subject is not authoritative for any `ud_ip_exp` processing step.
 - For `ud_ip_exp`, ERP family fields selected from body file numbers drive attachment storage and workbook-family context. PDF-derived LC/SC values are supporting validation evidence and must hard-block if they contradict the ERP family.
+- `ud_ip_exp` processes only PDFs whose filenames match one of the confirmed workflow patterns: names beginning `UD-`, names beginning `IP-`, or names beginning with one or more digits followed by `-EXP`. Other PDFs are skipped by the `ud_ip_exp` reader and are not used for UD/IP/EXP classification or extraction.
 - For `ud_ip_exp`, an explicit attachment filename pattern `UD-LC-<suffix>` or `UD-SC-<suffix>` is supporting validation evidence only. The suffix must match the end of the ERP LC/SC number selected by the email-body file number lookup; a mismatch hard-blocks as a likely renamed-against-wrong-family file. Filename suffixes must not be used to select the ERP row, workbook family, or UD LC table row.
 - ERP `Ship. Remarks`, together with the ERP LC/SC family context, is the primary linkage input for structured Base UD and UD Amendment PDF property extraction.
 
@@ -296,6 +297,7 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - The matched UD/AM LC table value is compared numerically to the sum of workbook `Amount` column 6.
 - Candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
+- Structured UD validation must identify the workbook quantity unit from the workbook cell number format for `Quantity of Fabrics (Yds/Mtr)`: if the format is `#,###.00 "Mtr"`, the unit is `MTR`; otherwise the unit defaults to `YDS`. This mirrors the export workflow, which writes MTR quantities by applying that number format.
 - Workbook quantities in the selected group are summed by unit and compared against structured UD supplier quantities for `PIONEER DENIM LIMITED` / `PIONEER DENIM LTD`.
 - Quantity validation passes only when UD quantity equals workbook quantity or UD excess is at least 50 yards/meters. UD quantity below workbook quantity or excess above zero but below 50 is a hard block.
 - Selected rows receive `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; all target cells must be blank before write.

@@ -162,6 +162,28 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.selected_candidate_id, "11-12")
         self.assertEqual(result.candidates[0].score_keys["workbook_value_sum"], "17375.8")
 
+    def test_allocate_structured_ud_rows_uses_number_format_for_numeric_only_workbook_quantity(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(
+                    row_index=475,
+                    values={1: "1550260400113", 2: "26548.0", 3: "", 4: "-", 5: "-", 6: "100882.4"},
+                    number_formats={2: '#,###.00 "Mtr"'},
+                ),
+            ]
+        )
+
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=snapshot,
+            lc_sc_number="1550260400113",
+            lc_sc_value=Decimal("100882.40"),
+            quantity_by_unit={"MTR": Decimal("26548")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "475")
+        self.assertEqual(result.candidates[0].score_keys["workbook_quantity_by_unit"], "MTR:26548")
+
     def test_allocate_structured_ud_rows_hard_blocks_when_value_group_not_found(self) -> None:
         result = allocate_structured_ud_rows(
             workbook_snapshot=_structured_snapshot(

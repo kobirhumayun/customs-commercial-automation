@@ -60,6 +60,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
 - Structured UD/AM value-first row selection by ERP-linked PDF LC value, with legacy combination-based UD allocation retained only for non-structured deterministic payloads.
+- Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and `<digits>-EXP*` PDFs.
 - Explicit UD-LC/UD-SC attachment filename suffixes validated only as sanity evidence against the ERP-derived LC/SC family, never as lookup input.
 - Ordered shared-column writing rules for UD/EXP/IP values and dates.
 - Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).
