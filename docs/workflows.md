@@ -614,6 +614,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - structured Base UD PDFs are identified by `UD Authenticating Authority` on page 1; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority` on page 1
 - for structured Base UD and UD Amendment PDFs, the UD/AM number and UD/AM date come from page 1 table index 1, row index 1, columns 1 and 3 respectively
 - structured UD LC/SC table extraction must match rows by exact ERP `Ship. Remarks` when present/found, otherwise ERP `LC No.`; ERP `LC No.` matching is exact first and may fall back only to stripping leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, but internal spaces and all other characters must remain unchanged; ERP values are sourced from the email-body file number lookup
+- for structured UD Amendments only, the extracted LC value comes from the `Increased/Decreased` column unless that value is numeric zero; when it is zero, use the row's `Value` column because the LC is being included in the amendment for the first time
 - the extracted UD LC/SC table date must match the ERP LC/SC date before workbook writes are allowed
 - the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
 - structured UD quantity extraction must aggregate rows for supplier `PIONEER DENIM LIMITED` or `PIONEER DENIM LTD`, applying supplier `DO` fill-down in the supplier column before filtering

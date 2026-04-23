@@ -157,6 +157,34 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "69734.7")
         self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "21390"})
 
+    def test_amendment_uses_value_column_when_increased_decreased_value_is_zero(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][2]["rows"][1] = [
+            "7",
+            "201260400935",
+            "2026-03-09",
+            "USD 89,675.00",
+            "USD 0.00",
+            "USD 89,675.00",
+        ]
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis.extracted_lc_sc_value, "89675")
+        self.assertEqual(analysis.extracted_lc_sc_value_currency, "USD")
+        self.assertEqual(analysis.extracted_lc_sc_value_provenance["value_column_index"], 3)
+        self.assertEqual(
+            analysis.extracted_lc_sc_value_provenance["value_strategy"],
+            "amendment_zero_increased_decreased_used_value_column",
+        )
+
 
 def _base_report() -> dict:
     return {

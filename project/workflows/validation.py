@@ -665,6 +665,10 @@ def _advance_workbook_snapshot_for_staged_writes(
         row.row_index: dict(row.values)
         for row in workbook_snapshot.rows
     }
+    number_formats_by_index = {
+        row.row_index: dict(row.number_formats)
+        for row in workbook_snapshot.rows
+    }
     for operation in staged_write_operations:
         column_index = column_indices_by_key.get(operation.column_key)
         if column_index is None:
@@ -673,9 +677,16 @@ def _advance_workbook_snapshot_for_staged_writes(
         row_values[column_index] = (
             "" if operation.expected_post_write_value is None else str(operation.expected_post_write_value)
         )
+        if operation.number_format:
+            row_number_formats = number_formats_by_index.setdefault(operation.row_index, {})
+            row_number_formats[column_index] = operation.number_format
 
     updated_rows = [
-        WorkbookRow(row_index=row_index, values=rows_by_index[row_index])
+        WorkbookRow(
+            row_index=row_index,
+            values=rows_by_index[row_index],
+            number_formats=number_formats_by_index.get(row_index, {}),
+        )
         for row_index in sorted(rows_by_index)
     ]
     return WorkbookSnapshot(

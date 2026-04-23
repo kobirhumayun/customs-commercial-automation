@@ -167,6 +167,7 @@ def _extract_lc_table_row(
             tables=target_tables,
             exact_identifier=exact_identifier,
             identifier_source=identifier_source,
+            document_subtype=document_subtype,
             context=context,
             value_column=value_column,
         )
@@ -180,6 +181,7 @@ def _find_lc_table_row_for_identifier(
     tables: list[dict[str, Any]],
     exact_identifier: str,
     identifier_source: str,
+    document_subtype: str,
     context: StructuredUDExtractionContext,
     value_column: int,
 ) -> dict[str, Any] | None:
@@ -197,7 +199,11 @@ def _find_lc_table_row_for_identifier(
             if match_strategy is None:
                 continue
             raw_date = _clean_cell(row[2] if len(row) > 2 else "")
-            raw_value = _clean_cell(row[value_column])
+            raw_value, effective_value_column, value_strategy = _lc_value_cell(
+                row=row,
+                document_subtype=document_subtype,
+                configured_value_column=value_column,
+            )
             amount, currency = _parse_money(raw_value)
             if amount is None:
                 continue
@@ -215,10 +221,27 @@ def _find_lc_table_row_for_identifier(
                     "table_identifier": identifier,
                     "identifier_source": identifier_source,
                     "match_strategy": match_strategy,
+                    "value_column_index": effective_value_column,
+                    "value_strategy": value_strategy,
                     "extraction_method": "structured_table",
                 },
             }
     return None
+
+
+def _lc_value_cell(
+    *,
+    row: list[str],
+    document_subtype: str,
+    configured_value_column: int,
+) -> tuple[str, int, str]:
+    raw_value = _clean_cell(row[configured_value_column])
+    if document_subtype != "ud_amendment":
+        return raw_value, configured_value_column, "configured_value_column"
+    amount, _currency = _parse_money(raw_value)
+    if amount != Decimal("0") or len(row) <= 3:
+        return raw_value, configured_value_column, "amendment_increased_decreased_column"
+    return _clean_cell(row[3]), 3, "amendment_zero_increased_decreased_used_value_column"
 
 
 def _identifier_match_strategy(*, expected: str, actual: str, identifier_source: str) -> str | None:
