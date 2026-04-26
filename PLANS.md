@@ -63,7 +63,8 @@ Goal: support shared-column population and quantity/value matching rules.
 - Structured UD/AM LC row matching keeps `Ship. Remarks` exact-only and permits ERP `LC No.` fallback matching only by stripping leading zeros from the left side; leading/trailing spaces may be trimmed, but internal spaces and all other characters remain unchanged.
 - Structured UD Amendment value extraction uses `Increased/Decreased` unless that value is numeric zero, in which case the matched row's `Value` column is used because the LC is newly included in the amendment.
 - Structured UD quantity validation uses workbook quantity cell number formats as the unit source and preserves those formats across staged in-memory batch advancement.
-- Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and `<digits>-EXP*` PDFs.
+- Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and EXP PDFs whose filename stem is exactly `<digits>-EXP`.
+- EXP descriptor variants such as `<digits>-EXP-INVOICE.pdf` are skipped to prefer the machine-generated text-layer EXP file.
 - Explicit UD-LC/UD-SC attachment filename suffixes validated only as sanity evidence against the ERP-derived LC/SC family, never as lookup input.
 - Ordered shared-column writing rules for UD/EXP/IP values and dates.
 - Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).

@@ -25,7 +25,7 @@ _REQUIRED_DOCUMENT_NUMBER_CONFIDENCE = {
     UDIPEXPDocumentKind.IP: 0.97,
     UDIPEXPDocumentKind.EXP: 0.97,
 }
-_EXP_FILENAME_RE = re.compile(r"^\d+-EXP", re.IGNORECASE)
+_EXP_FILENAME_RE = re.compile(r"^\d+-EXP$", re.IGNORECASE)
 
 
 @dataclass(slots=True, frozen=True)
@@ -141,12 +141,13 @@ def is_processable_ud_ip_exp_filename(normalized_filename: str) -> bool:
 
 def document_kind_from_filename(normalized_filename: str) -> UDIPEXPDocumentKind | None:
     filename = Path(normalized_filename).name.strip()
+    stem = Path(filename).stem.strip()
     upper_filename = filename.upper()
     if upper_filename.startswith("UD-"):
         return UDIPEXPDocumentKind.UD
     if upper_filename.startswith("IP-"):
         return UDIPEXPDocumentKind.IP
-    if _EXP_FILENAME_RE.match(filename):
+    if _EXP_FILENAME_RE.fullmatch(stem):
         return UDIPEXPDocumentKind.EXP
     return None
 

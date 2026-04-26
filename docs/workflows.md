@@ -607,7 +607,8 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 ### Initial live-document validation boundary
 - the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
-- the live `ud_ip_exp` reader processes only PDFs whose filenames begin `UD-`, begin `IP-`, or begin with one or more digits followed by `-EXP`; all other PDFs are skipped before UD/IP/EXP document analysis
+- the live `ud_ip_exp` reader processes only PDFs whose filenames begin `UD-`, begin `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP`; all other PDFs are skipped before UD/IP/EXP document analysis
+- EXP filenames with trailing descriptors, such as `123-EXP-INVOICE.pdf`, are skipped because the strict `123-EXP.pdf` form identifies the machine-generated text-layer file preferred for extraction accuracy
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
 - live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
 - if a live UD/IP/EXP attachment filename explicitly follows `UD-LC-<suffix>` or `UD-SC-<suffix>`, that suffix is a sanity check only and must match the end of the ERP-derived LC/SC number; mismatch hard-blocks with attachment-level evidence, while filenames without that explicit pattern are not used for lookup

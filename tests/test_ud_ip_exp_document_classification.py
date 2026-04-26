@@ -4,7 +4,11 @@ import unittest
 
 from project.documents import SavedDocumentAnalysis
 from project.models import SavedDocument
-from project.workflows.ud_ip_exp.document_classification import classify_saved_ud_ip_exp_documents
+from project.workflows.ud_ip_exp import UDIPEXPDocumentKind
+from project.workflows.ud_ip_exp.document_classification import (
+    classify_saved_ud_ip_exp_documents,
+    document_kind_from_filename,
+)
 
 
 class UDIPEXPDocumentClassificationTests(unittest.TestCase):
@@ -65,6 +69,12 @@ class UDIPEXPDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(len(result.documents), 1)
         self.assertEqual(result.saved_documents[0].document_type, "ip_document")
         self.assertEqual(result.saved_documents[0].extracted_document_number, "IP-LC-0113-ANANTA")
+
+    def test_exp_filename_must_end_strictly_with_exp_stem(self) -> None:
+        self.assertEqual(document_kind_from_filename("123-EXP.pdf"), UDIPEXPDocumentKind.EXP)
+        self.assertEqual(document_kind_from_filename("123-exp.PDF"), UDIPEXPDocumentKind.EXP)
+        self.assertIsNone(document_kind_from_filename("123-EXP-INVOICE.pdf"))
+        self.assertIsNone(document_kind_from_filename("123-EXP-SCAN.pdf"))
 
 
 if __name__ == "__main__":
