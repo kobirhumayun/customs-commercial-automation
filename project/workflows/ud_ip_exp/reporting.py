@@ -64,6 +64,8 @@ def _score_keys_report(score_keys: dict[str, Any]) -> dict[str, Any]:
 def _selection_final_decision(allocation_result: UDAllocationResult) -> str:
     if allocation_result.final_decision == "selected":
         return "selected"
+    if allocation_result.final_decision == "already_recorded":
+        return "already_recorded"
     if allocation_result.discrepancy_code == "ud_candidate_tie_after_full_tiebreak":
         return "hard_block_tie"
     return "hard_block"

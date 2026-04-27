@@ -87,25 +87,6 @@ def prepare_live_ud_ip_exp_documents(
         saved_documents=staged_classified.saved_documents,
         documents=resolution_documents,
     )
-    if not documents_override:
-        ambiguity_issue = _detect_live_ud_document_conflict(document_evidence)
-        if ambiguity_issue is not None:
-            _cleanup_directory(staging_directory)
-            return UDIPEXPLiveDocumentPreparationResult(
-                document_save_result=DocumentSaveResult(
-                    saved_documents=[],
-                    issues=[ambiguity_issue],
-                    decision_reasons=[
-                        "Attachment saving blocked because live UD document evidence was inconsistent within the mail."
-                    ],
-                ),
-                classified_documents=ClassifiedUDIPEXPDocumentSet(
-                    saved_documents=[],
-                    documents=[],
-                    decision_reasons=list(staged_classified.decision_reasons),
-                    discrepancies=list(staged_classified.discrepancies),
-                ),
-            )
     if verified_family is not None:
         family = _validate_documents_against_verified_family(
             verified_family=verified_family,
@@ -551,52 +532,6 @@ def _format_decimal_string(value) -> str:
     if "." in normalized:
         normalized = normalized.rstrip("0").rstrip(".")
     return normalized or "0"
-
-
-def _detect_live_ud_document_conflict(
-    document_evidence: list[dict[str, object]],
-) -> DocumentSaveIssue | None:
-    ud_evidence = [
-        item
-        for item in document_evidence
-        if str(item.get("document_kind") or "").upper() == "UD"
-    ]
-    if len(ud_evidence) <= 1:
-        return None
-
-    conflicting_fields: list[str] = []
-    document_dates = _distinct_nonblank_values(ud_evidence, "document_date")
-    if len(document_dates) > 1:
-        conflicting_fields.append("document_date")
-    quantities = _distinct_nonblank_values(ud_evidence, "quantity")
-    if len(quantities) > 1:
-        conflicting_fields.append("quantity")
-    if not conflicting_fields:
-        return None
-
-    return DocumentSaveIssue(
-        code="ud_live_document_conflict",
-        severity=FinalDecision.HARD_BLOCK,
-        message="Live UD document evidence is inconsistent across attachments for the same mail.",
-        details={
-            "conflicting_fields": conflicting_fields,
-            "document_dates": document_dates,
-            "quantities": quantities,
-            "document_evidence": ud_evidence,
-        },
-    )
-
-
-def _distinct_nonblank_values(
-    evidence_rows: list[dict[str, object]],
-    key: str,
-) -> list[str]:
-    values = {
-        str(item.get(key) or "").strip()
-        for item in evidence_rows
-        if str(item.get(key) or "").strip()
-    }
-    return sorted(values)
 
 
 def _move_staged_documents_to_final_directory(

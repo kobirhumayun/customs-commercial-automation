@@ -174,8 +174,6 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
             missing_fields.append("document_date")
         if not document.lc_sc_number.value.strip():
             missing_fields.append("lc_sc_number")
-        if document.quantity is None:
-            missing_fields.append("quantity")
         if _is_structured_bgmea_ud(document):
             if document.lc_sc_date is None or not document.lc_sc_date.value.strip():
                 missing_fields.append("lc_sc_date")
@@ -183,6 +181,8 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
                 missing_fields.append("lc_sc_value")
             if not document.quantity_by_unit:
                 missing_fields.append("quantity_by_unit")
+        elif document.quantity is None:
+            missing_fields.append("quantity")
         if missing_fields:
             missing_by_document.append(
                 {
@@ -221,11 +221,16 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
 def evaluate_ud_allocation_selected(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
     allocation = payload.ud_allocation_result
-    if allocation is not None and allocation.final_decision == "selected":
+    if allocation is not None and allocation.final_decision in {"selected", "already_recorded"}:
+        rationale = (
+            "UD workbook rows already contain the requested UD document values."
+            if allocation.final_decision == "already_recorded"
+            else "UD allocation selected deterministic workbook candidate rows."
+        )
         return RuleEvaluationResult(
             rule_id="ud_ip_exp.ud_allocation_selected.v1",
             outcome=FinalDecision.PASS,
-            rationale="UD allocation selected deterministic workbook candidate rows.",
+            rationale=rationale,
         )
 
     details = {

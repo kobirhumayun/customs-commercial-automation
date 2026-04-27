@@ -199,6 +199,36 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision, "hard_block")
         self.assertEqual(result.discrepancy_code, "ud_lc_value_match_unresolved")
 
+    def test_allocate_structured_ud_rows_recognizes_already_recorded_ud(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "LC-0043",
+                            2: "1000 YDS",
+                            3: "BGMEA/DHK/UD/2026/5483/003",
+                            4: "",
+                            5: "",
+                            6: "1000",
+                            7: "2026-03-31T00:00:00",
+                            8: "22/04/2026",
+                        },
+                    ),
+                ]
+            ),
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("1000"),
+            quantity_by_unit={"YDS": Decimal("1000")},
+            expected_shared_value="BGMEA/DHK/UD/2026/5483/003",
+            expected_ud_date="2026-03-31",
+        )
+
+        self.assertEqual(result.final_decision, "already_recorded")
+        self.assertEqual(result.final_decision_reason, "ud_already_recorded")
+        self.assertEqual(result.selected_candidate_id, "11")
+
     def test_allocate_structured_ud_rows_hard_blocks_quantity_excess_below_threshold(self) -> None:
         result = allocate_structured_ud_rows(
             workbook_snapshot=_structured_snapshot(

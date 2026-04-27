@@ -182,6 +182,7 @@ try {
     $runId = [string]$validate.Json.run_id
     $writePhaseStatus = [string]$validate.Json.write_phase_status
     $hardBlockCount = [int]$validate.Json.summary.hard_block
+    $stagedWriteOperationCount = [int]$validate.Json.staged_write_operation_count
 
     Write-Host ""
     Write-Host "Run ID: $runId" -ForegroundColor Green
@@ -198,6 +199,35 @@ try {
     if ($hardBlockCount -gt 0) {
         Write-Host "Validation produced $hardBlockCount hard block(s), but eligible mails will continue through the live cycle." -ForegroundColor Yellow
         Write-Host "Blocked mails will stay out of downstream print/mail-move handling for this run." -ForegroundColor Yellow
+    }
+
+    if ($stagedWriteOperationCount -eq 0) {
+        Write-Host "No workbook writes were staged; skipping print planning and print execution." -ForegroundColor Yellow
+
+        Write-Section "Execute Mail Moves"
+        $mailMove = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "execute-mail-moves", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId,
+            "--live-outlook"
+        )
+
+        Write-Section "Final Status"
+        $status = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "report-run-status", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId
+        )
+
+        Write-Host ""
+        Write-Host "Live cycle completed without workbook writes." -ForegroundColor Green
+        Write-Host "Run ID: $runId" -ForegroundColor Green
+        Write-Host "Write: $($status.Json.manual_verification.write_phase_status)" -ForegroundColor Green
+        Write-Host "Print: $($status.Json.manual_verification.print_phase_status)" -ForegroundColor Green
+        Write-Host "Mail move: $($status.Json.manual_verification.mail_move_phase_status)" -ForegroundColor Green
+        Finish-Script 0
     }
 
     Write-Section "Plan Print"

@@ -39,10 +39,11 @@ from project.workflows.export_lc_sc.staging import (
 )
 from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
-from project.workflows.ud_ip_exp.payloads import UDIPEXPWorkflowPayload
-from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider, select_preferred_ud_document
+from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, UDIPEXPWorkflowPayload
+from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider
 from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
 from project.workflows.ud_ip_exp.live_documents import prepare_live_ud_ip_exp_documents
+from project.erp.normalization import normalize_lc_sc_date
 
 
 @dataclass(slots=True, frozen=True)
@@ -372,6 +373,7 @@ def _evaluate_mail_for_workflow(
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, object, dict | None]:
     if descriptor.workflow_id == WorkflowId.UD_IP_EXP:
         return _evaluate_ud_ip_exp_mail(
+            descriptor=descriptor,
             run_report=run_report,
             rule_pack=rule_pack,
             mail=mail,
@@ -410,6 +412,7 @@ def _evaluate_mail_for_workflow(
 
 def _evaluate_ud_ip_exp_mail(
     *,
+    descriptor: WorkflowDescriptor,
     run_report: RunReport,
     rule_pack: LoadedRulePack,
     mail: EmailMessage,
@@ -421,24 +424,109 @@ def _evaluate_ud_ip_exp_mail(
     documents = list(workflow_documents or [])
     if not documents and ud_document_provider is not None:
         documents = ud_document_provider.get_documents(mail)
-    ud_document = select_preferred_ud_document(documents)
-    if ud_document is not None:
+    ud_documents = _ordered_ud_documents(documents)
+    if ud_documents:
         from project.workflows.ud_ip_exp.validation import assemble_ud_validation, workflow_date_from_started_at
 
-        assembly = assemble_ud_validation(
-            run_id=run_report.run_id,
-            mail=mail,
-            rule_pack=rule_pack,
-            ud_document=ud_document,
-            workbook_snapshot=workbook_snapshot,
-            documents=documents,
-            saved_documents=[],
+        ud_receive_date = workflow_date_from_started_at(
+            run_report.started_at_utc,
             state_timezone=run_report.state_timezone,
-            export_payload=export_payload,
-            ud_receive_date=workflow_date_from_started_at(
-                run_report.started_at_utc,
+        )
+        working_snapshot = workbook_snapshot
+        operation_index_start = 0
+        excluded_row_indexes: set[int] = set()
+        rule_evaluations: list[AggregatedRuleEvaluation] = []
+        staging_results: list[UDIPEXPWriteStagingResult] = []
+        ud_selection_items: list[dict] = []
+        staged_write_operations: list[WriteOperation] = []
+
+        for document_index, ud_document in enumerate(ud_documents):
+            current_documents = [
+                document
+                for document in documents
+                if not isinstance(document, UDDocumentPayload)
+            ] + [ud_document]
+            assembly = assemble_ud_validation(
+                run_id=run_report.run_id,
+                mail=mail,
+                rule_pack=rule_pack,
+                ud_document=ud_document,
+                workbook_snapshot=working_snapshot,
+                documents=current_documents,
+                saved_documents=[],
                 state_timezone=run_report.state_timezone,
-            ),
+                export_payload=export_payload,
+                ud_receive_date=ud_receive_date,
+                operation_index_start=operation_index_start,
+                excluded_row_indexes=excluded_row_indexes,
+            )
+            rule_evaluations.append(assembly.rule_evaluation)
+            staging_results.append(assembly.staging_result)
+            ud_selection_items.append(
+                {
+                    "document_index": document_index,
+                    "document_number": ud_document.document_number.value,
+                    "document_date": ud_document.document_date.value if ud_document.document_date else None,
+                    "source_saved_document_id": ud_document.source_saved_document_id,
+                    "selection": assembly.ud_selection,
+                }
+            )
+
+            document_passed = (
+                assembly.rule_evaluation.final_decision != FinalDecision.HARD_BLOCK
+                and not assembly.staging_result.discrepancies
+            )
+            if document_passed:
+                staged_write_operations.extend(assembly.staging_result.staged_write_operations)
+                operation_index_start += len(assembly.staging_result.staged_write_operations)
+                excluded_row_indexes.update(
+                    operation.row_index
+                    for operation in assembly.staging_result.staged_write_operations
+                )
+                excluded_row_indexes.update(_selected_ud_selection_rows(assembly.ud_selection))
+                working_snapshot = _advance_workbook_snapshot_for_staged_writes(
+                    descriptor=descriptor,
+                    workbook_snapshot=working_snapshot,
+                    staged_write_operations=assembly.staging_result.staged_write_operations,
+                )
+
+        aggregated = _combine_aggregated_rule_evaluations(rule_evaluations)
+        any_staging_discrepancy = any(result.discrepancies for result in staging_results)
+        all_documents_passed = (
+            aggregated.final_decision != FinalDecision.HARD_BLOCK
+            and not any_staging_discrepancy
+        )
+        if all_documents_passed:
+            staging_result = UDIPEXPWriteStagingResult(
+                staged_write_operations=staged_write_operations,
+                discrepancies=[],
+                decision_reasons=[
+                    reason
+                    for result in staging_results
+                    for reason in result.decision_reasons
+                ],
+            )
+        else:
+            staging_result = UDIPEXPWriteStagingResult(
+                staged_write_operations=[],
+                discrepancies=[
+                    discrepancy
+                    for result in staging_results
+                    for discrepancy in result.discrepancies
+                ],
+                decision_reasons=[
+                    reason
+                    for result in staging_results
+                    for reason in result.decision_reasons
+                    if not reason.startswith("Staged UD shared-column write")
+                ] + [
+                    "UD multi-document staging returned no writes because at least one UD document hard-blocked."
+                ],
+            )
+
+        workflow_payload = UDIPEXPWorkflowPayload(
+            documents=documents,
+            export_payload=export_payload,
         )
         context = WorkflowValidationContext(
             run_id=run_report.run_id,
@@ -448,9 +536,9 @@ def _evaluate_ud_ip_exp_mail(
             state_timezone=run_report.state_timezone,
             operator_context=run_report.operator_context,
             mail=mail,
-            workflow_payload=assembly.workflow_payload,
+            workflow_payload=workflow_payload,
         )
-        return context, assembly.rule_evaluation, assembly.staging_result, assembly.ud_selection
+        return context, aggregated, staging_result, _build_ud_multi_selection_report(ud_selection_items)
 
     workflow_payload = UDIPEXPWorkflowPayload(documents=documents, export_payload=export_payload)
     context = WorkflowValidationContext(
@@ -473,6 +561,102 @@ def _evaluate_ud_ip_exp_mail(
         ),
         None,
     )
+
+
+def _ordered_ud_documents(documents: list) -> list[UDDocumentPayload]:
+    indexed_documents = [
+        (index, document)
+        for index, document in enumerate(documents)
+        if isinstance(document, UDDocumentPayload)
+    ]
+    return [
+        document
+        for _index, document in sorted(
+            indexed_documents,
+            key=lambda item: (
+                _ud_document_date_sort_key(item[1]),
+                item[0],
+            ),
+        )
+    ]
+
+
+def _ud_document_date_sort_key(document: UDDocumentPayload) -> str:
+    if document.document_date is None:
+        return "9999-12-31"
+    normalized = normalize_lc_sc_date(document.document_date.value)
+    return normalized or "9999-12-31"
+
+
+def _combine_aggregated_rule_evaluations(
+    evaluations: list[AggregatedRuleEvaluation],
+) -> AggregatedRuleEvaluation:
+    applied_rule_ids: list[str] = []
+    decision_reasons: list[str] = []
+    discrepancies = []
+    seen_warning = False
+    seen_hard_block = False
+    for evaluation in evaluations:
+        for rule_id in evaluation.applied_rule_ids:
+            if rule_id not in applied_rule_ids:
+                applied_rule_ids.append(rule_id)
+        decision_reasons.extend(evaluation.decision_reasons)
+        discrepancies.extend(evaluation.discrepancies)
+        if evaluation.final_decision == FinalDecision.WARNING:
+            seen_warning = True
+        if evaluation.final_decision == FinalDecision.HARD_BLOCK:
+            seen_hard_block = True
+    if seen_hard_block:
+        final_decision = FinalDecision.HARD_BLOCK
+    elif seen_warning:
+        final_decision = FinalDecision.WARNING
+    else:
+        final_decision = FinalDecision.PASS
+    return AggregatedRuleEvaluation(
+        applied_rule_ids=applied_rule_ids,
+        discrepancies=discrepancies,
+        final_decision=final_decision,
+        decision_reasons=decision_reasons or ["No rule discrepancies were emitted."],
+    )
+
+
+def _build_ud_multi_selection_report(selection_items: list[dict]) -> dict | None:
+    if not selection_items:
+        return None
+    if len(selection_items) == 1:
+        return selection_items[0]["selection"]
+    handled_decisions = [
+        item["selection"].get("final_decision")
+        for item in selection_items
+        if item["selection"] is not None
+    ]
+    all_handled = len(handled_decisions) == len(selection_items) and all(
+        decision in {"selected", "already_recorded"}
+        for decision in handled_decisions
+    )
+    all_selected = all(
+        item["selection"] is not None
+        and item["selection"].get("final_decision") == "selected"
+        for item in selection_items
+    )
+    return {
+        "document_count": len(selection_items),
+        "final_decision": "selected" if all_selected else "already_recorded" if all_handled else "hard_block",
+        "documents": selection_items,
+    }
+
+
+def _selected_ud_selection_rows(selection: dict | None) -> set[int]:
+    if not selection:
+        return set()
+    rows: set[int] = set()
+    for candidate in selection.get("candidates", []):
+        if not isinstance(candidate, dict) or not candidate.get("selected"):
+            continue
+        for row_index in candidate.get("row_indexes", []):
+            if isinstance(row_index, int):
+                rows.add(row_index)
+    return rows
 
 
 def _build_discrepancy_reports(

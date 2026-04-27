@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from itertools import combinations
 from typing import Any
 
+from project.erp.normalization import normalize_lc_sc_date
 from project.workbook import WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
 from project.workflows.ud_ip_exp.payloads import normalize_quantity_unit
 
@@ -211,6 +212,9 @@ def allocate_structured_ud_rows(
     lc_sc_value: Decimal | int | str,
     quantity_by_unit: dict[str, Decimal | int | str],
     header_mapping: dict[str, int] | None = None,
+    excluded_row_indexes: set[int] | None = None,
+    expected_shared_value: str | None = None,
+    expected_ud_date: str | None = None,
     value_tolerance: Decimal = DEFAULT_UD_VALUE_TOLERANCE,
     excess_threshold: Decimal = DEFAULT_UD_EXCESS_THRESHOLD,
 ) -> UDAllocationResult:
@@ -228,11 +232,30 @@ def allocate_structured_ud_rows(
 
     target_value = Decimal(str(lc_sc_value))
     expected_lc_sc = _normalize_match_text(lc_sc_number)
-    eligible_rows = [
+    excluded = set(excluded_row_indexes or set())
+    all_family_rows = [
         row
         for row in sorted(workbook_snapshot.rows, key=lambda item: item.row_index)
         if _normalize_match_text(row.values.get(mapping["lc_sc_no"], "")) == expected_lc_sc
-        and not row.values.get(mapping["ud_ip_shared"], "").strip()
+        and row.row_index not in excluded
+    ]
+    already_recorded_result = _allocate_already_recorded_structured_rows(
+        rows=all_family_rows,
+        mapping=mapping,
+        target_value=target_value,
+        quantity_by_unit=quantity_by_unit,
+        expected_shared_value=expected_shared_value,
+        expected_ud_date=expected_ud_date,
+        value_tolerance=value_tolerance,
+        excess_threshold=excess_threshold,
+    )
+    if already_recorded_result is not None:
+        return already_recorded_result
+
+    eligible_rows = [
+        row
+        for row in all_family_rows
+        if not row.values.get(mapping["ud_ip_shared"], "").strip()
     ]
     selected_rows: list[UDCandidateRow] = []
     running_value = Decimal("0")
@@ -335,6 +358,102 @@ def allocate_structured_ud_rows(
         final_decision_reason="selected_structured_lc_value_and_quantity",
         selected_candidate_id=candidate.candidate_id,
     )
+
+
+def _allocate_already_recorded_structured_rows(
+    *,
+    rows: list,
+    mapping: dict[str, int],
+    target_value: Decimal,
+    quantity_by_unit: dict[str, Decimal | int | str],
+    expected_shared_value: str | None,
+    expected_ud_date: str | None,
+    value_tolerance: Decimal,
+    excess_threshold: Decimal,
+) -> UDAllocationResult | None:
+    if expected_shared_value is None or "ud_ip_date" not in mapping:
+        return None
+    expected_ud_date_key = normalize_lc_sc_date(expected_ud_date or "")
+    if expected_ud_date_key is None:
+        return None
+
+    selected_rows: list[UDCandidateRow] = []
+    running_value = Decimal("0")
+    for workbook_row in rows:
+        if not _shared_value_matches(
+            workbook_row.values.get(mapping["ud_ip_shared"], ""),
+            expected_shared_value,
+        ):
+            if selected_rows:
+                break
+            continue
+        observed_date_key = normalize_lc_sc_date(workbook_row.values.get(mapping["ud_ip_date"], ""))
+        if observed_date_key != expected_ud_date_key:
+            if selected_rows:
+                break
+            continue
+        amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
+        if amount is None:
+            break
+        raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
+        quantity = _parse_quantity(raw_quantity) or Decimal("0")
+        quantity_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
+        selected_rows.append(
+            UDCandidateRow(
+                row_index=workbook_row.row_index,
+                lc_sc_number=workbook_row.values.get(mapping["lc_sc_no"], ""),
+                quantity=quantity,
+                quantity_unit=quantity_unit,
+                export_amount=amount,
+                ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
+                lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
+                lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
+            )
+        )
+        running_value += amount
+        if abs(running_value - target_value) <= value_tolerance:
+            break
+        if running_value > target_value + value_tolerance:
+            break
+
+    if not selected_rows or abs(running_value - target_value) > value_tolerance:
+        return None
+
+    quantity_totals = _quantity_totals_by_unit(selected_rows)
+    normalized_ud_quantities = {
+        normalize_quantity_unit(unit): Decimal(str(amount))
+        for unit, amount in quantity_by_unit.items()
+    }
+    quantity_error = _structured_quantity_error(
+        workbook_quantities=quantity_totals,
+        ud_quantities=normalized_ud_quantities,
+        excess_threshold=excess_threshold,
+    )
+    if quantity_error is not None:
+        return None
+
+    candidate = _structured_candidate(
+        selected_rows=selected_rows,
+        workbook_value_sum=running_value,
+        lc_sc_value=target_value,
+        workbook_quantities=quantity_totals,
+        ud_quantities=normalized_ud_quantities,
+        selected=True,
+        rejection_reason=None,
+    )
+    return UDAllocationResult(
+        required_quantity=_format_quantity_map(normalized_ud_quantities),
+        quantity_unit="MULTI",
+        candidate_count=1,
+        candidates=[candidate],
+        final_decision="already_recorded",
+        final_decision_reason="ud_already_recorded",
+        selected_candidate_id=candidate.candidate_id,
+    )
+
+
+def _shared_value_matches(observed_value: str, expected_value: str) -> bool:
+    return _normalize_match_text(observed_value) == _normalize_match_text(expected_value)
 
 
 def _build_allocation_candidates(

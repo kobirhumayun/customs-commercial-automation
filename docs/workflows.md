@@ -645,7 +645,8 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 
 ### UD allocation logic
 - extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
-- filter workbook rows to the ERP LC/SC family and exclude rows where `UD No. & IP No.` is already populated
+- first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
+- otherwise filter workbook rows to the ERP LC/SC family and exclude rows where `UD No. & IP No.` is already populated
 - sort candidate workbook rows by row index ascending
 - starting from the first blank-UD row, sum workbook `Amount` column 6 until it matches the extracted UD LC/SC value numerically within tolerance
 - the matched contiguous row range is the only target row group for the mail

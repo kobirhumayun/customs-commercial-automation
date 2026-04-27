@@ -15,6 +15,8 @@ from project.workflows.ud_ip_exp.payloads import (
     format_shared_column_values,
 )
 
+DATE_NUMBER_FORMAT = "dd/mm/yyyy"
+
 
 @dataclass(slots=True, frozen=True)
 class UDIPEXPStagingDiscrepancy:
@@ -39,6 +41,7 @@ def stage_ud_shared_column_operations(
     allocation_result: UDAllocationResult,
     workbook_snapshot: WorkbookSnapshot | None,
     ud_receive_date: str | None = None,
+    operation_index_start: int = 0,
 ) -> UDIPEXPWriteStagingResult:
     if workbook_snapshot is None:
         return UDIPEXPWriteStagingResult(
@@ -66,6 +69,15 @@ def stage_ud_shared_column_operations(
         (candidate for candidate in allocation_result.candidates if candidate.selected),
         None,
     )
+    if allocation_result.final_decision == "already_recorded" and selected_candidate is not None:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=[
+                f"Skipped UD shared-column write for {ud_document.document_number.value} "
+                "because it is already recorded in the workbook."
+            ],
+        )
     if allocation_result.final_decision != "selected" or selected_candidate is None:
         return UDIPEXPWriteStagingResult(
             staged_write_operations=[],
@@ -139,7 +151,7 @@ def stage_ud_shared_column_operations(
         )
 
     staged_write_operations: list[WriteOperation] = []
-    operation_index = 0
+    operation_index = operation_index_start
     for row_index in selected_candidate.row_indexes:
         for column_key, post_write_value in target_values.items():
             staged_write_operations.append(
@@ -161,6 +173,9 @@ def stage_ud_shared_column_operations(
                     expected_pre_write_value=None,
                     expected_post_write_value=post_write_value,
                     row_eligibility_checks=["target_cell_blank_by_construction"],
+                    number_format=DATE_NUMBER_FORMAT
+                    if column_key in {"ud_ip_date", "ud_recv_date"}
+                    else None,
                 )
             )
             operation_index += 1

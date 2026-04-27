@@ -93,6 +93,65 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 ("ud_recv_date", "22/04/2026"),
             ],
         )
+        self.assertEqual(
+            [(operation.column_key, operation.number_format) for operation in result.staged_write_operations],
+            [
+                ("ud_ip_shared", None),
+                ("ud_ip_date", "dd/mm/yyyy"),
+                ("ud_recv_date", "dd/mm/yyyy"),
+            ],
+        )
+
+    def test_stage_structured_ud_operations_noops_when_already_recorded(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={1: "LC-0043", 2: "1000", 3: "BGMEA/DHK/UD/2026/5483/003", 4: "", 5: "", 6: "1000", 7: "31/03/2026", 8: ""},
+                ),
+            ]
+        )
+        allocation = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            candidate_rows=[
+                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
+            ],
+        )
+        allocation = type(allocation)(
+            required_quantity=allocation.required_quantity,
+            quantity_unit=allocation.quantity_unit,
+            candidate_count=allocation.candidate_count,
+            candidates=allocation.candidates,
+            final_decision="already_recorded",
+            final_decision_reason="ud_already_recorded",
+            selected_candidate_id=allocation.selected_candidate_id,
+        )
+        ud_document = UDDocumentPayload(
+            document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+            document_date=DocumentExtractionField("2026-03-31"),
+            lc_sc_number=DocumentExtractionField("LC-0043"),
+            lc_sc_value=DocumentExtractionField("1000"),
+            quantity_by_unit={"YDS": Decimal("1000")},
+        )
+
+        result = stage_ud_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            ud_document=ud_document,
+            allocation_result=allocation,
+            workbook_snapshot=snapshot,
+            ud_receive_date="2026-04-22",
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies, [])
+        self.assertEqual(
+            result.decision_reasons,
+            [
+                "Skipped UD shared-column write for BGMEA/DHK/UD/2026/5483/003 because it is already recorded in the workbook."
+            ],
+        )
 
     def test_stage_ud_shared_column_operations_blocks_unselected_allocation(self) -> None:
         allocation = allocate_ud_rows(

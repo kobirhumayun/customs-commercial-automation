@@ -803,7 +803,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             ["UD-LC-9999-TWO"],
         )
 
-    def test_prepare_live_ud_ip_exp_documents_hard_blocks_conflicting_ud_quantities_within_same_family(self) -> None:
+    def test_prepare_live_ud_ip_exp_documents_allows_multiple_same_family_ud_quantities(self) -> None:
         mail = _mail(
             "entry-live-006",
             "UD same family conflicting quantity",
@@ -865,16 +865,17 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 analysis_provider=Provider(),
             )
 
-        self.assertEqual(len(result.document_save_result.issues), 1)
-        self.assertEqual(result.document_save_result.issues[0].code, "ud_live_document_conflict")
-        self.assertEqual(result.document_save_result.issues[0].details["conflicting_fields"], ["quantity"])
-        self.assertEqual(result.document_save_result.issues[0].details["quantities"], ["1000 YDS", "1200 YDS"])
+        self.assertEqual(result.document_save_result.issues, [])
         self.assertEqual(
-            [evidence["document_number"] for evidence in result.document_save_result.issues[0].details["document_evidence"]],
+            [document.document_number.value for document in result.classified_documents.documents],
             ["UD-LC-0043-ONE", "UD-LC-0043-TWO"],
         )
+        self.assertEqual(
+            [str(document.quantity.amount) for document in result.classified_documents.documents],
+            ["1000", "1200"],
+        )
 
-    def test_validate_run_snapshot_serializes_live_ud_date_conflict(self) -> None:
+    def test_validate_run_snapshot_processes_multiple_same_mail_ud_documents_in_date_order(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail(
             "entry-live-007",
@@ -924,7 +925,19 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                                 6: "",
                                 7: "",
                             },
-                        )
+                        ),
+                        WorkbookRow(
+                            row_index=12,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
                     ]
                 ),
                 attachment_content_provider=SimulatedAttachmentContentProvider(
@@ -937,19 +950,21 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 document_analysis_provider=Provider(),
             )
 
-        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
-        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
-        discrepancy = next(
-            item
-            for item in validation_result.mail_outcomes[0].discrepancies
-            if item["code"] == "ud_live_document_conflict"
-        )
-        self.assertEqual(discrepancy["details"]["conflicting_fields"], ["document_date"])
-        self.assertEqual(discrepancy["details"]["document_dates"], ["2026-04-01", "2026-04-02"])
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[0].discrepancies, [])
         self.assertEqual(
-            [evidence["document_number"] for evidence in discrepancy["details"]["document_evidence"]],
-            ["UD-LC-0043-ONE", "UD-LC-0043-TWO"],
+            [
+                (operation.row_index, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+            ],
+            [
+                (11, "UD-LC-0043-ONE"),
+                (12, "UD-LC-0043-TWO"),
+            ],
         )
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "selected")
 
     def test_validate_run_snapshot_hard_blocks_mixed_quality_ud_documents_with_stable_evidence(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
@@ -1029,7 +1044,12 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["required_quantity"], "1000")
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "hard_block")
+        self.assertEqual(
+            validation_result.mail_outcomes[0].ud_selection["documents"][1]["selection"]["required_quantity"],
+            "1000",
+        )
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[0]["extracted_document_number"],
             "UD-LC-0043-PARTIAL",

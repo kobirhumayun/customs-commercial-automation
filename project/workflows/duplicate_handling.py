@@ -9,6 +9,9 @@ DUPLICATE_IN_WORKBOOK_REASON_PATTERN = re.compile(
 DUPLICATE_IN_RUN_REASON_PATTERN = re.compile(
     r"^Skipped workbook append for (?P<file_number>P/\d{2}/\d{4}) because the file number was already staged earlier in this run\.$"
 )
+UD_DUPLICATE_IN_WORKBOOK_REASON_PATTERN = re.compile(
+    r"^Skipped UD shared-column write for .+ because it is already recorded in the workbook\.$"
+)
 
 
 def summarize_duplicate_decision_reasons(decision_reasons: list[str]) -> dict[str, int]:
@@ -16,6 +19,8 @@ def summarize_duplicate_decision_reasons(decision_reasons: list[str]) -> dict[st
     duplicate_in_run_file_count = 0
     for reason in decision_reasons:
         if DUPLICATE_IN_WORKBOOK_REASON_PATTERN.match(reason):
+            duplicate_in_workbook_file_count += 1
+        elif UD_DUPLICATE_IN_WORKBOOK_REASON_PATTERN.match(reason):
             duplicate_in_workbook_file_count += 1
         elif DUPLICATE_IN_RUN_REASON_PATTERN.match(reason):
             duplicate_in_run_file_count += 1

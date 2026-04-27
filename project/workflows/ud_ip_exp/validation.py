@@ -19,6 +19,7 @@ from project.workflows.ud_ip_exp.payloads import (
     UDDocumentPayload,
     UDIPEXPDocumentPayload,
     UDIPEXPWorkflowPayload,
+    format_shared_column_entry,
 )
 from project.workflows.ud_ip_exp.reporting import build_ud_selection_report
 from project.workflows.ud_ip_exp.staging import (
@@ -48,11 +49,14 @@ def assemble_ud_validation(
     state_timezone: str = "Asia/Dhaka",
     export_payload=None,
     ud_receive_date: str | None = None,
+    operation_index_start: int = 0,
+    excluded_row_indexes: set[int] | None = None,
 ) -> UDValidationAssemblyResult:
     allocation_result = _build_allocation_result(
         ud_document=ud_document,
         workbook_snapshot=workbook_snapshot,
         export_payload=export_payload,
+        excluded_row_indexes=excluded_row_indexes,
     )
     workflow_payload = UDIPEXPWorkflowPayload(
         documents=list(documents or [ud_document]),
@@ -82,6 +86,7 @@ def assemble_ud_validation(
         workbook_snapshot=workbook_snapshot,
         rule_evaluation=rule_evaluation,
         ud_receive_date=ud_receive_date,
+        operation_index_start=operation_index_start,
     )
     return UDValidationAssemblyResult(
         workflow_payload=workflow_payload,
@@ -100,6 +105,7 @@ def _build_allocation_result(
     ud_document: UDDocumentPayload,
     workbook_snapshot: WorkbookSnapshot | None,
     export_payload=None,
+    excluded_row_indexes: set[int] | None = None,
 ) -> UDAllocationResult | None:
     if workbook_snapshot is None:
         return None
@@ -111,6 +117,7 @@ def _build_allocation_result(
         workbook_snapshot=workbook_snapshot,
         header_mapping=header_mapping,
         export_payload=export_payload,
+        excluded_row_indexes=excluded_row_indexes,
     )
     if structured_result is not None:
         return structured_result
@@ -124,6 +131,11 @@ def _build_allocation_result(
         quantity_unit=ud_document.quantity.unit,
         header_mapping=header_mapping,
     )
+    excluded = set(excluded_row_indexes or set())
+    if excluded:
+        candidate_rows = [
+            row for row in candidate_rows if row.row_index not in excluded
+        ]
     return allocate_ud_rows(
         required_quantity=ud_document.quantity.amount,
         quantity_unit=ud_document.quantity.unit,
@@ -140,6 +152,7 @@ def _stage_after_rules(
     workbook_snapshot: WorkbookSnapshot | None,
     rule_evaluation: AggregatedRuleEvaluation,
     ud_receive_date: str | None,
+    operation_index_start: int,
 ) -> UDIPEXPWriteStagingResult:
     if allocation_result is not None and rule_evaluation.final_decision != FinalDecision.HARD_BLOCK:
         return stage_ud_shared_column_operations(
@@ -149,6 +162,7 @@ def _stage_after_rules(
             allocation_result=allocation_result,
             workbook_snapshot=workbook_snapshot,
             ud_receive_date=ud_receive_date,
+            operation_index_start=operation_index_start,
         )
 
     if (
@@ -171,6 +185,7 @@ def _stage_after_rules(
             ),
             workbook_snapshot=workbook_snapshot,
             ud_receive_date=ud_receive_date,
+            operation_index_start=operation_index_start,
         )
 
     return UDIPEXPWriteStagingResult(
@@ -193,6 +208,7 @@ def _build_structured_allocation_result(
     workbook_snapshot: WorkbookSnapshot,
     header_mapping: dict[str, int],
     export_payload,
+    excluded_row_indexes: set[int] | None = None,
 ) -> UDAllocationResult | None:
     if (
         ud_document.lc_sc_date is None
@@ -221,6 +237,12 @@ def _build_structured_allocation_result(
         lc_sc_value=Decimal(str(ud_document.lc_sc_value.value)),
         quantity_by_unit=ud_document.quantity_by_unit,
         header_mapping=header_mapping,
+        excluded_row_indexes=set(excluded_row_indexes or set()),
+        expected_shared_value=format_shared_column_entry(
+            ud_document.document_kind,
+            ud_document.document_number.value,
+        ),
+        expected_ud_date=ud_document.document_date.value if ud_document.document_date is not None else None,
     )
 
 

@@ -179,6 +179,55 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_reports[0].ud_selection["final_decision"], "selected")
         self.assertEqual(validation_result.discrepancy_reports, [])
 
+    def test_validate_run_snapshot_marks_already_recorded_ud_as_duplicate_noop(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
+        ud_document = UDDocumentPayload(
+            document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+            document_date=DocumentExtractionField("2026-03-31"),
+            lc_sc_number=DocumentExtractionField("LC-0043"),
+            lc_sc_date=DocumentExtractionField("2026-01-10"),
+            lc_sc_value=DocumentExtractionField("1000"),
+            quantity_by_unit={"YDS": Decimal("1000")},
+        )
+
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "LC-0043",
+                            2: "1000 YDS",
+                            3: "BGMEA/DHK/UD/2026/5483/003",
+                            4: "",
+                            5: "",
+                            6: "1000",
+                            7: "31/03/2026",
+                            8: "01/04/2026",
+                        },
+                    ),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider({mail.entry_id: ud_document}),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(validation_result.staged_write_plan, [])
+        self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "duplicate_only_noop")
+        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_write)
+        self.assertFalse(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "already_recorded")
+        self.assertEqual(
+            validation_result.mail_outcomes[0].ud_selection["final_decision_reason"],
+            "ud_already_recorded",
+        )
+
     def test_validate_run_snapshot_hard_blocks_mixed_ud_ip_exp_manifest_until_policy_resolved(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
@@ -222,6 +271,44 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             "EXP: EXP-001\nIP: IP-002",
         )
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
+
+    def test_validate_run_snapshot_stages_multiple_ud_documents_in_one_mail_without_reusing_rows(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-ONE AND TWO")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                    WorkbookRow(row_index=12, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {
+                    mail.entry_id: [
+                        _ud_document("UD-LC-0043-TWO", quantity=Decimal("1000"), document_date="2026-04-02"),
+                        _ud_document("UD-LC-0043-ONE", quantity=Decimal("1000"), document_date="2026-04-01"),
+                    ]
+                }
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(
+            [
+                (operation.operation_index_within_mail, operation.row_index, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+            ],
+            [
+                (0, 11, "UD-LC-0043-ONE"),
+                (1, 12, "UD-LC-0043-TWO"),
+            ],
+        )
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "selected")
 
     def test_validate_run_snapshot_for_ud_without_payload_hard_blocks(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
@@ -274,10 +361,15 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
 
 
-def _ud_document(document_number: str, *, quantity: Decimal | None) -> UDDocumentPayload:
+def _ud_document(
+    document_number: str,
+    *,
+    quantity: Decimal | None,
+    document_date: str = "2026-04-01",
+) -> UDDocumentPayload:
     return UDDocumentPayload(
         document_number=DocumentExtractionField(document_number),
-        document_date=DocumentExtractionField("2026-04-01"),
+        document_date=DocumentExtractionField(document_date),
         lc_sc_number=DocumentExtractionField("LC-0043"),
         quantity=UDIPEXPQuantity(amount=quantity, unit="YDS") if quantity is not None else None,
     )
@@ -331,6 +423,23 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
             WorkbookHeader(column_index=3, text="UD No. & IP No."),
             WorkbookHeader(column_index=4, text="L/C Amnd No."),
             WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+        ],
+        rows=rows,
+    )
+
+
+def _structured_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    return WorkbookSnapshot(
+        sheet_name="Sheet1",
+        headers=[
+            WorkbookHeader(column_index=1, text="L/C & S/C No."),
+            WorkbookHeader(column_index=2, text="Quantity of Fabrics (Yds/Mtr)"),
+            WorkbookHeader(column_index=3, text="UD No. & IP No."),
+            WorkbookHeader(column_index=4, text="L/C Amnd No."),
+            WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
         ],
         rows=rows,
     )
