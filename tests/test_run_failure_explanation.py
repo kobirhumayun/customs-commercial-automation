@@ -131,7 +131,7 @@ class RunFailureExplanationTests(unittest.TestCase):
             ["ud_ip_date", "ud_recv_date"],
         )
         self.assertEqual(cause["workbook_targets"][0]["required_pre_write_state"], "blank")
-        self.assertIn("Clear the mistakenly retained", cause["operator_hint"])
+        self.assertIn("Review the reported workbook row and target cells", cause["operator_hint"])
 
 
 if __name__ == "__main__":

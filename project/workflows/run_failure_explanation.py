@@ -258,8 +258,8 @@ def _operator_hint_for_code(code: str, details: dict[str, Any]) -> str:
         return "The workbook target did not match the required pre-write state."
     if code == "ud_shared_column_nonblank_policy_unresolved":
         return (
-            "Do not rerun as-is. Clear the mistakenly retained UD target date/value cells in the reported workbook "
-            "row, or restore the full previously written UD record, then run the workflow again."
+            "Do not rerun as-is. Review the reported workbook row and target cells, correct the non-blank values "
+            "according to the business record, then run the workflow again."
         )
     return "Review the discrepancy message and details for the exact failed contract."
 
