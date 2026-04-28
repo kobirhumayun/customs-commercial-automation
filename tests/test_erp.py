@@ -12,11 +12,17 @@ from project.erp import (
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
+from project.erp.normalization import normalize_lc_sc_date
 from project.erp.providers import _build_download_receipt
 from project.workflows.erp_inspection import inspect_erp_rows
 
 
 class ERPProviderTests(unittest.TestCase):
+    def test_normalize_lc_sc_date_rejects_unparseable_dates(self) -> None:
+        self.assertIsNone(normalize_lc_sc_date("2026-99-99"))
+        self.assertIsNone(normalize_lc_sc_date("not a date"))
+        self.assertEqual(normalize_lc_sc_date("2026-04-16T00:00:00"), "2026-04-16")
+
     def test_inspect_playwright_report_download_saves_debug_artifacts_and_download(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "erp-debug"

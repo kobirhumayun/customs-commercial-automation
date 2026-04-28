@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
+from project.erp.normalization import normalize_lc_sc_date
 from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
 from project.workbook import WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
 from project.workflows.ud_ip_exp.matching import UDAllocationResult
+from project.workflows.ud_ip_exp.parsing import is_bgmea_ud_am_document_number
 from project.workflows.ud_ip_exp.payloads import (
     UDDocumentPayload,
     UDIPEXPDocumentKind,
@@ -135,8 +137,8 @@ def stage_ud_shared_column_operations(
                     code="ud_shared_column_nonblank_policy_unresolved",
                     severity=FinalDecision.HARD_BLOCK,
                     message=(
-                        "Selected UD target row has a non-blank shared-column value; append and duplicate "
-                        "handling policy is not yet confirmed for phase 1."
+                        "Selected UD target row has a non-blank target cell; phase 1 does not write to "
+                        "any workbook target cell that already contains a value."
                     ),
                     details={
                         "selected_candidate_id": selected_candidate.candidate_id,
@@ -291,6 +293,17 @@ def _target_values(
     header_mapping: dict[str, int],
     ud_receive_date: str | None,
 ) -> dict[str, str] | UDIPEXPStagingDiscrepancy:
+    if not is_bgmea_ud_am_document_number(ud_document.document_number.value):
+        return UDIPEXPStagingDiscrepancy(
+            code="ud_required_field_invalid",
+            severity=FinalDecision.HARD_BLOCK,
+            message="UD workbook writes require an extracted BGMEA UD/AM document number.",
+            details={
+                "invalid_fields": ["document_number"],
+                "document_number": ud_document.document_number.value,
+                "expected_pattern": "BGMEA/<office>/<UD-or-AM>/...",
+            },
+        )
     values = {
         "ud_ip_shared": format_shared_column_entry(
             ud_document.document_kind,
@@ -329,18 +342,31 @@ def _target_values(
             message="Structured UD writes require a current workflow receive date.",
             details={"missing_fields": ["ud_receive_date"]},
         )
-    values["ud_ip_date"] = _format_ddmmyyyy(ud_document.document_date.value)
-    values["ud_recv_date"] = _format_ddmmyyyy(ud_receive_date)
+    ud_ip_date = _format_ddmmyyyy(ud_document.document_date.value)
+    recv_date = _format_ddmmyyyy(ud_receive_date)
+    invalid_fields = []
+    if ud_ip_date is None:
+        invalid_fields.append("document_date")
+    if recv_date is None:
+        invalid_fields.append("ud_receive_date")
+    if invalid_fields:
+        return UDIPEXPStagingDiscrepancy(
+            code="ud_required_field_invalid",
+            severity=FinalDecision.HARD_BLOCK,
+            message="Structured UD writes require parseable UD/AM and receive dates.",
+            details={
+                "invalid_fields": invalid_fields,
+                "document_date": ud_document.document_date.value,
+                "ud_receive_date": ud_receive_date,
+            },
+        )
+    values["ud_ip_date"] = ud_ip_date
+    values["ud_recv_date"] = recv_date
     return values
 
 
-def _format_ddmmyyyy(value: str) -> str:
-    normalized = value.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
-        try:
-            if fmt == "%Y-%m-%d":
-                return date.fromisoformat(normalized).strftime("%d/%m/%Y")
-            return datetime.strptime(normalized, fmt).date().strftime("%d/%m/%Y")
-        except ValueError:
-            continue
-    return normalized
+def _format_ddmmyyyy(value: str | object) -> str | None:
+    normalized_date = normalize_lc_sc_date(value)
+    if normalized_date is None:
+        return None
+    return date.fromisoformat(normalized_date).strftime("%d/%m/%Y")

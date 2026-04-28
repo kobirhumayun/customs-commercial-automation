@@ -1,6 +1,8 @@
 from project.models import FinalDecision
 from project.models.enums import RuleStage
 from project.rules.types import RuleDefinition, RuleDiscrepancy, RuleEvaluationResult
+from project.erp.normalization import normalize_lc_sc_date
+from project.workflows.ud_ip_exp.parsing import is_bgmea_ud_am_document_number
 from project.workflows.ud_ip_exp.payloads import (
     UDDocumentPayload,
     UDIPEXPDocumentKind,
@@ -166,17 +168,25 @@ def evaluate_ud_document_present(context) -> RuleEvaluationResult:
 def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
     missing_by_document = []
+    invalid_by_document = []
     for index, document in enumerate(_ud_documents(payload)):
         missing_fields = []
+        invalid_fields = []
         if not document.document_number.value.strip():
             missing_fields.append("document_number")
+        elif not is_bgmea_ud_am_document_number(document.document_number.value):
+            invalid_fields.append("document_number")
         if document.document_date is None or not document.document_date.value.strip():
             missing_fields.append("document_date")
+        elif normalize_lc_sc_date(document.document_date.value) is None:
+            invalid_fields.append("document_date")
         if not document.lc_sc_number.value.strip():
             missing_fields.append("lc_sc_number")
         if _is_structured_bgmea_ud(document):
             if document.lc_sc_date is None or not document.lc_sc_date.value.strip():
                 missing_fields.append("lc_sc_date")
+            elif normalize_lc_sc_date(document.lc_sc_date.value) is None:
+                invalid_fields.append("lc_sc_date")
             if document.lc_sc_value is None or not document.lc_sc_value.value.strip():
                 missing_fields.append("lc_sc_value")
             if not document.quantity_by_unit:
@@ -191,18 +201,24 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
                     "missing_fields": missing_fields,
                 }
             )
+        if invalid_fields:
+            invalid_by_document.append(
+                {
+                    "document_index": index,
+                    "document_number": document.document_number.value,
+                    "invalid_fields": invalid_fields,
+                }
+            )
 
-    if not missing_by_document:
+    if not missing_by_document and not invalid_by_document:
         return RuleEvaluationResult(
             rule_id="ud_ip_exp.ud_required_fields_present.v1",
             outcome=FinalDecision.PASS,
             rationale="UD document payloads contain the confirmed required fields.",
         )
-    return RuleEvaluationResult(
-        rule_id="ud_ip_exp.ud_required_fields_present.v1",
-        outcome=FinalDecision.HARD_BLOCK,
-        rationale="UD document payloads must contain all confirmed required fields.",
-        discrepancies=(
+    discrepancies = []
+    if missing_by_document:
+        discrepancies.append(
             RuleDiscrepancy(
                 code="ud_required_field_missing",
                 severity=FinalDecision.HARD_BLOCK,
@@ -213,8 +229,28 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
                     "mail_id": context.mail.mail_id,
                     "missing_by_document": missing_by_document,
                 },
-            ),
-        ),
+            )
+        )
+    if invalid_by_document:
+        discrepancies.append(
+            RuleDiscrepancy(
+                code="ud_required_field_invalid",
+                severity=FinalDecision.HARD_BLOCK,
+                message="One or more UD document payloads contain invalid confirmed required fields.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "invalid_by_document": invalid_by_document,
+                    "expected_document_number_pattern": "BGMEA/<office>/<UD-or-AM>/...",
+                },
+            )
+        )
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.ud_required_fields_present.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="UD document payloads must contain all confirmed required fields.",
+        discrepancies=tuple(discrepancies),
     )
 
 
@@ -342,8 +378,11 @@ def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
 
 
 def _is_structured_bgmea_ud(document: UDIPEXPDocumentPayload) -> bool:
-    value = document.document_number.value.upper()
-    return "/UD/" in value or "/AM/" in value
+    return (
+        document.lc_sc_date is not None
+        or document.lc_sc_value is not None
+        or bool(document.quantity_by_unit)
+    )
 
 
 RULE_DEFINITIONS = (

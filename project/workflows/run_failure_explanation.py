@@ -82,6 +82,7 @@ def _build_discrepancy_cause(
     category = _category_for_code(code)
     row_index = _optional_int(details.get("row_index"))
     column_key = _optional_string(details.get("column_key"))
+    file_numbers = list(outcome.file_numbers_extracted) if outcome is not None else []
     cause: dict[str, Any] = {
         "category": category,
         "code": code,
@@ -89,8 +90,18 @@ def _build_discrepancy_cause(
         "message": _optional_string(discrepancy.get("message")),
         "mail_id": mail_id,
         "subject": outcome.subject_raw if outcome is not None else None,
+        "file_numbers": file_numbers,
         "operator_hint": _operator_hint_for_code(code, details),
     }
+    if code == "ud_shared_column_nonblank_policy_unresolved":
+        cause["operator_summary"] = (
+            "The UD/IP/EXP workflow selected the correct workbook row, but one or more target cells "
+            "already contain values. Phase 1 blocks the mail because target cells must be blank before writing."
+        )
+        cause["workbook_targets"] = _ud_nonblank_workbook_targets(
+            details=details,
+            file_numbers=file_numbers,
+        )
     if code == "export_file_number_missing":
         cause["body_excerpt"] = _excerpt(str(details.get("body_text", "")))
     if row_index is not None or column_key is not None:
@@ -221,7 +232,7 @@ def _category_for_code(code: str) -> str:
         return "mail_validation"
     if code.startswith("document_"):
         return "document_storage"
-    if code.startswith("workbook_"):
+    if code.startswith("workbook_") or code == "ud_shared_column_nonblank_policy_unresolved":
         return "workbook_prevalidation"
     if code.startswith("print_"):
         return "print"
@@ -237,7 +248,37 @@ def _operator_hint_for_code(code: str, details: dict[str, Any]) -> str:
         if details.get("failure_reason") == "row_eligibility_failed":
             return "The selected append row was not fully safe; check for existing values in the reported row/column."
         return "The workbook target did not match the required pre-write state."
+    if code == "ud_shared_column_nonblank_policy_unresolved":
+        return (
+            "Do not rerun as-is. Clear the mistakenly retained UD target date/value cells in the reported workbook "
+            "row, or restore the full previously written UD record, then run the workflow again."
+        )
     return "Review the discrepancy message and details for the exact failed contract."
+
+
+def _ud_nonblank_workbook_targets(
+    *,
+    details: dict[str, Any],
+    file_numbers: list[str],
+) -> list[dict[str, Any]]:
+    target_rows = details.get("target_rows")
+    if not isinstance(target_rows, list):
+        return []
+    targets: list[dict[str, Any]] = []
+    for item in target_rows:
+        if not isinstance(item, dict):
+            continue
+        targets.append(
+            {
+                "row_index": _optional_int(item.get("row_index")),
+                "column_key": _optional_string(item.get("column_key")),
+                "observed_value": _optional_string(item.get("observed_value")),
+                "required_pre_write_state": "blank",
+                "failure_reason": "target_cell_already_contains_value",
+                "file_numbers": file_numbers,
+            }
+        )
+    return targets
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:

@@ -4564,7 +4564,7 @@ class CLITests(unittest.TestCase):
                     [
                         {
                             "entry_id": "entry-ud-001",
-                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_number": "BGMEA/DHK/UD/2026/5483/003",
                             "document_date": "2026-04-01",
                             "lc_sc_number": "LC-0043",
                             "quantity": "1000",
@@ -4719,7 +4719,7 @@ class CLITests(unittest.TestCase):
                         {
                             "entry_id": "entry-ud-001",
                             "document_kind": "UD",
-                            "document_number": "UD-LC-0043-ANANTA",
+                            "document_number": "BGMEA/DHK/UD/2026/5483/003",
                             "document_date": "2026-04-01",
                             "lc_sc_number": "LC-0043",
                             "quantity": "1000",
@@ -5074,7 +5074,7 @@ def _write_ud_saved_document_analysis_json(root: Path) -> Path:
             [
                 {
                     "normalized_filename": "UD-LC-0043-ANANTA.pdf",
-                    "document_number": "UD-LC-0043-ANANTA",
+                    "document_number": "BGMEA/DHK/UD/2026/5483/003",
                     "document_date": "2026-04-01",
                     "lc_sc_number": "LC-0043",
                     "quantity": "1000",

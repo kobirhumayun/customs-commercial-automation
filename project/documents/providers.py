@@ -1715,7 +1715,7 @@ def _normalize_pi_number(raw_value: str) -> str | None:
 
 def _normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
     normalized = _apply_ud_ip_exp_identifier_primitives(raw_value)
-    if re.fullmatch(r"BGMEA/DHK/(UD|AM)/.+", normalized):
+    if re.fullmatch(r"BGMEA/[A-Z]+/(UD|AM)/.+", normalized):
         return normalized
     match = _UD_IP_EXP_PREFIX_RE.match(normalized)
     if match is None:

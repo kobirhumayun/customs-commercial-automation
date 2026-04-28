@@ -58,7 +58,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1000",
@@ -101,7 +101,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-RENAMED-WRONG",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-9999",
                     extracted_quantity="1000",
@@ -154,7 +154,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-9999-ANANTA",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-9999",
                     extracted_quantity="1000",
@@ -204,7 +204,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 test_case.assertEqual(saved_document.normalized_filename, "UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf")
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0113-ANANTA CASUAL WEAR LTD",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/113",
                     extracted_document_date="2026-04-19",
                     extracted_lc_sc_number="LC-0113",
                     extracted_quantity="26548",
@@ -313,7 +313,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1000",
@@ -377,7 +377,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1000",
@@ -545,7 +545,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
         self.assertTrue(validation_result.mail_outcomes[1].eligible_for_mail_move)
 
-    def test_prepare_live_ud_ip_exp_documents_infers_lc_sc_from_document_number_when_field_missing(self) -> None:
+    def test_prepare_live_ud_ip_exp_documents_hard_blocks_when_lc_sc_field_missing(self) -> None:
         mail = _mail(
             "entry-live-002",
             "UD-LC-0043-ANANTA",
@@ -572,7 +572,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-ANANTA",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
                     extracted_document_date="2026-04-01",
                     extracted_quantity="1000",
                     extracted_quantity_unit="YDS",
@@ -591,9 +591,13 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 analysis_provider=Provider(),
             )
 
-        self.assertEqual(result.document_save_result.issues, [])
-        self.assertEqual(len(result.classified_documents.documents), 1)
-        self.assertEqual(result.classified_documents.documents[0].lc_sc_number.value, "LC-0043")
+        self.assertEqual(len(result.document_save_result.issues), 1)
+        self.assertEqual(result.document_save_result.issues[0].code, "document_storage_path_unresolved")
+        self.assertEqual(result.document_save_result.issues[0].details["lc_sc_numbers"], [])
+        self.assertEqual(
+            result.document_save_result.issues[0].details["document_evidence"][0]["document_number"],
+            "BGMEA/DHK/UD/2026/5483/003",
+        )
 
     def test_prepare_live_ud_ip_exp_documents_hard_blocks_mixed_live_document_families(self) -> None:
         mail = _mail(
@@ -626,7 +630,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
                     return SavedDocumentAnalysis(
                         analysis_basis="fixture",
-                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                         extracted_quantity="1000",
@@ -634,7 +638,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                     )
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-9999-TWO",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-9999",
                     extracted_quantity="1000",
@@ -668,7 +672,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 evidence["document_number"]
                 for evidence in result.document_save_result.issues[0].details["document_evidence"]
             ],
-            ["UD-LC-0043-ONE", "UD-LC-9999-TWO"],
+            ["BGMEA/DHK/UD/2026/5483/001", "BGMEA/DHK/UD/2026/5483/999"],
         )
         self.assertEqual(
             [
@@ -689,7 +693,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             def analyze(self, *, saved_document):
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-REFERENCE-ONLY",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
                     extracted_document_date="2026-04-01",
                     extracted_quantity="1000",
                     extracted_quantity_unit="YDS",
@@ -718,7 +722,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 "attachment_name": "ud-unresolved.pdf",
                 "normalized_filename": "ud-unresolved.pdf",
                 "document_kind": "UD",
-                "document_number": "UD-REFERENCE-ONLY",
+                "document_number": "BGMEA/DHK/UD/2026/5483/003",
                 "lc_sc_number": "",
                 "document_date": "2026-04-01",
                 "quantity": "1000 YDS",
@@ -742,7 +746,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
                     return SavedDocumentAnalysis(
                         analysis_basis="fixture",
-                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                         extracted_quantity="1000",
@@ -750,7 +754,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                     )
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-9999-TWO",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-9999",
                     extracted_quantity="1000",
@@ -800,7 +804,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(discrepancy["details"]["expected_lc_sc_number"], "LC-0043")
         self.assertEqual(
             [evidence["document_number"] for evidence in discrepancy["details"]["conflicting_document_evidence"]],
-            ["UD-LC-9999-TWO"],
+            ["BGMEA/DHK/UD/2026/5483/999"],
         )
 
     def test_prepare_live_ud_ip_exp_documents_allows_multiple_same_family_ud_quantities(self) -> None:
@@ -834,7 +838,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
                     return SavedDocumentAnalysis(
                         analysis_basis="fixture",
-                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                         extracted_quantity="1000",
@@ -842,7 +846,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                     )
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-TWO",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/002",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1200",
@@ -868,7 +872,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(result.document_save_result.issues, [])
         self.assertEqual(
             [document.document_number.value for document in result.classified_documents.documents],
-            ["UD-LC-0043-ONE", "UD-LC-0043-TWO"],
+            ["BGMEA/DHK/UD/2026/5483/001", "BGMEA/DHK/UD/2026/5483/002"],
         )
         self.assertEqual(
             [str(document.quantity.amount) for document in result.classified_documents.documents],
@@ -891,7 +895,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
                     return SavedDocumentAnalysis(
                         analysis_basis="fixture",
-                        extracted_document_number="UD-LC-0043-ONE",
+                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                         extracted_quantity="1000",
@@ -899,7 +903,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                     )
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-TWO",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/002",
                     extracted_document_date="2026-04-02",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1000",
@@ -959,8 +963,8 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 for operation in validation_result.staged_write_plan
             ],
             [
-                (11, "UD-LC-0043-ONE"),
-                (12, "UD-LC-0043-TWO"),
+                (11, "BGMEA/DHK/UD/2026/5483/001"),
+                (12, "BGMEA/DHK/UD/2026/5483/002"),
             ],
         )
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
@@ -982,13 +986,13 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 if saved_document.normalized_filename == "UD-LC-0043-PARTIAL.pdf":
                     return SavedDocumentAnalysis(
                         analysis_basis="fixture",
-                        extracted_document_number="UD-LC-0043-PARTIAL",
+                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                     )
                 return SavedDocumentAnalysis(
                     analysis_basis="fixture",
-                    extracted_document_number="UD-LC-0043-COMPLETE",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/002",
                     extracted_document_date="2026-04-01",
                     extracted_lc_sc_number="LC-0043",
                     extracted_quantity="1000",
@@ -1039,7 +1043,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             [
                 {
                     "document_index": 0,
-                    "document_number": "UD-LC-0043-PARTIAL",
+                    "document_number": "BGMEA/DHK/UD/2026/5483/001",
                     "missing_fields": ["quantity"],
                 }
             ],
@@ -1052,11 +1056,11 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         )
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[0]["extracted_document_number"],
-            "UD-LC-0043-PARTIAL",
+            "BGMEA/DHK/UD/2026/5483/001",
         )
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[1]["extracted_document_number"],
-            "UD-LC-0043-COMPLETE",
+            "BGMEA/DHK/UD/2026/5483/002",
         )
         self.assertEqual(validation_result.staged_write_plan, [])
 
@@ -1125,20 +1129,11 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         discrepancy = next(
             item
             for item in validation_result.mail_outcomes[0].discrepancies
-            if item["code"] == "ud_required_field_missing"
+            if item["code"] == "ud_document_number_pattern_mismatch"
         )
-        self.assertEqual(
-            discrepancy["details"]["missing_by_document"],
-            [
-                {
-                    "document_index": 0,
-                    "document_number": "UD-LC-0043-ANANTA",
-                    "missing_fields": ["document_date"],
-                }
-            ],
-        )
+        self.assertEqual(discrepancy["details"]["extracted_document_number"], "UD-LC-0043-ANANTA")
         self.assertIsNone(validation_result.mail_outcomes[0].saved_documents[0]["extracted_document_date"])
-        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["required_quantity"], "1000")
+        self.assertIsNone(validation_result.mail_outcomes[0].ud_selection)
         self.assertEqual(validation_result.staged_write_plan, [])
 
 

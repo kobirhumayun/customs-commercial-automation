@@ -61,7 +61,7 @@ def normalize_lc_sc_date(raw_value: object) -> str | None:
             return datetime.strptime(normalized, fmt).date().isoformat()
         except ValueError:
             continue
-    return normalized
+    return None
 
 
 def _shared_string_normalize(raw_value: str) -> str:

@@ -70,6 +70,76 @@ class UDIPEXPDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(result.saved_documents[0].document_type, "ip_document")
         self.assertEqual(result.saved_documents[0].extracted_document_number, "IP-LC-0113-ANANTA")
 
+    def test_matching_ud_filename_uses_ctg_structured_identifier_over_filename(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="saved-ud",
+            mail_id="mail-1",
+            attachment_name="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            normalized_filename="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            destination_path="D:/docs/UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            file_sha256="c" * 64,
+            save_decision="saved_new",
+            attachment_index=0,
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="structured_ud_layered_table",
+                    extracted_document_number="BGMEA/CTG/AM/2026/6425/020-010",
+                    extracted_document_number_confidence=1.0,
+                    extracted_document_date="2026-04-16",
+                    extracted_document_date_confidence=1.0,
+                )
+
+        result = classify_saved_ud_ip_exp_documents(
+            saved_documents=[saved_document],
+            analysis_provider=Provider(),
+        )
+
+        self.assertEqual(len(result.documents), 1)
+        self.assertEqual(
+            result.saved_documents[0].extracted_document_number,
+            "BGMEA/CTG/AM/2026/6425/020-010",
+        )
+        self.assertEqual(result.saved_documents[0].extracted_document_date, "2026-04-16")
+        self.assertEqual(result.documents[0].document_number.value, "BGMEA/CTG/AM/2026/6425/020-010")
+        self.assertEqual(result.documents[0].document_date.value, "2026-04-16")
+
+    def test_matching_ud_filename_does_not_fallback_to_filename_without_bgmea_identifier(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="saved-ud",
+            mail_id="mail-1",
+            attachment_name="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            normalized_filename="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            destination_path="D:/docs/UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            file_sha256="d" * 64,
+            save_decision="saved_new",
+            attachment_index=0,
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="layered_text",
+                    extracted_document_number=None,
+                    extracted_document_date="2026-04-16",
+                    extracted_document_date_confidence=1.0,
+                )
+
+        result = classify_saved_ud_ip_exp_documents(
+            saved_documents=[saved_document],
+            analysis_provider=Provider(),
+        )
+
+        self.assertEqual(result.documents, [])
+        self.assertIsNone(result.saved_documents[0].extracted_document_number)
+        self.assertEqual([item.code for item in result.discrepancies], ["ud_document_number_pattern_mismatch"])
+        self.assertEqual(
+            result.discrepancies[0].details["normalized_filename"],
+            "UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+        )
+
     def test_exp_filename_must_end_strictly_with_exp_stem(self) -> None:
         self.assertEqual(document_kind_from_filename("123-EXP.pdf"), UDIPEXPDocumentKind.EXP)
         self.assertEqual(document_kind_from_filename("123-exp.PDF"), UDIPEXPDocumentKind.EXP)

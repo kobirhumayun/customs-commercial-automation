@@ -5,6 +5,7 @@ import unittest
 from project.workflows.ud_ip_exp import (
     UDIPEXPDocumentKind,
     document_kind_from_number,
+    is_bgmea_ud_am_document_number,
     normalize_ud_ip_exp_document_number,
 )
 
@@ -37,6 +38,18 @@ class UDIPEXPParsingTests(unittest.TestCase):
     def test_document_kind_from_number_returns_prefix_kind(self) -> None:
         self.assertEqual(document_kind_from_number("EXP-9981"), UDIPEXPDocumentKind.EXP)
         self.assertIsNone(document_kind_from_number("INV-9981"))
+
+    def test_bgmea_document_numbers_accept_non_dhk_office_codes(self) -> None:
+        self.assertEqual(
+            normalize_ud_ip_exp_document_number("BGMEA/CTG/AM/2026/6425/020-010"),
+            "BGMEA/CTG/AM/2026/6425/020-010",
+        )
+        self.assertEqual(
+            document_kind_from_number("BGMEA/CTG/AM/2026/6425/020-010"),
+            UDIPEXPDocumentKind.UD,
+        )
+        self.assertTrue(is_bgmea_ud_am_document_number("BGMEA/CTG/AM/2026/6425/020-010"))
+        self.assertFalse(is_bgmea_ud_am_document_number("UD-LC-0127-COTTONEX FASHIONS LTD"))
 
 
 if __name__ == "__main__":

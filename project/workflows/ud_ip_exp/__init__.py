@@ -10,6 +10,7 @@ from project.workflows.ud_ip_exp.matching import (
 )
 from project.workflows.ud_ip_exp.parsing import (
     document_kind_from_number,
+    is_bgmea_ud_am_document_number,
     normalize_ud_ip_exp_document_number,
 )
 from project.workflows.ud_ip_exp.payloads import (
@@ -72,6 +73,7 @@ __all__ = [
     "document_kind_from_number",
     "format_shared_column_entry",
     "format_shared_column_values",
+    "is_bgmea_ud_am_document_number",
     "normalize_ud_ip_exp_document_number",
     "prepare_live_ud_ip_exp_documents",
     "stage_ip_exp_shared_column_operations",

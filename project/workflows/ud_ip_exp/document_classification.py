@@ -7,9 +7,13 @@ import re
 
 from project.documents.providers import NullSavedDocumentAnalysisProvider, SavedDocumentAnalysisProvider
 from project.erp.normalization import normalize_lc_sc_number
-from project.models import SavedDocument
+from project.models import FinalDecision, SavedDocument
 from project.workflows.export_lc_sc.document_classification import DocumentClassificationDiscrepancy
-from project.workflows.ud_ip_exp.parsing import document_kind_from_number, normalize_ud_ip_exp_document_number
+from project.workflows.ud_ip_exp.parsing import (
+    document_kind_from_number,
+    is_bgmea_ud_am_document_number,
+    normalize_ud_ip_exp_document_number,
+)
 from project.workflows.ud_ip_exp.payloads import (
     DocumentExtractionField,
     EXPDocumentPayload,
@@ -45,6 +49,7 @@ def classify_saved_ud_ip_exp_documents(
     annotated_documents: list[SavedDocument] = []
     documents: list[UDIPEXPDocumentPayload] = []
     decision_reasons: list[str] = []
+    discrepancies: list[DocumentClassificationDiscrepancy] = []
 
     for saved_document in saved_documents:
         filename_kind = document_kind_from_filename(saved_document.normalized_filename)
@@ -65,11 +70,13 @@ def classify_saved_ud_ip_exp_documents(
             continue
 
         analysis = provider.analyze(saved_document=saved_document)
-        document_number = _classification_document_number(
+        document_number, discrepancy = _classification_document_number(
             saved_document=saved_document,
             analysis=analysis,
             filename_kind=filename_kind,
         )
+        if discrepancy is not None:
+            discrepancies.append(discrepancy)
         document_kind = filename_kind
         annotated_document = replace(
             saved_document,
@@ -118,8 +125,8 @@ def classify_saved_ud_ip_exp_documents(
         saved_documents=annotated_documents,
         documents=documents,
         decision_reasons=decision_reasons,
-        discrepancies=[],
-    )
+            discrepancies=discrepancies,
+        )
 
 
 def _document_number_from_filename(saved_document: SavedDocument) -> str | None:
@@ -157,15 +164,32 @@ def _classification_document_number(
     saved_document: SavedDocument,
     analysis,
     filename_kind: UDIPEXPDocumentKind,
-) -> str | None:
+) -> tuple[str | None, DocumentClassificationDiscrepancy | None]:
     analyzed_number = analysis.extracted_document_number
     analyzed_kind = document_kind_from_number(analyzed_number) if analyzed_number else None
     if analyzed_kind == filename_kind and _document_number_confidence_is_acceptable(
         document_kind=analyzed_kind,
         confidence=analysis.extracted_document_number_confidence,
     ):
-        return analyzed_number
-    return _document_number_from_filename(saved_document)
+        if filename_kind != UDIPEXPDocumentKind.UD or is_bgmea_ud_am_document_number(analyzed_number):
+            return analyzed_number, None
+    if filename_kind == UDIPEXPDocumentKind.UD:
+        return None, DocumentClassificationDiscrepancy(
+            code="ud_document_number_pattern_mismatch",
+            severity=FinalDecision.HARD_BLOCK,
+            message=(
+                "UD/AM workbook writes require an extracted BGMEA UD/AM document number; "
+                "the attachment filename is not accepted as a fallback write value."
+            ),
+            details={
+                "attachment_name": saved_document.attachment_name,
+                "normalized_filename": saved_document.normalized_filename,
+                "analysis_basis": analysis.analysis_basis,
+                "extracted_document_number": analyzed_number,
+                "expected_pattern": "BGMEA/<office>/<UD-or-AM>/...",
+            },
+        )
+    return _document_number_from_filename(saved_document), None
 
 
 def _document_number_confidence_is_acceptable(

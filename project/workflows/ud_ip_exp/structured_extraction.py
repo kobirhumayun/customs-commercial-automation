@@ -399,7 +399,7 @@ def _raw_cell(value: object) -> str:
 
 
 def _extract_bgmea_number(value: str, target_token: str) -> str | None:
-    pattern = rf"BGMEA/DHK/{re.escape(target_token.strip('/'))}/[A-Z0-9./-]+"
+    pattern = rf"BGMEA/[A-Z]+/{re.escape(target_token.strip('/'))}/[A-Z0-9./-]+"
     match = re.search(pattern, value.upper())
     if match is None:
         return None

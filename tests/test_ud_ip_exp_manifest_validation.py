@@ -163,7 +163,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
                 ]
             ),
             ud_document_provider=MappingUDDocumentPayloadProvider(
-                {mail.entry_id: _ud_document("UD-LC-0043-ANANTA", quantity=Decimal("1000"))}
+                {mail.entry_id: _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000"))}
             ),
         )
 
@@ -244,7 +244,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             ud_document_provider=MappingUDDocumentPayloadProvider(
                 {
                     mail.entry_id: [
-                        _ud_document("UD-LC-0043-ANANTA", quantity=Decimal("1000")),
+                        _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
                         EXPDocumentPayload(
                             document_number=DocumentExtractionField("EXP-001"),
                             document_date=DocumentExtractionField("2026-04-02"),
@@ -289,8 +289,8 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             ud_document_provider=MappingUDDocumentPayloadProvider(
                 {
                     mail.entry_id: [
-                        _ud_document("UD-LC-0043-TWO", quantity=Decimal("1000"), document_date="2026-04-02"),
-                        _ud_document("UD-LC-0043-ONE", quantity=Decimal("1000"), document_date="2026-04-01"),
+                        _ud_document("BGMEA/DHK/UD/2026/5483/004", quantity=Decimal("1000"), document_date="2026-04-02"),
+                        _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000"), document_date="2026-04-01"),
                     ]
                 }
             ),
@@ -303,8 +303,8 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
                 for operation in validation_result.staged_write_plan
             ],
             [
-                (0, 11, "UD-LC-0043-ONE"),
-                (1, 12, "UD-LC-0043-TWO"),
+                (0, 11, "BGMEA/DHK/UD/2026/5483/003"),
+                (1, 12, "BGMEA/DHK/UD/2026/5483/004"),
             ],
         )
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
@@ -345,8 +345,8 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             ),
             ud_document_provider=MappingUDDocumentPayloadProvider(
                 {
-                    first_mail.entry_id: _ud_document("UD-LC-0043-ONE", quantity=Decimal("1000")),
-                    second_mail.entry_id: _ud_document("UD-LC-0043-TWO", quantity=Decimal("1000")),
+                    first_mail.entry_id: _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
+                    second_mail.entry_id: _ud_document("BGMEA/DHK/UD/2026/5483/004", quantity=Decimal("1000")),
                 }
             ),
         )

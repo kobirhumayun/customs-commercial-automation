@@ -109,6 +109,46 @@ class UDIPEXPRuleTests(unittest.TestCase):
             ["document_number", "document_date", "quantity"],
         )
 
+    def test_rule_pack_hard_blocks_invalid_ud_number_and_date(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        payload = UDIPEXPWorkflowPayload(
+            documents=[
+                UDDocumentPayload(
+                    document_number=DocumentExtractionField("UD-LC-0127-COTTONEX FASHIONS LTD"),
+                    document_date=DocumentExtractionField("2026-99-99"),
+                    lc_sc_number=DocumentExtractionField("LC-0127"),
+                    quantity=UDIPEXPQuantity(amount=Decimal("1000"), unit="YDS"),
+                )
+            ],
+            ud_allocation_result=allocate_ud_rows(
+                required_quantity=Decimal("1000"),
+                quantity_unit="YDS",
+                candidate_rows=[
+                    UDCandidateRow(
+                        row_index=11,
+                        lc_sc_number="LC-0127",
+                        quantity=Decimal("1000"),
+                        quantity_unit="YDS",
+                    )
+                ],
+            ),
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual([item.code for item in result.discrepancies], ["ud_required_field_invalid"])
+        self.assertEqual(
+            result.discrepancies[0].details["invalid_by_document"],
+            [
+                {
+                    "document_index": 0,
+                    "document_number": "UD-LC-0127-COTTONEX FASHIONS LTD",
+                    "invalid_fields": ["document_number", "document_date"],
+                }
+            ],
+        )
+
     def test_rule_pack_preserves_ud_allocation_tie_code(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
@@ -289,7 +329,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
 
 def _ud_document() -> UDDocumentPayload:
     return UDDocumentPayload(
-        document_number=DocumentExtractionField("UD-LC-0043-ANANTA"),
+        document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
         document_date=DocumentExtractionField("2026-04-01"),
         lc_sc_number=DocumentExtractionField("LC-0043"),
         quantity=UDIPEXPQuantity(amount=Decimal("1000"), unit="YDS"),

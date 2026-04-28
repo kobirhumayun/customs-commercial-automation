@@ -157,6 +157,28 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "69734.7")
         self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "21390"})
 
+    def test_extracts_ctg_amendment_document_number_and_date(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][1]["rows"][1] = [
+            "Amendment no. (For office use only)",
+            "BGMEA/CTG/AM/2026/6425/020-010",
+            "Date",
+            "2026-04-16",
+        ]
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis.extracted_document_subtype, "ud_amendment")
+        self.assertEqual(analysis.extracted_document_number, "BGMEA/CTG/AM/2026/6425/020-010")
+        self.assertEqual(analysis.extracted_document_date, "2026-04-16")
+
     def test_amendment_uses_value_column_when_increased_decreased_value_is_zero(self) -> None:
         report = _amendment_report()
         report["pages"][0]["tables"][2]["rows"][1] = [

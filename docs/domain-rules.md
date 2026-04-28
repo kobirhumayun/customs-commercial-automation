@@ -100,6 +100,9 @@ Match rule: exact canonical equality.
 
 ### UD / IP / EXP document number profile
 Accepted raw forms may include mixed separators and spacing around prefixes (`UD`, `IP`, `EXP`).
+BGMEA-issued UD/AM numbers are also accepted in the form `BGMEA/<office>/<UD-or-AM>/...`; the office segment is not limited to `DHK` and may include values such as `CTG`.
+For UD workbook writes, the accepted UD/AM number must be extracted from the document as a BGMEA-issued `BGMEA/<office>/<UD-or-AM>/...` number. Attachment filenames such as `UD-LC-...` are guardrails/classification evidence only and must not be used as fallback workbook values; missing or non-matching extracted UD/AM numbers hard-block.
+UD/AM document dates and workflow receive dates used for workbook writes must parse as valid dates before staging. Unparseable date text must hard-block rather than being written as raw text.
 
 Normalization steps (exact order):
 1. apply shared primitives 1, 2, 3, 4, 5

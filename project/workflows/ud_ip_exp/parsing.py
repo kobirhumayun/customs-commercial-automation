@@ -8,6 +8,7 @@ from project.workflows.ud_ip_exp.payloads import UDIPEXPDocumentKind
 
 _PREFIX_RE = re.compile(r"^(UD|IP|EXP)(?:[\s./\\_:;,\-]+|$)(.*)$")
 _SEPARATOR_RE = re.compile(r"[\s/\\_\-]+")
+_BGMEA_UD_AM_RE = re.compile(r"BGMEA/[A-Z]+/(UD|AM)/.+")
 _UNICODE_DASHES = {
     "\u2010",
     "\u2011",
@@ -27,7 +28,7 @@ _ZERO_WIDTH = {
 
 def normalize_ud_ip_exp_document_number(raw_value: str) -> str | None:
     normalized = _apply_shared_identifier_primitives(raw_value)
-    bgmea_match = re.fullmatch(r"BGMEA/DHK/(UD|AM)/.+", normalized)
+    bgmea_match = _BGMEA_UD_AM_RE.fullmatch(normalized)
     if bgmea_match is not None:
         return normalized
 
@@ -55,6 +56,11 @@ def document_kind_from_number(canonical_document_number: str) -> UDIPEXPDocument
         return UDIPEXPDocumentKind(prefix)
     except ValueError:
         return None
+
+
+def is_bgmea_ud_am_document_number(raw_value: str) -> bool:
+    normalized = normalize_ud_ip_exp_document_number(raw_value)
+    return normalized is not None and _BGMEA_UD_AM_RE.fullmatch(normalized) is not None
 
 
 def _apply_shared_identifier_primitives(raw_value: str) -> str:

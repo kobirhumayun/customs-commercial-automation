@@ -155,7 +155,7 @@ class UDIPEXPValidationAssemblyTests(unittest.TestCase):
 
 def _ud_document(*, quantity: Decimal | None) -> UDDocumentPayload:
     return UDDocumentPayload(
-        document_number=DocumentExtractionField("UD-LC-0043-ANANTA"),
+        document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
         document_date=DocumentExtractionField("2026-04-01"),
         lc_sc_number=DocumentExtractionField("LC-0043"),
         quantity=UDIPEXPQuantity(amount=quantity, unit="YDS") if quantity is not None else None,

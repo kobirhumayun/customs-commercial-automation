@@ -36,7 +36,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ud_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            ud_document=_ud_document("UD-LC-0043-ANANTA"),
+            ud_document=_ud_document("BGMEA/DHK/UD/2026/5483/003"),
             allocation_result=allocation,
             workbook_snapshot=snapshot,
         )
@@ -45,7 +45,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual([operation.row_index for operation in result.staged_write_operations], [11, 19])
         self.assertEqual(
             [operation.expected_post_write_value for operation in result.staged_write_operations],
-            ["UD-LC-0043-ANANTA", "UD-LC-0043-ANANTA"],
+            ["BGMEA/DHK/UD/2026/5483/003", "BGMEA/DHK/UD/2026/5483/003"],
         )
         self.assertTrue(
             all(
@@ -100,6 +100,46 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 ("ud_ip_date", "dd/mm/yyyy"),
                 ("ud_recv_date", "dd/mm/yyyy"),
             ],
+        )
+
+    def test_stage_structured_ud_operations_blocks_existing_date_values_even_when_shared_cell_blank(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "31/03/2026", 8: "27/04/2026"},
+                ),
+            ]
+        )
+        allocation = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            candidate_rows=[
+                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
+            ],
+        )
+        ud_document = UDDocumentPayload(
+            document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+            document_date=DocumentExtractionField("2026-03-31"),
+            lc_sc_number=DocumentExtractionField("LC-0043"),
+            lc_sc_value=DocumentExtractionField("1000"),
+            quantity_by_unit={"YDS": Decimal("1000")},
+        )
+
+        result = stage_ud_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            ud_document=ud_document,
+            allocation_result=allocation,
+            workbook_snapshot=snapshot,
+            ud_receive_date="2026-04-28",
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies[0].code, "ud_shared_column_nonblank_policy_unresolved")
+        self.assertEqual(
+            [item["column_key"] for item in result.discrepancies[0].details["target_rows"]],
+            ["ud_ip_date", "ud_recv_date"],
         )
 
     def test_stage_structured_ud_operations_noops_when_already_recorded(self) -> None:
@@ -165,7 +205,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ud_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            ud_document=_ud_document("UD-LC-0043-ANANTA"),
+            ud_document=_ud_document("BGMEA/DHK/UD/2026/5483/003"),
             allocation_result=allocation,
             workbook_snapshot=_snapshot(rows=[]),
         )
@@ -187,7 +227,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ud_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            ud_document=_ud_document("UD-LC-0043-ANANTA"),
+            ud_document=_ud_document("BGMEA/DHK/UD/2026/5483/003"),
             allocation_result=allocation,
             workbook_snapshot=_snapshot(rows=[]),
         )
@@ -212,7 +252,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ud_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            ud_document=_ud_document("UD-LC-0043-ANANTA"),
+            ud_document=_ud_document("BGMEA/DHK/UD/2026/5483/003"),
             allocation_result=allocation,
             workbook_snapshot=snapshot,
         )
@@ -220,6 +260,64 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual(result.staged_write_operations, [])
         self.assertEqual(result.discrepancies[0].code, "ud_shared_column_nonblank_policy_unresolved")
         self.assertEqual(result.discrepancies[0].details["target_rows"][0]["observed_value"], "UD-OLD")
+
+    def test_stage_ud_shared_column_operations_blocks_filename_style_ud_number(self) -> None:
+        allocation = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            candidate_rows=[
+                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
+            ],
+        )
+
+        result = stage_ud_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            ud_document=_ud_document("UD-LC-0127-COTTONEX FASHIONS LTD"),
+            allocation_result=allocation,
+            workbook_snapshot=_snapshot(rows=[WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: ""})]),
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies[0].code, "ud_required_field_invalid")
+        self.assertEqual(result.discrepancies[0].details["invalid_fields"], ["document_number"])
+
+    def test_stage_structured_ud_operations_blocks_unparseable_dates(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
+            ]
+        )
+        allocation = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            candidate_rows=[
+                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
+            ],
+        )
+        ud_document = UDDocumentPayload(
+            document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
+            document_date=DocumentExtractionField("2026-99-99"),
+            lc_sc_number=DocumentExtractionField("LC-0043"),
+            lc_sc_value=DocumentExtractionField("1000"),
+            quantity_by_unit={"YDS": Decimal("1050")},
+        )
+
+        result = stage_ud_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            ud_document=ud_document,
+            allocation_result=allocation,
+            workbook_snapshot=snapshot,
+            ud_receive_date="not a date",
+        )
+
+        self.assertEqual(result.staged_write_operations, [])
+        self.assertEqual(result.discrepancies[0].code, "ud_required_field_invalid")
+        self.assertEqual(
+            result.discrepancies[0].details["invalid_fields"],
+            ["document_date", "ud_receive_date"],
+        )
 
     def test_stage_ud_shared_column_operations_blocks_invalid_header_mapping(self) -> None:
         snapshot = WorkbookSnapshot(
@@ -241,7 +339,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ud_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            ud_document=_ud_document("UD-LC-0043-ANANTA"),
+            ud_document=_ud_document("BGMEA/DHK/UD/2026/5483/003"),
             allocation_result=allocation,
             workbook_snapshot=snapshot,
         )
@@ -289,7 +387,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         result = stage_ip_exp_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
-            documents=[_ud_document("UD-LC-0043-ANANTA")],
+            documents=[_ud_document("BGMEA/DHK/UD/2026/5483/003")],
             workbook_snapshot=_snapshot(rows=[]),
         )
 
