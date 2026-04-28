@@ -56,6 +56,18 @@ class RunFailureExplanationTests(unittest.TestCase):
                         },
                     }
                 )
+                + "\n"
+                + json.dumps(
+                    {
+                        "run_id": "run-ud",
+                        "workflow_id": "ud_ip_exp",
+                        "severity": "hard_block",
+                        "code": "mail_move_gate_unsatisfied",
+                        "message": "Mail moves are blocked until prior run phases reach terminal success.",
+                        "mail_id": None,
+                        "details": {},
+                    }
+                )
                 + "\n",
                 encoding="utf-8",
             )
@@ -106,6 +118,9 @@ class RunFailureExplanationTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["overall_status"], "attention_required")
+        self.assertEqual(payload["primary_cause_count"], 1)
+        self.assertEqual(payload["related_cause_count"], 1)
+        self.assertEqual(payload["related_causes"][0]["code"], "mail_move_gate_unsatisfied")
         cause = payload["primary_causes"][0]
         self.assertEqual(cause["category"], "workbook_prevalidation")
         self.assertEqual(cause["subject"], "UD-LC-1227-RAM APPAREL LTD")

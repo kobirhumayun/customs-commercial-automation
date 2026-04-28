@@ -21,6 +21,11 @@ def build_run_failure_explanation(
     outcomes_by_mail = {outcome.mail_id: outcome for outcome in mail_outcomes}
     file_numbers_by_target = _index_file_numbers_by_target(staged_write_plan)
     discrepancy_codes_by_mail = _index_discrepancy_codes_by_mail(discrepancies)
+    all_discrepancy_codes = {
+        code
+        for discrepancy in discrepancies
+        if (code := _optional_string(discrepancy.get("code")))
+    }
 
     primary_causes: list[dict[str, Any]] = []
     related_causes: list[dict[str, Any]] = []
@@ -32,7 +37,7 @@ def build_run_failure_explanation(
             outcome=outcomes_by_mail.get(mail_id or ""),
             file_numbers_by_target=file_numbers_by_target,
         )
-        if _is_secondary_discrepancy(code, mail_id, discrepancy_codes_by_mail):
+        if _is_secondary_discrepancy(code, mail_id, discrepancy_codes_by_mail, all_discrepancy_codes):
             cause["secondary"] = True
             related_causes.append(cause)
         else:
@@ -204,9 +209,12 @@ def _is_secondary_discrepancy(
     code: str,
     mail_id: str | None,
     discrepancy_codes_by_mail: dict[str, set[str]],
+    all_discrepancy_codes: set[str],
 ) -> bool:
     if code == "document_storage_path_unresolved" and mail_id:
         return "export_file_number_missing" in discrepancy_codes_by_mail.get(mail_id, set())
+    if code == "mail_move_gate_unsatisfied":
+        return any(other_code != "mail_move_gate_unsatisfied" for other_code in all_discrepancy_codes)
     return False
 
 

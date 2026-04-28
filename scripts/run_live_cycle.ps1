@@ -187,6 +187,16 @@ try {
     Write-Host ""
     Write-Host "Run ID: $runId" -ForegroundColor Green
 
+    if ($hardBlockCount -gt 0) {
+        Write-Section "Failure Explanation"
+        $explanation = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "explain-run-failure", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId
+        )
+    }
+
     if ($writePhaseStatus -notin @("committed", "not_started")) {
         Write-Host "Write phase stopped at '$writePhaseStatus'. Stopping before print." -ForegroundColor Yellow
         Write-Host "Explain the exact cause with:" -ForegroundColor Yellow
