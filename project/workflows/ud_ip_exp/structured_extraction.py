@@ -15,6 +15,10 @@ from project.models import SavedDocument
 from project.workflows.ud_ip_exp.payloads import normalize_quantity_unit
 
 PIONEER_SUPPLIERS = ("PIONEER DENIM LIMITED", "PIONEER DENIM LTD")
+_OFFICE_USE_ONLY_LABELS = {
+    "base_ud": "ud no (for office use only)",
+    "ud_amendment": "amendment no. (for office use only)",
+}
 
 
 @dataclass(slots=True, frozen=True)
@@ -109,29 +113,28 @@ def _extract_document_number_and_date(
     report: dict[str, Any],
     document_subtype: str,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
-    target_token = "/AM/" if document_subtype == "ud_amendment" else "/UD/"
+    target_label = _OFFICE_USE_ONLY_LABELS[document_subtype]
     for table in _iter_tables(report):
         if table["page_number"] != 1:
             continue
         rows = table["rows"]
         for row_index, row in enumerate(rows):
-            for cell_index, cell in enumerate(row):
-                value = _clean_cell(cell)
-                if target_token not in value.upper() or "/W/" in value.upper():
-                    continue
-                document_number = _extract_bgmea_number(value, target_token)
-                document_date = _row_date(row, preferred_start=cell_index + 1)
-                return (
-                    document_number,
-                    document_date,
-                    {
-                        "page_number": table["page_number"],
-                        "table_index": table["table_index"],
-                        "row_index": row_index,
-                        "column_index": cell_index,
-                        "extraction_method": "structured_table",
-                    },
-                )
+            label_index = _office_use_only_label_index(row, target_label=target_label)
+            if label_index is None:
+                continue
+            document_number = _row_value(row, cell_index=label_index + 1)
+            document_date = _row_date_after_index(row, start_index=label_index + 1)
+            return (
+                document_number,
+                document_date,
+                {
+                    "page_number": table["page_number"],
+                    "table_index": table["table_index"],
+                    "row_index": row_index,
+                    "column_index": label_index,
+                    "extraction_method": "structured_table",
+                },
+            )
     return None, None, {"extraction_method": "structured_table"}
 
 
@@ -398,16 +401,31 @@ def _raw_cell(value: object) -> str:
     return str(value or "").replace("\ufffe", " ")
 
 
-def _extract_bgmea_number(value: str, target_token: str) -> str | None:
-    pattern = rf"BGMEA/[A-Z]+/{re.escape(target_token.strip('/'))}/[A-Z0-9./-]+"
-    match = re.search(pattern, value.upper())
-    if match is None:
+def _office_use_only_label_index(row: list[str], *, target_label: str) -> int | None:
+    for cell_index, cell in enumerate(row):
+        normalized = _normalized_office_use_only_label(cell)
+        if normalized == target_label:
+            return cell_index
+        if normalized:
+            return None
+    return None
+
+
+def _normalized_office_use_only_label(value: object) -> str:
+    cleaned = _clean_cell(value)
+    cleaned = re.sub(r"^\d+(?:\.\d+)?[.)]?\s*", "", cleaned)
+    return cleaned.casefold()
+
+
+def _row_value(row: list[str], *, cell_index: int) -> str | None:
+    if cell_index >= len(row):
         return None
-    return match.group(0).rstrip(".,;:")
+    value = _clean_cell(row[cell_index])
+    return value or None
 
 
-def _row_date(row: list[str], *, preferred_start: int) -> str | None:
-    for value in row[preferred_start:] + row:
+def _row_date_after_index(row: list[str], *, start_index: int) -> str | None:
+    for value in row[start_index:]:
         normalized = normalize_lc_sc_date(_clean_cell(value))
         if normalized and re.search(r"\d", normalized):
             return normalized

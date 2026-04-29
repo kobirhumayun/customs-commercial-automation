@@ -27,6 +27,68 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "17375.8")
         self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "6633"})
 
+    def test_office_use_only_row_is_the_only_base_ud_number_source(self) -> None:
+        report = _base_report()
+        report["pages"][0]["tables"][1]["rows"].insert(
+            0,
+            ["03A. Tracking", "BGMEA/DHK/UD/2026/9999/999", "Date", "2026-03-30"],
+        )
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="1345260400434",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertEqual(analysis.extracted_document_number, "BGMEA/DHK/UD/2026/5483/003")
+        self.assertEqual(analysis.extracted_document_date, "2026-03-31")
+
+    def test_base_ud_requires_for_office_use_only_label_without_fallback(self) -> None:
+        report = _base_report()
+        report["pages"][0]["tables"][1]["rows"][1] = [
+            "04. UD No",
+            "BGMEA/DHK/UD/2026/5483/003",
+            "Date",
+            "2026-03-31",
+        ]
+        report["pages"][0]["tables"][1]["rows"].append(
+            ["05. Duplicate", "BGMEA/DHK/UD/2026/9999/999", "Date", "2026-04-01"]
+        )
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="1345260400434",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertIsNone(analysis.extracted_document_number)
+        self.assertIsNone(analysis.extracted_document_date)
+
+    def test_invalid_office_use_only_ud_number_is_extracted_from_same_row(self) -> None:
+        report = _base_report()
+        report["pages"][0]["tables"][1]["rows"][1] = [
+            "04. UD No (For office use only)",
+            "BGMEA/DHK/W/2026/5483/003",
+            "Date",
+            "2026-03-31",
+        ]
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="1345260400434",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertEqual(analysis.extracted_document_number, "BGMEA/DHK/W/2026/5483/003")
+        self.assertEqual(analysis.extracted_document_date, "2026-03-31")
+
     def test_ship_remarks_match_has_priority_over_lc_number_match(self) -> None:
         report = _base_report()
         report["pages"][0]["tables"][2]["rows"].append(
@@ -178,6 +240,30 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_document_subtype, "ud_amendment")
         self.assertEqual(analysis.extracted_document_number, "BGMEA/CTG/AM/2026/6425/020-010")
         self.assertEqual(analysis.extracted_document_date, "2026-04-16")
+
+    def test_amendment_requires_for_office_use_only_label_without_fallback(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][1]["rows"][1] = [
+            "Amendment no.",
+            "BGMEA/DHK/AM/2026/3420/004-010",
+            "Date",
+            "2026-04-12",
+        ]
+        report["pages"][0]["tables"][1]["rows"].append(
+            ["Other row", "BGMEA/DHK/AM/2026/9999/999-001", "Date", "2026-04-13"]
+        )
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="201260400935",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertIsNone(analysis.extracted_document_number)
+        self.assertIsNone(analysis.extracted_document_date)
 
     def test_amendment_uses_value_column_when_increased_decreased_value_is_zero(self) -> None:
         report = _amendment_report()

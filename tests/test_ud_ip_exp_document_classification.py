@@ -140,6 +140,41 @@ class UDIPEXPDocumentClassificationTests(unittest.TestCase):
             "UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
         )
 
+    def test_matching_ud_filename_hard_blocks_invalid_bgmea_identifier_from_analysis(self) -> None:
+        saved_document = SavedDocument(
+            saved_document_id="saved-ud",
+            mail_id="mail-1",
+            attachment_name="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            normalized_filename="UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            destination_path="D:/docs/UD-LC-0127-COTTONEX FASHIONS LTD.pdf",
+            file_sha256="e" * 64,
+            save_decision="saved_new",
+            attachment_index=0,
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="structured_ud_layered_table",
+                    extracted_document_number="BGMEA/DHK/W/2026/5483/003",
+                    extracted_document_number_confidence=1.0,
+                    extracted_document_date="2026-04-16",
+                    extracted_document_date_confidence=1.0,
+                )
+
+        result = classify_saved_ud_ip_exp_documents(
+            saved_documents=[saved_document],
+            analysis_provider=Provider(),
+        )
+
+        self.assertEqual(result.documents, [])
+        self.assertIsNone(result.saved_documents[0].extracted_document_number)
+        self.assertEqual([item.code for item in result.discrepancies], ["ud_document_number_pattern_mismatch"])
+        self.assertEqual(
+            result.discrepancies[0].details["extracted_document_number"],
+            "BGMEA/DHK/W/2026/5483/003",
+        )
+
     def test_exp_filename_must_end_strictly_with_exp_stem(self) -> None:
         self.assertEqual(document_kind_from_filename("123-EXP.pdf"), UDIPEXPDocumentKind.EXP)
         self.assertEqual(document_kind_from_filename("123-exp.PDF"), UDIPEXPDocumentKind.EXP)

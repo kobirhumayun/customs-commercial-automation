@@ -169,7 +169,8 @@ Current live-extraction boundary:
 - explicit UD-LC/UD-SC attachment filename suffixes are supporting validation evidence only and must agree with the ERP LC/SC suffix when present
 - ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
-- structured UD/AM extraction now requires page-1 table-based UD/AM number/date extraction, exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
+- structured UD/AM extraction now requires page-1 office-use-only-row UD/AM number/date extraction: Base UD must match `UD No (For office use only)` and Amendment must match `Amendment no. (For office use only)`; `For office use only` is mandatory, no alternate row-label fallback is allowed, and invalid BGMEA row values hard-block
+- structured UD/AM extraction also requires exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
 - ERP `LC No.` row matching is exact first, then may compare only after removing leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, internal spaces and all other characters remain unchanged, and `Ship. Remarks` remains exact-only
 - for UD Amendments only, if the matched row's `Increased/Decreased` value is numeric zero, extraction uses that row's `Value` column instead because the LC is treated as newly included in the amendment
 - structured UD/AM quantity validation uses the workbook `Quantity of Fabrics (Yds/Mtr)` cell number format as the unit source: `#,###.00 "Mtr"` means `MTR`; any other number format defaults to `YDS`
@@ -327,7 +328,7 @@ Until answered, default to hard-block with comprehensive discrepancy reporting r
 
 The next highest-value work is whichever of these the team wants to unblock first:
 1. Update this handoff and adjacent durable docs whenever the implementation boundary changes.
-2. Continue improving live UD extraction quality with deterministic saved-document analysis fixtures and hard-block reporting inside the confirmed ERP LC/SC + `Ship. Remarks` linkage rule.
+2. Continue improving live UD extraction quality with deterministic saved-document analysis fixtures and hard-block reporting inside the confirmed office-use-only-row plus ERP LC/SC + `Ship. Remarks` linkage rules.
 3. Finalize IP/EXP business rules in docs, then replace the current unresolved-policy hard-block path with deterministic matching and staging logic.
 
 ## Guardrails for New Sessions

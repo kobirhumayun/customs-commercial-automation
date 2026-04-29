@@ -296,6 +296,8 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 
 ### Structured UD value-first row selection
 - Email body file number selects the canonical ERP row and therefore the ERP LC/SC family, ERP `LC No.`, ERP `Ship. Remarks`, and ERP LC/SC date.
+- Structured UD/AM number and document date extraction must locate the page-1 office-use-only row strictly by label: Base UD uses `UD No (For office use only)` and UD Amendment uses `Amendment no. (For office use only)`. The `For office use only` text is mandatory, no alternate row-label fallback is allowed, and both fields must come from that same matched row.
+- If the extracted office-use-only UD/AM number does not match the BGMEA `BGMEA/<office>/<UD-or-AM>/...` pattern, the mail hard-blocks; attachment filenames and other PDF rows must not be used as fallback workbook values.
 - The structured UD/AM PDF LC table must match a row by exact ERP `Ship. Remarks` when found; if not found or blank, ERP `LC No.` may be used.
 - ERP `LC No.` matching is exact first. If exact matching fails, the only permitted fallback is to strip zeros from the left side of the ERP/table LC strings and compare those results. Leading and trailing spaces around compared values may be trimmed, but internal spaces must remain unchanged. No dashes, slashes, punctuation, internal zeros, or other characters may be modified, and this fallback does not apply to `Ship. Remarks`.
 - For structured UD Amendments only, the matched row value normally comes from `Increased/Decreased`. If `Increased/Decreased` is numeric zero, treat the LC as newly included in the amendment and use the same row's `Value` column for workbook row selection. This fallback does not apply to Base UD documents.

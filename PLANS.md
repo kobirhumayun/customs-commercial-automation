@@ -60,6 +60,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
 - Structured UD/AM value-first row selection by ERP-linked PDF LC value, with legacy combination-based UD allocation retained only for non-structured deterministic payloads.
+- Structured UD/AM number/date extraction uses only the page-1 office-use-only row label (`UD No (For office use only)` for Base UD, `Amendment no. (For office use only)` for Amendment), with no alternate row-label fallback and hard-blocking invalid BGMEA UD/AM numbers.
 - Structured UD/AM LC row matching keeps `Ship. Remarks` exact-only and permits ERP `LC No.` fallback matching only by stripping leading zeros from the left side; leading/trailing spaces may be trimmed, but internal spaces and all other characters remain unchanged.
 - Structured UD Amendment value extraction uses `Increased/Decreased` unless that value is numeric zero, in which case the matched row's `Value` column is used because the LC is newly included in the amendment.
 - Structured UD quantity validation uses workbook quantity cell number formats as the unit source and preserves those formats across staged in-memory batch advancement.
