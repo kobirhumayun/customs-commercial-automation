@@ -310,6 +310,65 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "selected")
 
+    def test_validate_run_snapshot_ignores_same_mail_duplicate_ud_document_number(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-DUPLICATE")
+        duplicate_documents = [
+            _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
+            _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
+        ]
+
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider({mail.entry_id: duplicate_documents}),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 1, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.WARNING)
+        self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "mixed_duplicate_and_new_writes")
+        self.assertEqual(
+            [report.code for report in validation_result.discrepancy_reports],
+            ["ud_duplicate_document_same_mail"],
+        )
+
+    def test_validate_run_snapshot_hard_blocks_same_mail_duplicate_ud_number_when_evidence_differs(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "UD-LC-0043-CONFLICT")
+        conflict_documents = [
+            _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000"), document_date="2026-04-01"),
+            _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000"), document_date="2026-04-02"),
+        ]
+
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider({mail.entry_id: conflict_documents}),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(validation_result.staged_write_plan, [])
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual(
+            [report.code for report in validation_result.discrepancy_reports],
+            ["ud_live_document_conflict"],
+        )
+
     def test_validate_run_snapshot_for_ud_without_payload_hard_blocks(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
@@ -329,7 +388,39 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
         self.assertIsNone(validation_result.mail_outcomes[0].ud_selection)
 
-    def test_validate_run_snapshot_advances_ud_workbook_snapshot_between_mails(self) -> None:
+    def test_validate_run_snapshot_marks_later_legacy_ud_mail_as_same_run_duplicate_noop(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        first_mail = _mail("entry-ud-001", "UD-LC-0043-ONE")
+        second_mail = _mail("entry-ud-002", "UD-LC-0043-TWO")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [first_mail, second_mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {
+                    first_mail.entry_id: _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
+                    second_mail.entry_id: _ud_document("BGMEA/DHK/UD/2026/5483/003", quantity=Decimal("1000")),
+                }
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 1, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.WARNING)
+        self.assertEqual(validation_result.mail_outcomes[1].write_disposition, "duplicate_only_noop")
+        self.assertEqual(
+            [report.code for report in validation_result.discrepancy_reports],
+            ["ud_duplicate_document_same_run"],
+        )
+
+    def test_validate_run_snapshot_hard_blocks_later_legacy_ud_mail_with_row_conflict(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         first_mail = _mail("entry-ud-001", "UD-LC-0043-ONE")
         second_mail = _mail("entry-ud-002", "UD-LC-0043-TWO")
@@ -357,7 +448,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.HARD_BLOCK)
         self.assertEqual(
             validation_result.mail_outcomes[1].discrepancies[0]["code"],
-            "ud_shared_column_nonblank_policy_unresolved",
+            "ud_target_row_conflict",
         )
 
 

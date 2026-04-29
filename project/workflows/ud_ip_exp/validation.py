@@ -140,6 +140,10 @@ def _build_allocation_result(
         required_quantity=ud_document.quantity.amount,
         quantity_unit=ud_document.quantity.unit,
         candidate_rows=candidate_rows,
+        expected_shared_value=format_shared_column_entry(
+            ud_document.document_kind,
+            ud_document.document_number.value,
+        ),
     )
 
 

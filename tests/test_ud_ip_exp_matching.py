@@ -142,6 +142,77 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision, "hard_block")
         self.assertEqual(result.discrepancy_code, "ud_candidate_tie_after_full_tiebreak")
 
+    def test_allocate_ud_rows_recognizes_already_recorded_ud(self) -> None:
+        result = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            expected_shared_value="BGMEA/DHK/UD/2026/5483/003",
+            candidate_rows=[
+                UDCandidateRow(
+                    row_index=11,
+                    lc_sc_number="LC-1",
+                    quantity=Decimal("1000"),
+                    quantity_unit="YDS",
+                    ud_ip_shared_value="BGMEA/DHK/UD/2026/5483/003",
+                ),
+                UDCandidateRow(
+                    row_index=12,
+                    lc_sc_number="LC-1",
+                    quantity=Decimal("1000"),
+                    quantity_unit="YDS",
+                ),
+            ],
+        )
+
+        self.assertEqual(result.final_decision, "already_recorded")
+        self.assertEqual(result.final_decision_reason, "ud_already_recorded")
+        self.assertEqual(result.selected_candidate_id, "11")
+
+    def test_allocate_ud_rows_prefers_blank_rows_over_conflicting_occupied_rows(self) -> None:
+        result = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            expected_shared_value="BGMEA/DHK/UD/2026/5483/004",
+            candidate_rows=[
+                UDCandidateRow(
+                    row_index=11,
+                    lc_sc_number="LC-1",
+                    quantity=Decimal("1000"),
+                    quantity_unit="YDS",
+                    ud_ip_shared_value="BGMEA/DHK/UD/2026/5483/003",
+                ),
+                UDCandidateRow(
+                    row_index=12,
+                    lc_sc_number="LC-1",
+                    quantity=Decimal("1000"),
+                    quantity_unit="YDS",
+                ),
+            ],
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "12")
+
+    def test_allocate_ud_rows_reports_row_conflict_when_only_occupied_match_exists(self) -> None:
+        result = allocate_ud_rows(
+            required_quantity=Decimal("1000"),
+            quantity_unit="YDS",
+            expected_shared_value="BGMEA/DHK/UD/2026/5483/004",
+            candidate_rows=[
+                UDCandidateRow(
+                    row_index=11,
+                    lc_sc_number="LC-1",
+                    quantity=Decimal("1000"),
+                    quantity_unit="YDS",
+                    ud_ip_shared_value="BGMEA/DHK/UD/2026/5483/003",
+                ),
+            ],
+        )
+
+        self.assertEqual(result.final_decision, "hard_block")
+        self.assertEqual(result.final_decision_reason, "target_row_conflict")
+        self.assertEqual(result.discrepancy_code, "ud_target_row_conflict")
+
     def test_allocate_structured_ud_rows_selects_contiguous_value_group_then_checks_quantity(self) -> None:
         snapshot = _structured_snapshot(
             rows=[

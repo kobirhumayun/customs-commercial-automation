@@ -317,10 +317,7 @@ These must be answered or intentionally hard-blocked before production release:
 4. Which extracted fields are mandatory for EXP?
 5. Which workbook columns besides `UD No. & IP No.` are written by this workflow?
 6. How should dates be stored if UD/IP/EXP has date columns?
-7. Are existing values in `UD No. & IP No.` appendable, replaceable, or hard-blocking?
-8. How should duplicate UD/IP/EXP values already present in a row be handled?
-9. Should duplicate-only/no-write `ud_ip_exp` mails move exactly like export duplicate-only mails after successful validation?
-10. What source/destination Outlook folders should production use for this workflow?
+7. What source/destination Outlook folders should production use for this workflow?
 
 Until answered, default to hard-block with comprehensive discrepancy reporting rather than guessing.
 

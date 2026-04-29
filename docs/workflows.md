@@ -623,6 +623,8 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - structured UD quantity validation derives the workbook quantity unit from the `Quantity of Fabrics (Yds/Mtr)` cell number format: `#,###.00 "Mtr"` means `MTR`, and all other formats default to `YDS`
 - batch validation must preserve row number formats when advancing the in-memory workbook snapshot after staged writes, so later mails in the same run keep the workbook-authored `MTR`/`YDS` quantity-unit evidence
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
+- same-mail duplicate UD/AM handling must first dedupe by BGMEA UD/AM number and then by duplicate filename evidence; later duplicates are ignored only when their extracted evidence agrees exactly, otherwise the mail hard-blocks
+- for multiple UD/AM documents in the same mail, deterministic processing order is document date first and BGMEA UD/AM number second
 - when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
 - this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
@@ -647,10 +649,13 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 ### UD allocation logic
 - extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
 - first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
+- legacy/non-structured UD allocation must also check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, treat the mail as duplicate-only/no-write
 - otherwise filter workbook rows to the ERP LC/SC family and exclude rows where `UD No. & IP No.` is already populated
 - sort candidate workbook rows by row index ascending
 - starting from the first blank-UD row, sum workbook `Amount` column 6 until it matches the extracted UD LC/SC value numerically within tolerance
 - the matched contiguous row range is the only target row group for the mail
+- if a preferred row group was already claimed by an earlier document but another equally valid blank row group remains, the later document may use that blank alternative in deterministic processing order
+- if only occupied matching rows remain and they belong to a different UD/AM number, or if the same UD/AM number is present with a conflicting `UD & IP Date`, hard-block with `ud_target_row_conflict`
 - sum workbook quantities for only that target row group by unit
 - derive workbook quantity units for the selected target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
 - compare each workbook unit total against the corresponding UD supplier quantity total

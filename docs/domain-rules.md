@@ -304,7 +304,12 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - The matched UD/AM LC table date must equal the ERP LC/SC date after date parsing.
 - The matched UD/AM LC table value is compared numerically to the sum of workbook `Amount` column 6.
 - Before staging a structured UD write, workbook rows in the ERP LC/SC family are checked for an exact already-recorded UD value plus matching `UD & IP Date`; if the recorded rows satisfy the same value and quantity checks, the mail is a successful duplicate no-op and stages no workbook writes or prints.
+- For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number.
+- Same-mail duplicate UD/AM evidence is resolved first by BGMEA UD/AM number and then by duplicate filename evidence. Later duplicates are ignored only when their required extracted evidence matches exactly; any disagreement in date, LC/SC value, or quantity evidence is a hard block.
+- Duplicate attachment filename evidence is business-relevant for `ud_ip_exp`; same-mail repeated filenames must participate in duplicate/conflict checks even when the BGMEA number is unavailable from filename alone.
 - Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.
+- If a previously matched row group is already occupied by a different UD/AM but another equally valid blank row group remains, the later document may use the blank alternative by deterministic processing order.
+- If only occupied matching rows remain and they belong to a different UD/AM number, or if the same BGMEA UD/AM number is present with a conflicting `UD & IP Date`, the mail hard-blocks with `ud_target_row_conflict`.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
 - Structured UD validation must identify the workbook quantity unit from the workbook cell number format for `Quantity of Fabrics (Yds/Mtr)`: if the format is `#,###.00 "Mtr"`, the unit is `MTR`; otherwise the unit defaults to `YDS`. This mirrors the export workflow, which writes MTR quantities by applying that number format.
 - During a multi-mail run, in-memory workbook snapshot advancement after staged writes must preserve row number formats so later mails still evaluate quantity units from the original workbook-authored evidence.
@@ -314,6 +319,8 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 
 ### Legacy UD quantity-combination rule
 When multiple valid legacy UD row combinations satisfy the same extracted quantity, selection must be deterministic and fully reportable.
+- Before choosing a new legacy row combination, the workflow must first check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, the outcome is duplicate-only/no-write.
+- New legacy selection considers blank `UD No. & IP No.` targets only. Occupied combinations may explain a `ud_target_row_conflict`, but must not outrank an equally valid blank combination.
 
 ### Tie-break key order (normative)
 Apply keys in this exact order:

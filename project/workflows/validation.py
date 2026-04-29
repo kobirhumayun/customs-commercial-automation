@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from project.documents import NullSavedDocumentAnalysisProvider, SavedDocumentAnalysisProvider
@@ -20,6 +21,7 @@ from project.models import (
     WriteOperation,
 )
 from project.rules import AggregatedRuleEvaluation, LoadedRulePack, evaluate_rule_pack
+from project.rules.types import RuleDiscrepancy
 from project.storage import AttachmentContentProvider, DocumentSaveIssue, DocumentSaveResult, save_export_mail_documents
 from project.utils.hashing import canonical_json_hash
 from project.utils.json import to_jsonable
@@ -127,6 +129,7 @@ def validate_run_snapshot(
             erp_row_provider=erp_row_provider,
             ud_document_provider=ud_document_provider,
             workflow_documents=workflow_documents,
+            saved_documents=document_classification_result.saved_documents,
             ud_family_payload=ud_family_payload,
         )
         if descriptor.workflow_id != WorkflowId.UD_IP_EXP:
@@ -369,6 +372,7 @@ def _evaluate_mail_for_workflow(
     erp_row_provider: ERPRowProvider | None,
     ud_document_provider: UDDocumentPayloadProvider | None,
     workflow_documents: list | None = None,
+    saved_documents: list[SavedDocument] | None = None,
     ud_family_payload: ExportMailPayload | None = None,
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, object, dict | None]:
     if descriptor.workflow_id == WorkflowId.UD_IP_EXP:
@@ -378,8 +382,10 @@ def _evaluate_mail_for_workflow(
             rule_pack=rule_pack,
             mail=mail,
             workbook_snapshot=workbook_snapshot,
+            baseline_workbook_snapshot=baseline_workbook_snapshot,
             ud_document_provider=ud_document_provider,
             workflow_documents=workflow_documents,
+            saved_documents=saved_documents,
             export_payload=ud_family_payload,
         )
 
@@ -417,13 +423,60 @@ def _evaluate_ud_ip_exp_mail(
     rule_pack: LoadedRulePack,
     mail: EmailMessage,
     workbook_snapshot: WorkbookSnapshot | None,
+    baseline_workbook_snapshot: WorkbookSnapshot | None,
     ud_document_provider: UDDocumentPayloadProvider | None,
     workflow_documents: list | None = None,
+    saved_documents: list[SavedDocument] | None = None,
     export_payload: ExportMailPayload | None = None,
 ) -> tuple[WorkflowValidationContext, AggregatedRuleEvaluation, UDIPEXPWriteStagingResult, dict | None]:
     documents = list(workflow_documents or [])
     if not documents and ud_document_provider is not None:
         documents = ud_document_provider.get_documents(mail)
+    duplicate_resolution = _resolve_same_mail_ud_documents(
+        documents=documents,
+        saved_documents=saved_documents or [],
+        mail_id=mail.mail_id,
+    )
+    duplicate_conflict = next(
+        (
+            discrepancy
+            for discrepancy in duplicate_resolution.discrepancies
+            if discrepancy.severity == FinalDecision.HARD_BLOCK
+        ),
+        None,
+    )
+    if duplicate_conflict is not None:
+        workflow_payload = UDIPEXPWorkflowPayload(documents=documents, export_payload=export_payload)
+        context = WorkflowValidationContext(
+            run_id=run_report.run_id,
+            workflow_id=run_report.workflow_id,
+            rule_pack_id=rule_pack.rule_pack_id,
+            rule_pack_version=rule_pack.rule_pack_version,
+            state_timezone=run_report.state_timezone,
+            operator_context=run_report.operator_context,
+            mail=mail,
+            workflow_payload=workflow_payload,
+        )
+        return (
+            context,
+            AggregatedRuleEvaluation(
+                applied_rule_ids=[],
+                discrepancies=[duplicate_conflict],
+                final_decision=FinalDecision.HARD_BLOCK,
+                decision_reasons=list(duplicate_resolution.decision_reasons),
+            ),
+            UDIPEXPWriteStagingResult(
+                staged_write_operations=[],
+                discrepancies=[],
+                decision_reasons=["UD staging skipped because same-mail duplicate evidence hard-blocked."],
+            ),
+            {
+                "document_count": len([document for document in documents if isinstance(document, UDDocumentPayload)]),
+                "final_decision": "hard_block",
+                "documents": [],
+            },
+        )
+    documents = duplicate_resolution.documents
     ud_documents = _ordered_ud_documents(documents)
     if ud_documents:
         from project.workflows.ud_ip_exp.validation import assemble_ud_validation, workflow_date_from_started_at
@@ -439,6 +492,8 @@ def _evaluate_ud_ip_exp_mail(
         staging_results: list[UDIPEXPWriteStagingResult] = []
         ud_selection_items: list[dict] = []
         staged_write_operations: list[WriteOperation] = []
+        additional_discrepancies = list(duplicate_resolution.discrepancies)
+        additional_reasons = list(duplicate_resolution.decision_reasons)
 
         for document_index, ud_document in enumerate(ud_documents):
             current_documents = [
@@ -446,6 +501,18 @@ def _evaluate_ud_ip_exp_mail(
                 for document in documents
                 if not isinstance(document, UDDocumentPayload)
             ] + [ud_document]
+            preview_overlap = _preview_ud_target_row_overlap(
+                run_id=run_report.run_id,
+                mail=mail,
+                rule_pack=rule_pack,
+                ud_document=ud_document,
+                workbook_snapshot=working_snapshot,
+                export_payload=export_payload,
+                ud_receive_date=ud_receive_date,
+                excluded_row_indexes=excluded_row_indexes,
+                state_timezone=run_report.state_timezone,
+                operation_index_start=operation_index_start,
+            )
             assembly = assemble_ud_validation(
                 run_id=run_report.run_id,
                 mail=mail,
@@ -459,6 +526,12 @@ def _evaluate_ud_ip_exp_mail(
                 ud_receive_date=ud_receive_date,
                 operation_index_start=operation_index_start,
                 excluded_row_indexes=excluded_row_indexes,
+            )
+            assembly = _apply_ud_overlap_conflict_if_needed(
+                assembly=assembly,
+                mail_id=mail.mail_id,
+                document_number=ud_document.document_number.value,
+                preview_overlap=preview_overlap,
             )
             rule_evaluations.append(assembly.rule_evaluation)
             staging_results.append(assembly.staging_result)
@@ -489,8 +562,36 @@ def _evaluate_ud_ip_exp_mail(
                     workbook_snapshot=working_snapshot,
                     staged_write_operations=assembly.staging_result.staged_write_operations,
                 )
+                duplicate_warning = _same_run_ud_duplicate_warning(
+                    assembly=assembly,
+                    working_snapshot=working_snapshot,
+                    baseline_workbook_snapshot=baseline_workbook_snapshot,
+                    expected_document_number=ud_document.document_number.value,
+                    mail_id=mail.mail_id,
+                )
+                if duplicate_warning is not None:
+                    additional_discrepancies.append(duplicate_warning)
+                    additional_reasons.append(
+                        f"Ignored duplicate UD/AM document {ud_document.document_number.value} because the same document was already staged earlier in this run."
+                    )
+                    staging_results[-1] = replace(
+                        staging_results[-1],
+                        decision_reasons=[
+                            f"Skipped UD shared-column write for {ud_document.document_number.value} because the same document was already staged earlier in this run."
+                            if reason
+                            == f"Skipped UD shared-column write for {ud_document.document_number.value} because it is already recorded in the workbook."
+                            else reason
+                            for reason in staging_results[-1].decision_reasons
+                        ],
+                    )
 
         aggregated = _combine_aggregated_rule_evaluations(rule_evaluations)
+        if additional_discrepancies:
+            aggregated = _extend_aggregated_rule_evaluation(
+                aggregated=aggregated,
+                discrepancies=additional_discrepancies,
+                decision_reasons=additional_reasons,
+            )
         any_staging_discrepancy = any(result.discrepancies for result in staging_results)
         all_documents_passed = (
             aggregated.final_decision != FinalDecision.HARD_BLOCK
@@ -575,6 +676,7 @@ def _ordered_ud_documents(documents: list) -> list[UDDocumentPayload]:
             indexed_documents,
             key=lambda item: (
                 _ud_document_date_sort_key(item[1]),
+                item[1].document_number.value.strip().upper(),
                 item[0],
             ),
         )
@@ -617,6 +719,391 @@ def _combine_aggregated_rule_evaluations(
         discrepancies=discrepancies,
         final_decision=final_decision,
         decision_reasons=decision_reasons or ["No rule discrepancies were emitted."],
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class _UDSameMailResolution:
+    documents: list
+    discrepancies: list[RuleDiscrepancy]
+    decision_reasons: list[str]
+
+
+def _resolve_same_mail_ud_documents(
+    *,
+    documents: list,
+    saved_documents: list[SavedDocument],
+    mail_id: str,
+) -> _UDSameMailResolution:
+    saved_documents_by_id = {
+        document.saved_document_id: document
+        for document in saved_documents
+    }
+    indexed_ud_documents = [
+        (index, document)
+        for index, document in enumerate(documents)
+        if isinstance(document, UDDocumentPayload)
+    ]
+    kept_indexes = {index for index, _document in indexed_ud_documents}
+    discrepancies: list[RuleDiscrepancy] = []
+    decision_reasons: list[str] = []
+    handled_indexes: set[int] = set()
+
+    groups_by_number: dict[str, list[tuple[int, UDDocumentPayload]]] = defaultdict(list)
+    for index, document in indexed_ud_documents:
+        document_number = document.document_number.value.strip()
+        if document_number:
+            groups_by_number[document_number].append((index, document))
+    for document_number, group in groups_by_number.items():
+        if len(group) < 2:
+            continue
+        resolution = _resolve_same_mail_duplicate_group(
+            group=group,
+            duplicate_basis="document_number",
+            duplicate_label=document_number,
+            saved_documents_by_id=saved_documents_by_id,
+            mail_id=mail_id,
+        )
+        discrepancies.extend(resolution["discrepancies"])
+        decision_reasons.extend(resolution["decision_reasons"])
+        handled_indexes.update(index for index, _document in group)
+        kept_indexes.intersection_update(resolution["kept_indexes"])
+
+    groups_by_filename: dict[str, list[tuple[int, UDDocumentPayload]]] = defaultdict(list)
+    for index, document in indexed_ud_documents:
+        if index in handled_indexes:
+            continue
+        saved_document = saved_documents_by_id.get(document.source_saved_document_id or "")
+        filename = saved_document.normalized_filename if saved_document is not None else ""
+        if filename:
+            groups_by_filename[filename].append((index, document))
+    for filename, group in groups_by_filename.items():
+        if len(group) < 2:
+            continue
+        resolution = _resolve_same_mail_duplicate_group(
+            group=group,
+            duplicate_basis="filename",
+            duplicate_label=filename,
+            saved_documents_by_id=saved_documents_by_id,
+            mail_id=mail_id,
+        )
+        discrepancies.extend(resolution["discrepancies"])
+        decision_reasons.extend(resolution["decision_reasons"])
+        kept_indexes.intersection_update(resolution["kept_indexes"])
+
+    kept_documents = [
+        document
+        for index, document in enumerate(documents)
+        if not isinstance(document, UDDocumentPayload) or index in kept_indexes
+    ]
+    return _UDSameMailResolution(
+        documents=kept_documents,
+        discrepancies=discrepancies,
+        decision_reasons=decision_reasons,
+    )
+
+
+def _resolve_same_mail_duplicate_group(
+    *,
+    group: list[tuple[int, UDDocumentPayload]],
+    duplicate_basis: str,
+    duplicate_label: str,
+    saved_documents_by_id: dict[str, SavedDocument],
+    mail_id: str,
+) -> dict[str, object]:
+    sorted_group = sorted(group, key=lambda item: item[0])
+    canonical_signature = _ud_duplicate_signature(sorted_group[0][1])
+    conflicting = [
+        (index, document)
+        for index, document in sorted_group[1:]
+        if _ud_duplicate_signature(document) != canonical_signature
+    ]
+    if conflicting:
+        evidence = [
+            _ud_duplicate_evidence(document, saved_documents_by_id)
+            for _index, document in sorted_group
+        ]
+        return {
+            "kept_indexes": {sorted_group[0][0]},
+            "discrepancies": [
+                RuleDiscrepancy(
+                    code="ud_live_document_conflict",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message=(
+                        "Multiple UD/AM documents in the same mail were treated as duplicates but disagree "
+                        "on required extracted evidence."
+                    ),
+                    subject_scope="mail",
+                    target_ref=mail_id,
+                    details={
+                        "duplicate_basis": duplicate_basis,
+                        "duplicate_label": duplicate_label,
+                        "conflicting_document_evidence": evidence,
+                    },
+                )
+            ],
+            "decision_reasons": [
+                f"UD duplicate resolution hard-blocked because duplicate {duplicate_basis} {duplicate_label} disagreed on required extracted evidence."
+            ],
+        }
+
+    kept_index = sorted_group[0][0]
+    ignored_documents = [
+        _ud_duplicate_evidence(document, saved_documents_by_id)
+        for index, document in sorted_group
+        if index != kept_index
+    ]
+    return {
+        "kept_indexes": {kept_index},
+        "discrepancies": [
+            RuleDiscrepancy(
+                code="ud_duplicate_document_same_mail",
+                severity=FinalDecision.WARNING,
+                message="Duplicate UD/AM document evidence in the same mail was ignored after deterministic dedupe.",
+                subject_scope="mail",
+                target_ref=mail_id,
+                details={
+                    "duplicate_basis": duplicate_basis,
+                    "duplicate_label": duplicate_label,
+                    "kept_document": _ud_duplicate_evidence(sorted_group[0][1], saved_documents_by_id),
+                    "ignored_documents": ignored_documents,
+                },
+            )
+        ],
+        "decision_reasons": [
+            f"Ignored duplicate UD/AM document {duplicate_label} within the same mail."
+        ],
+    }
+
+
+def _ud_duplicate_signature(document: UDDocumentPayload) -> tuple:
+    quantity = (
+        str(document.quantity.amount),
+        document.quantity.unit,
+    ) if document.quantity is not None else None
+    quantity_by_unit = tuple(
+        (unit, str(amount))
+        for unit, amount in sorted(document.quantity_by_unit.items())
+    )
+    return (
+        document.document_number.value.strip(),
+        document.document_date.value.strip() if document.document_date is not None else "",
+        document.lc_sc_number.value.strip(),
+        document.lc_sc_date.value.strip() if document.lc_sc_date is not None else "",
+        document.lc_sc_value.value.strip() if document.lc_sc_value is not None else "",
+        document.lc_sc_value_currency or "",
+        quantity,
+        quantity_by_unit,
+    )
+
+
+def _ud_duplicate_evidence(
+    document: UDDocumentPayload,
+    saved_documents_by_id: dict[str, SavedDocument],
+) -> dict[str, object]:
+    saved_document = saved_documents_by_id.get(document.source_saved_document_id or "")
+    return {
+        "source_saved_document_id": document.source_saved_document_id,
+        "normalized_filename": saved_document.normalized_filename if saved_document is not None else None,
+        "document_number": document.document_number.value,
+        "document_date": document.document_date.value if document.document_date is not None else None,
+        "lc_sc_number": document.lc_sc_number.value,
+        "lc_sc_date": document.lc_sc_date.value if document.lc_sc_date is not None else None,
+        "lc_sc_value": document.lc_sc_value.value if document.lc_sc_value is not None else None,
+        "lc_sc_value_currency": document.lc_sc_value_currency,
+        "quantity": str(document.quantity.amount) if document.quantity is not None else None,
+        "quantity_unit": document.quantity.unit if document.quantity is not None else None,
+        "quantity_by_unit": {
+            unit: str(amount)
+            for unit, amount in sorted(document.quantity_by_unit.items())
+        },
+    }
+
+
+def _extend_aggregated_rule_evaluation(
+    *,
+    aggregated: AggregatedRuleEvaluation,
+    discrepancies: list[RuleDiscrepancy],
+    decision_reasons: list[str],
+) -> AggregatedRuleEvaluation:
+    combined_discrepancies = list(aggregated.discrepancies)
+    for discrepancy in discrepancies:
+        if any(
+            existing.code == discrepancy.code
+            and existing.subject_scope == discrepancy.subject_scope
+            and existing.target_ref == discrepancy.target_ref
+            and existing.details == discrepancy.details
+            for existing in combined_discrepancies
+        ):
+            continue
+        combined_discrepancies.append(discrepancy)
+
+    final_decision = aggregated.final_decision
+    if final_decision != FinalDecision.HARD_BLOCK and any(
+        discrepancy.severity == FinalDecision.WARNING
+        for discrepancy in discrepancies
+    ):
+        final_decision = FinalDecision.WARNING
+    if any(discrepancy.severity == FinalDecision.HARD_BLOCK for discrepancy in discrepancies):
+        final_decision = FinalDecision.HARD_BLOCK
+
+    return AggregatedRuleEvaluation(
+        applied_rule_ids=list(aggregated.applied_rule_ids),
+        discrepancies=combined_discrepancies,
+        final_decision=final_decision,
+        decision_reasons=list(aggregated.decision_reasons) + list(decision_reasons),
+    )
+
+
+def _preview_ud_target_row_overlap(
+    *,
+    run_id: str,
+    mail: EmailMessage,
+    rule_pack: LoadedRulePack,
+    ud_document: UDDocumentPayload,
+    workbook_snapshot: WorkbookSnapshot | None,
+    export_payload,
+    ud_receive_date: str,
+    excluded_row_indexes: set[int],
+    state_timezone: str,
+    operation_index_start: int,
+) -> set[int]:
+    if workbook_snapshot is None or not excluded_row_indexes:
+        return set()
+    from project.workflows.ud_ip_exp.validation import assemble_ud_validation
+
+    preview_snapshot = _clear_ud_targets_for_preview(
+        workbook_snapshot=workbook_snapshot,
+        row_indexes=excluded_row_indexes,
+    )
+    preview = assemble_ud_validation(
+        run_id=run_id,
+        mail=mail,
+        rule_pack=rule_pack,
+        ud_document=ud_document,
+        workbook_snapshot=preview_snapshot,
+        documents=[ud_document],
+        saved_documents=[],
+        state_timezone=state_timezone,
+        export_payload=export_payload,
+        ud_receive_date=ud_receive_date,
+        operation_index_start=operation_index_start,
+        excluded_row_indexes=None,
+    )
+    return _selected_ud_selection_rows(preview.ud_selection).intersection(excluded_row_indexes)
+
+
+def _clear_ud_targets_for_preview(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    row_indexes: set[int],
+) -> WorkbookSnapshot:
+    header_mapping = resolve_ud_ip_exp_header_mapping(workbook_snapshot)
+    if header_mapping is None:
+        return workbook_snapshot
+    target_columns = [
+        header_mapping[column_key]
+        for column_key in ("ud_ip_shared", "ud_ip_date", "ud_recv_date")
+        if column_key in header_mapping
+    ]
+    updated_rows = []
+    for row in workbook_snapshot.rows:
+        values = dict(row.values)
+        if row.row_index in row_indexes:
+            for column_index in target_columns:
+                values[column_index] = ""
+        updated_rows.append(
+            WorkbookRow(
+                row_index=row.row_index,
+                values=values,
+                number_formats=dict(row.number_formats),
+            )
+        )
+    return WorkbookSnapshot(
+        sheet_name=workbook_snapshot.sheet_name,
+        headers=list(workbook_snapshot.headers),
+        rows=updated_rows,
+    )
+
+
+def _apply_ud_overlap_conflict_if_needed(
+    *,
+    assembly,
+    mail_id: str,
+    document_number: str,
+    preview_overlap: set[int],
+):
+    if not preview_overlap or assembly.rule_evaluation.final_decision != FinalDecision.HARD_BLOCK:
+        return assembly
+    if any(discrepancy.code == "ud_target_row_conflict" for discrepancy in assembly.rule_evaluation.discrepancies):
+        return assembly
+    return replace(
+        assembly,
+        rule_evaluation=_extend_aggregated_rule_evaluation(
+            aggregated=assembly.rule_evaluation,
+            discrepancies=[
+                RuleDiscrepancy(
+                    code="ud_target_row_conflict",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message="UD/AM document targets workbook rows that were already claimed by an earlier document.",
+                    subject_scope="mail",
+                    target_ref=mail_id,
+                    details={
+                        "document_number": document_number,
+                        "conflicting_row_indexes": sorted(preview_overlap),
+                    },
+                )
+            ],
+            decision_reasons=[
+                f"UD row-group conflict detected for {document_number}; the preferred workbook rows were already claimed earlier."
+            ],
+        ),
+    )
+
+
+def _same_run_ud_duplicate_warning(
+    *,
+    assembly,
+    working_snapshot: WorkbookSnapshot | None,
+    baseline_workbook_snapshot: WorkbookSnapshot | None,
+    expected_document_number: str,
+    mail_id: str,
+) -> RuleDiscrepancy | None:
+    if working_snapshot is None or baseline_workbook_snapshot is None or assembly.ud_selection is None:
+        return None
+    if assembly.ud_selection.get("final_decision") != "already_recorded":
+        return None
+    row_indexes = sorted(_selected_ud_selection_rows(assembly.ud_selection))
+    if not row_indexes:
+        return None
+    working_mapping = resolve_ud_ip_exp_header_mapping(working_snapshot)
+    baseline_mapping = resolve_ud_ip_exp_header_mapping(baseline_workbook_snapshot)
+    if working_mapping is None or baseline_mapping is None:
+        return None
+    working_rows = {row.row_index: row for row in working_snapshot.rows}
+    baseline_rows = {row.row_index: row for row in baseline_workbook_snapshot.rows}
+    matches_working = all(
+        working_rows.get(row_index) is not None
+        and working_rows[row_index].values.get(working_mapping["ud_ip_shared"], "").strip() == expected_document_number
+        for row_index in row_indexes
+    )
+    matches_baseline = all(
+        baseline_rows.get(row_index) is not None
+        and baseline_rows[row_index].values.get(baseline_mapping["ud_ip_shared"], "").strip() == expected_document_number
+        for row_index in row_indexes
+    )
+    if not matches_working or matches_baseline:
+        return None
+    return RuleDiscrepancy(
+        code="ud_duplicate_document_same_run",
+        severity=FinalDecision.WARNING,
+        message="Duplicate UD/AM document in the same run was ignored because an earlier mail already staged it.",
+        subject_scope="mail",
+        target_ref=mail_id,
+        details={
+            "document_number": expected_document_number,
+            "row_indexes": row_indexes,
+        },
     )
 
 

@@ -235,7 +235,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual(result.staged_write_operations, [])
         self.assertEqual(result.discrepancies[0].code, "ud_candidate_tie_after_full_tiebreak")
 
-    def test_stage_ud_shared_column_operations_blocks_nonblank_shared_column_until_policy_confirmed(self) -> None:
+    def test_stage_ud_shared_column_operations_blocks_conflicting_shared_column_with_row_conflict(self) -> None:
         snapshot = _snapshot(
             rows=[
                 WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "UD-OLD", 4: "", 5: ""}),
@@ -258,7 +258,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         )
 
         self.assertEqual(result.staged_write_operations, [])
-        self.assertEqual(result.discrepancies[0].code, "ud_shared_column_nonblank_policy_unresolved")
+        self.assertEqual(result.discrepancies[0].code, "ud_target_row_conflict")
         self.assertEqual(result.discrepancies[0].details["target_rows"][0]["observed_value"], "UD-OLD")
 
     def test_stage_ud_shared_column_operations_blocks_filename_style_ud_number(self) -> None:

@@ -88,8 +88,9 @@ class UDIPEXPValidationAssemblyTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(result.rule_evaluation.final_decision, FinalDecision.PASS)
-        self.assertEqual(result.staging_result.discrepancies[0].code, "ud_shared_column_nonblank_policy_unresolved")
+        self.assertEqual(result.rule_evaluation.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual([item.code for item in result.rule_evaluation.discrepancies], ["ud_target_row_conflict"])
+        self.assertEqual(result.staging_result.discrepancies, [])
         self.assertEqual(result.staging_result.staged_write_operations, [])
 
     def test_assemble_ud_validation_hard_blocks_missing_quantity(self) -> None:

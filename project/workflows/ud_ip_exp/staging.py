@@ -130,6 +130,49 @@ def stage_ud_shared_column_operations(
         or rows_by_index[row_index].values.get(header_mapping[column_key], "").strip()
     ]
     if nonblank_targets:
+        if _has_ud_target_row_conflict(
+            nonblank_targets=nonblank_targets,
+            target_values=target_values,
+            expected_document_date=ud_document.document_date.value if ud_document.document_date is not None else None,
+        ):
+            return UDIPEXPWriteStagingResult(
+                staged_write_operations=[],
+                discrepancies=[
+                    UDIPEXPStagingDiscrepancy(
+                        code="ud_target_row_conflict",
+                        severity=FinalDecision.HARD_BLOCK,
+                        message=(
+                            "Selected UD target row already contains a different UD/AM document "
+                            "assignment or a conflicting UD date."
+                        ),
+                        details={
+                            "selected_candidate_id": selected_candidate.candidate_id,
+                            "target_column_keys": list(target_values),
+                            "target_rows": nonblank_targets,
+                            "expected_shared_value": target_values.get("ud_ip_shared"),
+                            "expected_document_date": ud_document.document_date.value
+                            if ud_document.document_date is not None
+                            else None,
+                        },
+                    )
+                ],
+                decision_reasons=[
+                    "UD shared-column staging blocked because selected rows already belong to a different UD/AM assignment."
+                ],
+            )
+        if _selected_rows_already_match_ud_targets(
+            nonblank_targets=nonblank_targets,
+            target_values=target_values,
+            expected_document_date=ud_document.document_date.value if ud_document.document_date is not None else None,
+        ):
+            return UDIPEXPWriteStagingResult(
+                staged_write_operations=[],
+                discrepancies=[],
+                decision_reasons=[
+                    f"Skipped UD shared-column write for {ud_document.document_number.value} "
+                    "because it is already recorded in the workbook."
+                ],
+            )
         return UDIPEXPWriteStagingResult(
             staged_write_operations=[],
             discrepancies=[
@@ -370,3 +413,48 @@ def _format_ddmmyyyy(value: str | object) -> str | None:
     if normalized_date is None:
         return None
     return date.fromisoformat(normalized_date).strftime("%d/%m/%Y")
+
+
+def _has_ud_target_row_conflict(
+    *,
+    nonblank_targets: list[dict[str, object]],
+    target_values: dict[str, str],
+    expected_document_date: str | None,
+) -> bool:
+    expected_shared = target_values.get("ud_ip_shared", "").strip()
+    expected_ud_date = normalize_lc_sc_date(expected_document_date or "")
+    for target in nonblank_targets:
+        column_key = str(target.get("column_key", ""))
+        observed_value = str(target.get("observed_value", "") or "").strip()
+        if column_key == "ud_ip_shared" and observed_value != expected_shared:
+            return True
+        if (
+            column_key == "ud_ip_date"
+            and observed_value
+            and expected_ud_date is not None
+            and normalize_lc_sc_date(observed_value) != expected_ud_date
+        ):
+            return True
+    return False
+
+
+def _selected_rows_already_match_ud_targets(
+    *,
+    nonblank_targets: list[dict[str, object]],
+    target_values: dict[str, str],
+    expected_document_date: str | None,
+) -> bool:
+    expected_shared = target_values.get("ud_ip_shared", "").strip()
+    expected_ud_date = normalize_lc_sc_date(expected_document_date or "")
+    saw_shared = False
+    for target in nonblank_targets:
+        column_key = str(target.get("column_key", ""))
+        observed_value = str(target.get("observed_value", "") or "").strip()
+        if column_key == "ud_ip_shared":
+            if observed_value != expected_shared:
+                return False
+            saw_shared = True
+        elif column_key == "ud_ip_date" and observed_value and expected_ud_date is not None:
+            if normalize_lc_sc_date(observed_value) != expected_ud_date:
+                return False
+    return saw_shared

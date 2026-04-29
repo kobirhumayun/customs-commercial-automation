@@ -79,6 +79,8 @@ Every discrepancy payload should include:
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `ud_candidate_tie_after_full_tiebreak` | `hard_block` | ud_ip_exp | UD row-combination selection tied after all deterministic keys. |
+| `ud_duplicate_document_same_mail` | `warning` | ud_ip_exp | Duplicate UD/AM evidence within one mail was deterministically ignored after matching by BGMEA number or duplicate filename evidence. |
+| `ud_duplicate_document_same_run` | `warning` | ud_ip_exp | A later mail in the same run carried a UD/AM already staged by an earlier mail, so it was treated as duplicate-only with no new write. |
 | `ud_live_document_conflict` | `hard_block` | ud_ip_exp | Multiple live-derived UD attachments in one mail disagree on required UD evidence such as date or quantity, so deterministic processing is blocked. |
 | `ud_file_number_missing` | `hard_block` | ud_ip_exp | UD/IP/EXP mail body did not yield any canonical file numbers for ERP family resolution. |
 | `ud_erp_row_missing` | `hard_block` | ud_ip_exp | One or more extracted UD/IP/EXP file numbers did not resolve to a canonical ERP row. |
@@ -93,6 +95,7 @@ Every discrepancy payload should include:
 | `ud_lc_value_match_unresolved` | `hard_block` | ud_ip_exp | Structured UD/AM LC value did not identify a contiguous blank-UD workbook row group. |
 | `ud_quantity_below_workbook` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity was less than the selected workbook quantity for a unit. |
 | `ud_quantity_excess_below_threshold` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity exceeded workbook quantity by less than the required 50-unit threshold. |
+| `ud_target_row_conflict` | `hard_block` | ud_ip_exp | The candidate UD/AM row group is already assigned to a different UD/AM document, or the existing UD date conflicts with the candidate document. |
 | `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row has one or more non-blank UD target cells; phase 1 does not write to any workbook target cell that already contains a value. |
 | `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | IP/EXP matching, date-column, total-check, or shared-column update policy remains unresolved, so staging is blocked with document evidence. |
 
