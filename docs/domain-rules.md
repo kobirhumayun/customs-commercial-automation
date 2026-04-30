@@ -291,6 +291,11 @@ Current shared-column formatting is:
 - EXP listed before IP when both exist
 - multiple values separated by line breaks
 
+Mail-shape contract for `ud_ip_exp`:
+- a mail may be UD-only, EXP-only, or EXP+IP only
+- a mail containing IP must also contain EXP
+- a mail must never mix any UD document with any IP/EXP document
+
 Current phase-1 write behavior is narrower:
 - only UD values are staged into the workbook
 - IP/EXP formatting is still used for discrepancy and proposed-value evidence

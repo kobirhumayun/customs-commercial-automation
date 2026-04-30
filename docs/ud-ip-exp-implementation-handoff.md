@@ -80,6 +80,11 @@ Workbook column `UD No. & IP No.` stores UD, EXP, and IP values together:
 - If both EXP and IP exist, EXP appears before IP.
 - Multiple values are separated by line breaks.
 
+Mail composition contract:
+- a mail may contain only UD documents, only EXP documents, or EXP together with IP
+- if IP exists in a mail, EXP must also be present
+- a mail mixing any UD document with any IP/EXP document is invalid
+
 ### UD Allocation
 
 For UD documents:
@@ -269,7 +274,9 @@ Manifest shape:
 - Top-level JSON value is a list of records.
 - Each record must include `mail_id` or `entry_id` matching the mail snapshot.
 - Each record may include `document_kind` (`UD`, `IP`, or `EXP`); omitted kind defaults to `UD` for backward-compatible UD fixtures.
-- Multiple records may reference the same mail when a fixture mail carries UD plus IP/EXP documents.
+- Multiple records may reference the same mail when a fixture mail carries multiple UD documents, or EXP together with IP documents.
+- A fixture mail must not mix any UD record with any IP/EXP record.
+- A fixture mail containing any IP record must also include at least one EXP record.
 - Each record must include `document_number`, `document_date`, and `lc_sc_number`.
 - `quantity` and `quantity_unit` should be supplied for UD allocation.
 - Optional confidence/provenance fields are supported for required extracted values.

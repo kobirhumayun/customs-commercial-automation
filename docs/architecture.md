@@ -199,6 +199,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### UD / IP / EXP CLI
 - Shares intake, storage, and parsing services with export workflow.
+- Mail composition follows a fixed contract: one mail may contain only UD documents (single or multiple), only EXP documents, or EXP documents together with IP documents. A mail containing IP must also contain EXP, and a mail mixing any UD document with any IP/EXP document is invalid.
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
 - Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.

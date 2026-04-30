@@ -601,10 +601,15 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 ### Inputs
 - Outlook folder: `working`; snapshot all messages in the folder when the CLI is triggered
 - Email body file numbers resolved through the ERP register report, using the same canonical file-number extraction and one-family consistency checks as `export_lc_sc`
-- PDF attachments for UD, EXP, and/or IP
+- PDF attachments in one of these valid mail shapes only:
+  - UD-only (single or multiple UD documents)
+  - EXP-only
+  - EXP with one or more IP documents
 - Existing master workbook rows for the same LC/SC family
 
 ### Initial live-document validation boundary
+- a mail must not mix any UD document with any IP/EXP document
+- if any IP document is present in a mail, at least one EXP document must also be present
 - the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
 - the live `ud_ip_exp` reader processes only PDFs whose filenames begin `UD-`, begin `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP`; all other PDFs are skipped before UD/IP/EXP document analysis
@@ -731,6 +736,8 @@ Selection:
 Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
 
 ### IP / EXP rules
+- valid non-UD mail shapes are EXP-only and EXP+IP; IP-only is invalid
+- a mail mixing UD with any IP/EXP document is invalid
 - no completed workbook-staging path is active for IP/EXP in the current code
 - when IP and/or EXP payloads appear in one mail, the workflow formats the proposed shared-column text (`EXP: ...` before `IP: ...`) and then hard-blocks with `ip_exp_policy_unresolved`
 - unresolved areas are workbook target-row matching keys, total value/quantity reconciliation, date-column mapping, and shared-column append/replacement/duplicate policy
