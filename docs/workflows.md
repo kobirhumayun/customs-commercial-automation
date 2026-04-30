@@ -786,6 +786,11 @@ Rows where:
 - within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
+- for UD/Amendment operator handling, emit a per-run print-annotation checklist ordered by the same final print sequence used for physical submission
+- each checklist row must include: `print_sequence`, `workflow_id`, `ud_or_amendment_no`, `sl_no_values`, `mail_subject`, `document_filename`
+- checklist generation must resolve `sl_no_values` from workbook `SL.No.` column values for the selected target rows; do not infer `SL.No.` from workbook `row_index`
+- checklist output may include `row_indexes` for audit traceability, but `sl_no_values` is mandatory for operator use
+- if any selected target row cannot resolve a valid `SL.No.` value, checklist generation must hard-block and emit discrepancy evidence
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
 - when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission
 - if `print_printer_name` is configured, that fallback must temporarily switch the Windows default printer to the configured printer, submit the silent job, and then restore the original default printer in `finally`

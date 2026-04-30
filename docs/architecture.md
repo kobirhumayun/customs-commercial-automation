@@ -96,6 +96,25 @@ Each manually triggered CLI run should follow one explicit execution contract:
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
+### Operator print-annotation checklist contract (normative)
+For workflows that print UD/Amendment documents, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
+
+Required checklist fields per printed document:
+- `print_sequence` (1-based sequence in physical print order)
+- `workflow_id`
+- `ud_or_amendment_no`
+- `sl_no_values` (list of workbook `SL.No.` values to annotate by hand)
+- `mail_subject`
+- `document_filename`
+
+Audit-support fields may also include `row_indexes`, but operators must not be asked to infer `SL.No.` from row coordinates.
+
+#### `SL.No.` mapping rule (normative)
+- `SL.No.` is a business field and must be resolved from the workbook `SL.No.` header column value for each selected target row.
+- Workbook `row_index` and `SL.No.` must be treated as distinct identifiers.
+- Operator-facing reports/checklists must include resolved `sl_no_values`; they may include `row_indexes` only as supplemental trace fields.
+- If any selected row has missing/unreadable `SL.No.` during checklist generation, the checklist phase must hard-block and emit a discrepancy artifact.
+
 ### Workbook contention protocol (normative)
 Before any write-capable phase transitions to target pre-validation, the orchestrator must run workbook contention preflight checks:
 1. verify workbook path exists and is writable by the current operator context
@@ -638,4 +657,3 @@ excel_lock_timeout_seconds = 120
 
 ## 9. Artifact storage layout reference
 Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.
-
