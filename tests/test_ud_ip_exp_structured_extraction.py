@@ -293,6 +293,37 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
             "amendment_zero_increased_decreased_used_value_column",
         )
 
+    def test_amendment_matches_lc_row_from_continuation_table(self) -> None:
+        report = _amendment_report()
+        report["pages"][0]["tables"][2]["rows"] = [
+            ["SL No", "Back-to-Back LC/Sight/Usance", "Date", "Value", "Increased/Decreased", "Total Value"],
+            ["Authorized Signature", "", "", "", "", ""],
+        ]
+        report["pages"][0]["tables"].insert(
+            3,
+            {
+                "table_index": 31,
+                "rows": [
+                    ["2", "1416260401030", "2026-03-29", "USD 438,226.80", "USD 78,255.50", "USD 516,482.30"],
+                ],
+            },
+        )
+
+        analysis = extract_structured_ud_analysis(
+            report=report,
+            context=StructuredUDExtractionContext(
+                erp_lc_sc_number="1416260401030",
+                erp_ship_remarks="",
+            ),
+        )
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis.extracted_lc_sc_number, "1416260401030")
+        self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-29")
+        self.assertEqual(analysis.extracted_lc_sc_value, "78255.5")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["table_index"], 31)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 0)
+
 
 def _base_report() -> dict:
     return {

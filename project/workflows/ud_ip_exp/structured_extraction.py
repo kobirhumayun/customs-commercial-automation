@@ -19,6 +19,14 @@ _OFFICE_USE_ONLY_LABELS = {
     "base_ud": "ud no (for office use only)",
     "ud_amendment": "amendment no. (for office use only)",
 }
+_LC_SECTION_STOP_HEADERS = (
+    "UD & AM NO.",
+    "STYLE NO",
+    "FABRIC/YARN DESCRIPTION",
+    "L/C INFO",
+    "PROCESS NAME",
+    "H.S. CODE",
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -155,15 +163,10 @@ def _extract_lc_table_row(
         for value in (context.erp_lc_sc_number.strip(),)
         if value
     ]
-    target_tables = []
-    for table in _iter_tables(report):
-        rows = table["rows"]
-        if not rows or len(rows[0]) < 3:
-            continue
-        header_cell = _clean_cell(rows[0][1] if len(rows[0]) > 1 else "")
-        if header_needle not in header_cell.upper():
-            continue
-        target_tables.append(table)
+    target_tables = _collect_lc_section_tables(
+        report=report,
+        header_needle=header_needle,
+    )
 
     for identifier_source, exact_identifier in priority_identifiers:
         match = _find_lc_table_row_for_identifier(
@@ -179,6 +182,37 @@ def _extract_lc_table_row(
     return None
 
 
+def _collect_lc_section_tables(
+    *,
+    report: dict[str, Any],
+    header_needle: str,
+) -> list[dict[str, Any]]:
+    collected: list[dict[str, Any]] = []
+    in_section = False
+
+    for table in _iter_tables(report):
+        rows = table["rows"]
+        if not rows:
+            continue
+
+        header_cell = _clean_cell(rows[0][1] if len(rows[0]) > 1 else "")
+        if header_needle in header_cell.upper():
+            in_section = True
+            collected.append(table)
+            continue
+
+        if not in_section:
+            continue
+
+        first_row_text = " ".join(_clean_cell(cell).upper() for cell in rows[0])
+        if any(stop_header in first_row_text for stop_header in _LC_SECTION_STOP_HEADERS):
+            break
+
+        collected.append(table)
+
+    return collected
+
+
 def _find_lc_table_row_for_identifier(
     *,
     tables: list[dict[str, Any]],
@@ -190,7 +224,7 @@ def _find_lc_table_row_for_identifier(
 ) -> dict[str, Any] | None:
     for table in tables:
         rows = table["rows"]
-        for row_index, row in enumerate(rows[1:], start=1):
+        for row_index, row in enumerate(rows):
             if len(row) <= value_column:
                 continue
             identifier = _clean_identifier_cell(row[1] if len(row) > 1 else "")
