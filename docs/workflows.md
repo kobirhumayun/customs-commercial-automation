@@ -791,6 +791,7 @@ Rows where:
 - checklist generation must resolve `sl_no_values` from workbook `SL.No.` column values for the selected target rows; do not infer `SL.No.` from workbook `row_index`
 - checklist output may include `row_indexes` for audit traceability, but `sl_no_values` is mandatory for operator use
 - if any selected target row cannot resolve a valid `SL.No.` value, checklist generation must hard-block and emit discrepancy evidence
+- as the final operator-facing step of checklist production, generate an HTML checklist file in print sequence order and automatically open it in the system default browser
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
 - when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission
 - if `print_printer_name` is configured, that fallback must temporarily switch the Windows default printer to the configured printer, submit the silent job, and then restore the original default printer in `finally`
@@ -822,7 +823,7 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 
 ### Phase 1 released operator note
 - The standard released sequence is:
-  `report-live-readiness` -> `validate-run` -> `plan-print` -> `execute-print` -> `execute-mail-moves`
+  `report-live-readiness` -> `validate-run` -> `plan-print` -> `execute-print` -> `generate-print-annotation-html` -> `execute-mail-moves`
 - `acknowledge-partial-print` is an exception-path recovery command, not part of the normal happy-path operator flow.
 - Print completion in phase 1 means deterministic silent submission order has completed and the workflow state reached `completed`; it does not mean the system waited for physical paper completion.
 - A run may end in terminal `completed` state while still retaining discrepancy records from earlier failed attempts in the same audit trail. Operators should treat terminal phase statuses as the authoritative state and use discrepancies as historical evidence.
