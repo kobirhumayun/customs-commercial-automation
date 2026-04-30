@@ -639,32 +639,28 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - duplicate-only/no-write movement behavior for `ud_ip_exp` follows the shared staged mail-move gates once validation succeeds and no print obligation exists
 
 ### Shared-column behavior
-- Column `UD No. & IP No.` stores UD/EXP/IP values together.
-- UD entries have no prefix.
-- EXP entries use `EXP: ` prefix.
-- IP entries use `IP: ` prefix.
-- When both EXP and IP exist, EXP must be listed before IP.
+- Column `UD No. & IP No.` uses plain UD values, `EXP: ` prefixes for EXP, and `IP: ` prefixes for IP.
+- When both EXP and IP are formatted together, EXP must be listed before IP.
 - Multiple entries are line-break separated.
+- In the current code, only UD values are staged into the workbook. EXP/IP formatting is used for proposed shared-column evidence while IP/EXP staging remains hard-blocked.
 
 ### UD allocation logic
 - extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
-- first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
-- legacy/non-structured UD allocation must also check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, treat the mail as duplicate-only/no-write
-- otherwise filter workbook rows to the ERP LC/SC family and exclude rows where `UD No. & IP No.` is already populated
-- sort candidate workbook rows by row index ascending
-- starting from the first blank-UD row, sum workbook `Amount` column 6 until it matches the extracted UD LC/SC value numerically within tolerance
-- the matched contiguous row range is the only target row group for the mail
-- if a preferred row group was already claimed by an earlier document but another equally valid blank row group remains, the later document may use that blank alternative in deterministic processing order
-- if only occupied matching rows remain and they belong to a different UD/AM number, or if the same UD/AM number is present with a conflicting `UD & IP Date`, hard-block with `ud_target_row_conflict`
-- sum workbook quantities for only that target row group by unit
-- derive workbook quantity units for the selected target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
+- when structured UD evidence is present (`lc_sc_date`, `lc_sc_value`, and `quantity_by_unit`), first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
+- otherwise, for the structured path, filter workbook rows to the ERP LC/SC family, exclude rows where `UD No. & IP No.` is already populated, keep ascending workbook row order, and accumulate workbook `Amount` column 6 until the extracted UD LC/SC value matches numerically within tolerance
+- the current structured path does not search arbitrary row combinations once value evidence is present; the first ascending blank-row accumulation that reaches the target value is the only candidate row group
+- sum workbook quantities for only that structured target row group by unit
+- derive workbook quantity units for the selected structured target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
 - compare each workbook unit total against the corresponding UD supplier quantity total
 - pass quantity validation only when UD quantity equals workbook quantity or the UD excess is at least 50 yards/meters; hard-block when UD quantity is less than workbook quantity or excess is greater than zero but below 50
-- write the UD/AM number, UD/AM date, and current workflow receive date to matched rows only if value and quantity rules are satisfied
+- structured UD writes stage the UD/AM number, UD/AM date, and current workflow receive date only if value and quantity rules are satisfied and every target cell for those fields is blank
 - `UD & IP Date` is written from the UD/AM document date as `DD/MM/YYYY`; `UD Recv. Date` is written as the current workflow date in the same format
+- if structured value evidence is absent but a deterministic UD quantity payload is present, fall back to the legacy/non-structured row-combination path
+- legacy/non-structured UD allocation must also check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, treat the mail as duplicate-only/no-write
+- legacy candidate selection may use non-sequential row combinations and follows the deterministic tie-break contract below
 
-#### UD row-combination candidate scoring and tie-break order (normative)
-When more than one valid row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
+#### Legacy UD row-combination candidate scoring and tie-break order (normative)
+When more than one valid legacy row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
 
 1. **Primary key — workbook row index sequence (ascending)**
    - Compare combinations lexicographically by sorted workbook row indexes.
@@ -705,10 +701,14 @@ For every mail that reaches UD allocation, the mail-level JSON report must inclu
   - `prewrite_nonblank_optional_count`
   - `selected` (boolean)
   - `rejection_reason` (if not selected)
-- `ud_selection.final_decision` (`selected` or `hard_block_tie`)
+- `ud_selection.final_decision` (`selected`, `already_recorded`, `hard_block`, or `hard_block_tie`)
 - `ud_selection.final_decision_reason`
+- `ud_selection.selected_candidate_id`
+- `ud_selection.discrepancy_code`
 
-#### Worked example (duplicated quantities + non-sequential matches)
+Structured UD selections reuse the same report shape but typically emit one candidate and may include extra `score_keys` fields such as `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
+
+#### Worked example (legacy duplicated quantities + non-sequential matches)
 UD extracted quantity = `3000 YDS`.
 Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
 - row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
@@ -731,10 +731,9 @@ Selection:
 Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
 
 ### IP / EXP rules
-- no amendment model
-- each document is newly issued against a specific LC/SC or amendment
-- when multiple IP/EXP docs appear in one mail, their total value and quantity should match LC total unless a future documented exception applies
-- dates must be written line-by-line aligned with their corresponding numbers
+- no completed workbook-staging path is active for IP/EXP in the current code
+- when IP and/or EXP payloads appear in one mail, the workflow formats the proposed shared-column text (`EXP: ...` before `IP: ...`) and then hard-blocks with `ip_exp_policy_unresolved`
+- unresolved areas are workbook target-row matching keys, total value/quantity reconciliation, date-column mapping, and shared-column append/replacement/duplicate policy
 
 ## Import / BTB LC processing
 

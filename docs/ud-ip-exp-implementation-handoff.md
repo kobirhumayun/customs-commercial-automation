@@ -83,18 +83,19 @@ Workbook column `UD No. & IP No.` stores UD, EXP, and IP values together:
 ### UD Allocation
 
 For UD documents:
-- Extract UD number, UD date, LC/SC number, quantity, quantity unit, and any additional fields required by the workbook mapping.
-- Find candidate workbook rows for the same LC/SC family.
-- Use a multiset/bag approach so duplicate row quantities are handled correctly.
-- Candidate row combinations may be non-sequential.
-- Write UD values only to selected matched rows.
+- Extract UD number, UD date, LC/SC number, quantity data, and any additional fields required by the workbook mapping.
+- Structured/live UD payloads now prefer the value-first path: match ERP family, validate LC date, then accumulate blank family rows in ascending row order by workbook `Amount` until the extracted LC value matches within tolerance.
+- Before staging a structured UD write, check for an already-recorded workbook group carrying the same UD value plus matching `UD & IP Date`; if found and quantity/value checks also pass, return `already_recorded` and stage no write.
+- Legacy fixture-style UD payloads without structured value evidence still use the older multiset/bag quantity-combination path.
+- Only the legacy path may select non-sequential row combinations.
+- Write UD values only to selected matched rows, and only when every target cell required for the write is blank.
 - Ignore excess quantity only when excess is at least `50` yards/meters.
 - If excess quantity is less than `50`, hard-block.
 - If required extraction fields are missing or below threshold, hard-block.
 
-### UD Candidate Tie-Breaking
+### Legacy UD Candidate Tie-Breaking
 
-When multiple valid row combinations satisfy the same extracted quantity, apply this exact deterministic order:
+When multiple valid legacy row combinations satisfy the same extracted quantity, apply this exact deterministic order:
 
 1. Row-index key:
    Compare sorted row-index sequences lexicographically; smallest sequence wins.
@@ -121,7 +122,7 @@ Mail-level reports for UD allocation must include:
 - rejection reason for non-selected candidates
 - final decision and reason
 
-This evidence is mandatory because the workflow may select non-sequential rows and must remain auditable.
+This evidence is mandatory because the legacy path may select non-sequential rows and the structured path still needs auditable candidate/value evidence.
 
 ### IP / EXP Rules
 
@@ -129,8 +130,9 @@ Current docs confirm:
 - IP and EXP do not use the UD amendment model.
 - EXP/IP values share `UD No. & IP No.` with UD values.
 - EXP must be ordered before IP when both are present.
+- the current code still hard-blocks workbook staging for IP/EXP with `ip_exp_policy_unresolved`
 
-The exact extraction fields, workbook date columns, matching keys, and update/append behavior for IP/EXP must be confirmed before coding if not already explicit in the source docs.
+The remaining unresolved areas are workbook target-row matching keys, total reconciliation, date-column mapping, and shared-column append/replacement/duplicate policy.
 
 ## Confirmed Exclusions
 
@@ -170,7 +172,7 @@ Current live-extraction boundary:
 - ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
 - structured UD/AM extraction now requires page-1 office-use-only-row UD/AM number/date extraction: Base UD must match `UD No (For office use only)` and Amendment must match `Amendment no. (For office use only)`; `For office use only` is mandatory, no alternate row-label fallback is allowed, and invalid BGMEA row values hard-block
-- structured UD/AM extraction also requires exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first contiguous workbook row selection by `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
+- structured UD/AM extraction also requires exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first ascending blank-row accumulation by workbook `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
 - ERP `LC No.` row matching is exact first, then may compare only after removing leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, internal spaces and all other characters remain unchanged, and `Ship. Remarks` remains exact-only
 - for UD Amendments only, if the matched row's `Increased/Decreased` value is numeric zero, extraction uses that row's `Value` column instead because the LC is treated as newly included in the amendment
 - structured UD/AM quantity validation uses the workbook `Quantity of Fabrics (Yds/Mtr)` cell number format as the unit source: `#,###.00 "Mtr"` means `MTR`; any other number format defaults to `YDS`
@@ -201,9 +203,9 @@ Do not assume additional workbook columns without verifying `docs/workflows.md`,
 
 Implemented:
 - Match rows by LC/SC family.
-- Compare quantities using normalized numeric values and unit compatibility.
-- Generate all valid candidate combinations for UD allocation.
-- Score candidates using the normative tie-break keys.
+- For structured UD, accumulate blank family rows in ascending workbook order until workbook `Amount` matches the extracted LC value, then validate workbook quantity totals by unit.
+- For legacy UD, compare quantities using normalized numeric values and unit compatibility.
+- For legacy UD, generate all valid candidate combinations and score them using the normative tie-break keys.
 - Persist/report all candidate evidence.
 
 ### 4. Write Staging
@@ -212,6 +214,7 @@ Implemented behavior:
 - No direct Excel writes during validation.
 - All target cells must be prevalidated before live write.
 - UD shared-column writes stage explicit `WriteOperation` records using expected post-write values.
+- Exact already-recorded UD matches no-op instead of staging appends or replacements.
 - Conflicting non-blank target values currently hard-block with `ud_shared_column_nonblank_policy_unresolved`.
 
 Still deferred:
@@ -221,6 +224,9 @@ Still deferred:
 ### 5. Rule Pack
 
 Implemented rule categories:
+- file number present for ERP family resolution
+- ERP rows present
+- ERP family consistent
 - required UD document present
 - required UD extraction fields present
 - deterministic UD allocation selected
@@ -228,9 +234,8 @@ Implemented rule categories:
 
 Still expected before workflow completion:
 - required document classification present
-- LC/SC family match
-- quantity/unit compatibility
-- workbook target update permitted
+- IP/EXP workbook target matching policy
+- IP/EXP total/date/update policy completion
 
 Any new discrepancy code must first be added to `docs/discrepancy-codes.md`.
 

@@ -241,7 +241,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `file_no` | `Commercial File No.` | `File No.`, `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
 | `lc_sc_no` | `L/C & S/C No.` | `L/C No.`, `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
 | `buyer_name` | `Name of Buyers` | `Buyer Name`, `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
-| `ud_ip_shared` | `UD No. & IP No.` | none | UD/IP/EXP extraction and ordering rules | `update_if_blank_or_append_multiline` | existing value may be preserved and line-extended only by deterministic rule pack |
+| `ud_ip_shared` | `UD No. & IP No.` | none | UD direct-write values plus EXP/IP formatting rules for unresolved-policy evidence | `update_if_blank` | phase-1 `ud_ip_exp` writes require blank target cells; exact already-recorded matches no-op instead of appending |
 | `up_no` | `UP No.` | `UP` | workflow filters only in phase 1 | `never_write` (except future approved workflow) | n/a |
 
 #### Mapping matrix — workflow-specific minimum fields
@@ -250,10 +250,10 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
 | `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; ERP row value may be blank; target blank |
-| `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank_or_append_multiline` | candidate rows selected by deterministic tie-break contract |
+| `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank` | selected UD target rows only; exact already-recorded matches no-op instead of appending |
 | `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows; source UD/AM document date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows; source current workflow date formatted `DD/MM/YYYY` |
-| `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by contiguous sequential sum |
+| `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by ascending blank-row accumulation |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
@@ -284,15 +284,20 @@ For `Quantity of Fabrics (Yds/Mtr)`:
 - Dependent amendments may be added to an existing file instead of receiving a new file.
 
 ## UD/IP/EXP shared column rule
-Column `UD No. & IP No.` stores:
+Current shared-column formatting is:
 - UD numbers for local buyers with no prefix
 - `EXP: ` prefixed values for EXP
 - `IP: ` prefixed values for IP
 - EXP listed before IP when both exist
 - multiple values separated by line breaks
 
+Current phase-1 write behavior is narrower:
+- only UD values are staged into the workbook
+- IP/EXP formatting is still used for discrepancy and proposed-value evidence
+- `ud_ip_exp` does not append to existing shared-column cell values; exact already-recorded matches no-op and unexpected non-blank targets hard-block
+
 ## UD candidate combination determinism rule
-For structured Base UD and UD Amendment PDFs, target rows are selected by the value-first contiguous row rule below. The older quantity-combination rule remains available only for deterministic legacy payloads that do not carry structured UD LC value evidence.
+For structured Base UD and UD Amendment PDFs, target rows are selected by the value-first ascending-row rule below. The older quantity-combination rule remains available only for deterministic legacy payloads that do not carry structured UD LC value evidence.
 
 ### Structured UD value-first row selection
 - Email body file number selects the canonical ERP row and therefore the ERP LC/SC family, ERP `LC No.`, ERP `Ship. Remarks`, and ERP LC/SC date.
@@ -307,9 +312,8 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number.
 - Same-mail duplicate UD/AM evidence is resolved first by BGMEA UD/AM number and then by duplicate filename evidence. Later duplicates are ignored only when their required extracted evidence matches exactly; any disagreement in date, LC/SC value, or quantity evidence is a hard block.
 - Duplicate attachment filename evidence is business-relevant for `ud_ip_exp`; same-mail repeated filenames must participate in duplicate/conflict checks even when the BGMEA number is unavailable from filename alone.
-- Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated contiguously from the first blank-UD row until the value matches within the configured tolerance.
-- If a previously matched row group is already occupied by a different UD/AM but another equally valid blank row group remains, the later document may use the blank alternative by deterministic processing order.
-- If only occupied matching rows remain and they belong to a different UD/AM number, or if the same BGMEA UD/AM number is present with a conflicting `UD & IP Date`, the mail hard-blocks with `ud_target_row_conflict`.
+- Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated in ascending row order until the value matches within the configured tolerance.
+- The current structured path does not run an arbitrary alternative-group search after value evidence is available; if the ascending blank-row accumulation does not match the target value, the result is `ud_lc_value_match_unresolved`.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
 - Structured UD validation must identify the workbook quantity unit from the workbook cell number format for `Quantity of Fabrics (Yds/Mtr)`: if the format is `#,###.00 "Mtr"`, the unit is `MTR`; otherwise the unit defaults to `YDS`. This mirrors the export workflow, which writes MTR quantities by applying that number format.
 - During a multi-mail run, in-memory workbook snapshot advancement after staged writes must preserve row number formats so later mails still evaluate quantity units from the original workbook-authored evidence.
@@ -346,7 +350,7 @@ Mail-level report payload must include:
 - selected/non-selected status per candidate and rejection reasons
 - final decision + final decision reason
 
-### Worked example (duplicated quantities, non-sequential matches)
+### Worked example (legacy duplicated quantities, non-sequential matches)
 For extracted UD quantity `3000 YDS`, candidate rows:
 - row 11 (`1000`, amnd date `2026-01-02`, amnd no `1`)
 - row 14 (`1000`, amnd date `2026-01-02`, amnd no `1`)

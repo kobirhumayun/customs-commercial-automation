@@ -83,9 +83,12 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 
 ### UD/IP/EXP unresolved IP/EXP policy details
 When `code` is `ip_exp_policy_unresolved`, `details` must include:
+- `run_id`
 - `mail_id`
-- `document_count`
-- `document_kinds`
+- `sheet_name`
+- `target_column_key`
+- `target_column_index`
+- `target_row_indexes`
 - `proposed_shared_column_value`
 - `documents`
 - `unresolved_policies`
@@ -95,9 +98,37 @@ Each `documents[]` item should include:
 - `document_number`
 - `document_date`
 - `lc_sc_number`
+- `lc_sc_date`
+- `lc_sc_value`
 - `quantity`
 - `quantity_unit`
+- `quantity_by_unit`
 - `source_saved_document_id`
+
+### UD/IP/EXP selection object
+When `ud_selection` is present for `ud_ip_exp`, it must include:
+- `required_quantity`
+- `quantity_unit`
+- `candidate_count`
+- `candidates`
+- `final_decision` (`selected` | `already_recorded` | `hard_block` | `hard_block_tie`)
+- `final_decision_reason`
+- `selected_candidate_id` (nullable)
+- `discrepancy_code` (nullable)
+
+Each `candidates[]` item should include:
+- `candidate_id`
+- `row_indexes`
+- `matched_quantities`
+- `quantity_sum`
+- `ignored_excess_quantity`
+- `score_keys`
+- `prewrite_blank_targets_count`
+- `prewrite_nonblank_optional_count`
+- `selected`
+- `rejection_reason`
+
+Structured UD candidates may also emit `score_keys` entries for `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
 
 ## 5) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`

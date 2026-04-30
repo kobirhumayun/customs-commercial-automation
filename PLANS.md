@@ -67,7 +67,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and EXP PDFs whose filename stem is exactly `<digits>-EXP`.
 - EXP descriptor variants such as `<digits>-EXP-INVOICE.pdf` are skipped to prefer the machine-generated text-layer EXP file.
 - Explicit UD-LC/UD-SC attachment filename suffixes validated only as sanity evidence against the ERP-derived LC/SC family, never as lookup input.
-- Ordered shared-column writing rules for UD/EXP/IP values and dates.
+- UD shared-column/date writes for deterministic UD documents, with IP/EXP workbook writes still unresolved and therefore hard-blocked in the current code.
 - Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).
 - Human-review routing is explicitly deferred to a later phase after recurring issue categories are formalized.
 
