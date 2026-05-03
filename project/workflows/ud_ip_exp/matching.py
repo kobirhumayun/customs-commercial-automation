@@ -372,34 +372,13 @@ def allocate_structured_ud_rows(
         for row in all_family_rows
         if not row.values.get(mapping["ud_ip_shared"], "").strip()
     ]
-    selected_rows: list[UDCandidateRow] = []
-    running_value = Decimal("0")
-    for workbook_row in eligible_rows:
-        amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
-        if amount is None:
-            break
-        raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
-        quantity = _parse_quantity(raw_quantity) or Decimal("0")
-        quantity_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
-        selected_rows.append(
-            UDCandidateRow(
-                row_index=workbook_row.row_index,
-                lc_sc_number=workbook_row.values.get(mapping["lc_sc_no"], ""),
-                quantity=quantity,
-                quantity_unit=quantity_unit,
-                export_amount=amount,
-                ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
-                lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
-                lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
-            )
-        )
-        running_value += amount
-        if abs(running_value - target_value) <= value_tolerance:
-            break
-        if running_value > target_value + value_tolerance:
-            break
-
-    if not selected_rows or abs(running_value - target_value) > value_tolerance:
+    exact_value_groups = _select_structured_value_groups(
+        workbook_rows=eligible_rows,
+        mapping=mapping,
+        target_value=target_value,
+        value_tolerance=value_tolerance,
+    )
+    if not exact_value_groups:
         return UDAllocationResult(
             required_quantity="",
             quantity_unit="",
@@ -410,68 +389,91 @@ def allocate_structured_ud_rows(
             discrepancy_code="ud_lc_value_match_unresolved",
         )
 
-    quantity_totals = _quantity_totals_by_unit(selected_rows)
     normalized_ud_quantities = {
         normalize_quantity_unit(unit): Decimal(str(amount))
         for unit, amount in quantity_by_unit.items()
     }
-    if not quantity_totals:
-        candidate = _structured_candidate(
-            selected_rows=selected_rows,
-            workbook_value_sum=running_value,
-            lc_sc_value=target_value,
-            workbook_quantities=quantity_totals,
-            ud_quantities=normalized_ud_quantities,
-            selected=False,
-            rejection_reason="ud_quantity_below_workbook",
+    evaluated_candidates: list[tuple[UDAllocationCandidate, str | None]] = []
+    for selected_rows in exact_value_groups:
+        workbook_value_sum = sum(
+            (row.export_amount or Decimal("0") for row in selected_rows),
+            Decimal("0"),
         )
-        return UDAllocationResult(
-            required_quantity=_format_quantity_map(normalized_ud_quantities),
-            quantity_unit="MULTI",
-            candidate_count=1,
-            candidates=[candidate],
-            final_decision="hard_block",
-            final_decision_reason="ud_quantity_below_workbook",
-            discrepancy_code="ud_quantity_below_workbook",
-        )
-    quantity_error = _structured_quantity_error(
-        workbook_quantities=quantity_totals,
-        ud_quantities=normalized_ud_quantities,
-        excess_threshold=excess_threshold,
-    )
-    candidate = _structured_candidate(
-        selected_rows=selected_rows,
-        workbook_value_sum=running_value,
-        lc_sc_value=target_value,
-        workbook_quantities=quantity_totals,
-        ud_quantities=normalized_ud_quantities,
-        selected=quantity_error is None,
-        rejection_reason=quantity_error,
-    )
-    if quantity_error is not None:
-        code = (
+        quantity_totals = _quantity_totals_by_unit(selected_rows)
+        quantity_error = (
             "ud_quantity_below_workbook"
-            if quantity_error == "ud_quantity_below_workbook"
-            else "ud_quantity_excess_below_threshold"
+            if not quantity_totals
+            else _structured_quantity_error(
+                workbook_quantities=quantity_totals,
+                ud_quantities=normalized_ud_quantities,
+                excess_threshold=excess_threshold,
+            )
         )
-        return UDAllocationResult(
-            required_quantity=_format_quantity_map(normalized_ud_quantities),
-            quantity_unit="MULTI",
-            candidate_count=1,
-            candidates=[candidate],
-            final_decision="hard_block",
-            final_decision_reason=quantity_error,
-            discrepancy_code=code,
+        evaluated_candidates.append(
+            (
+                _structured_candidate(
+                    selected_rows=selected_rows,
+                    workbook_value_sum=workbook_value_sum,
+                    lc_sc_value=target_value,
+                    workbook_quantities=quantity_totals,
+                    ud_quantities=normalized_ud_quantities,
+                    selected=False,
+                    rejection_reason=quantity_error,
+                ),
+                quantity_error,
+            )
         )
 
+    viable_candidates = [
+        candidate
+        for candidate, quantity_error in evaluated_candidates
+        if quantity_error is None
+    ]
+    if viable_candidates:
+        sorted_candidates = sorted(
+            (candidate for candidate, _quantity_error in evaluated_candidates),
+            key=_candidate_sort_key,
+        )
+        best_candidate = sorted(viable_candidates, key=_candidate_sort_key)[0]
+        selected_candidates = [
+            replace(
+                candidate,
+                selected=candidate.candidate_id == best_candidate.candidate_id,
+                rejection_reason=None
+                if candidate.candidate_id == best_candidate.candidate_id
+                else (
+                    "lower_priority_score"
+                    if candidate.candidate_id in {item.candidate_id for item in viable_candidates}
+                    else candidate.rejection_reason
+                ),
+            )
+            for candidate in sorted_candidates
+        ]
+        return UDAllocationResult(
+            required_quantity=_format_quantity_map(normalized_ud_quantities),
+            quantity_unit="MULTI",
+            candidate_count=len(selected_candidates),
+            candidates=selected_candidates,
+            final_decision="selected",
+            final_decision_reason="selected_structured_lc_value_and_quantity",
+            selected_candidate_id=best_candidate.candidate_id,
+        )
+
+    sorted_candidates = sorted(evaluated_candidates, key=lambda item: _candidate_sort_key(item[0]))
+    primary_candidate, primary_error = sorted_candidates[0]
+    code = (
+        "ud_quantity_below_workbook"
+        if primary_error == "ud_quantity_below_workbook"
+        else "ud_quantity_excess_below_threshold"
+    )
     return UDAllocationResult(
         required_quantity=_format_quantity_map(normalized_ud_quantities),
         quantity_unit="MULTI",
-        candidate_count=1,
-        candidates=[candidate],
-        final_decision="selected",
-        final_decision_reason="selected_structured_lc_value_and_quantity",
-        selected_candidate_id=candidate.candidate_id,
+        candidate_count=len(sorted_candidates),
+        candidates=[candidate for candidate, _quantity_error in sorted_candidates],
+        final_decision="hard_block",
+        final_decision_reason=primary_error or "ud_quantity_below_workbook",
+        discrepancy_code=code,
     )
 
 
@@ -492,78 +494,119 @@ def _allocate_already_recorded_structured_rows(
     if expected_ud_date_key is None:
         return None
 
-    selected_rows: list[UDCandidateRow] = []
-    running_value = Decimal("0")
-    for workbook_row in rows:
-        if not _shared_value_matches(
+    matching_rows = [
+        workbook_row
+        for workbook_row in rows
+        if _shared_value_matches(
             workbook_row.values.get(mapping["ud_ip_shared"], ""),
             expected_shared_value,
-        ):
-            if selected_rows:
-                break
-            continue
-        observed_date_key = normalize_lc_sc_date(workbook_row.values.get(mapping["ud_ip_date"], ""))
-        if observed_date_key != expected_ud_date_key:
-            if selected_rows:
-                break
-            continue
-        amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
-        if amount is None:
-            break
-        raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
-        quantity = _parse_quantity(raw_quantity) or Decimal("0")
-        quantity_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
-        selected_rows.append(
-            UDCandidateRow(
-                row_index=workbook_row.row_index,
-                lc_sc_number=workbook_row.values.get(mapping["lc_sc_no"], ""),
-                quantity=quantity,
-                quantity_unit=quantity_unit,
-                export_amount=amount,
-                ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
-                lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
-                lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
-            )
         )
-        running_value += amount
-        if abs(running_value - target_value) <= value_tolerance:
-            break
-        if running_value > target_value + value_tolerance:
-            break
-
-    if not selected_rows or abs(running_value - target_value) > value_tolerance:
+        and normalize_lc_sc_date(workbook_row.values.get(mapping["ud_ip_date"], "")) == expected_ud_date_key
+    ]
+    exact_value_groups = _select_structured_value_groups(
+        workbook_rows=matching_rows,
+        mapping=mapping,
+        target_value=target_value,
+        value_tolerance=value_tolerance,
+    )
+    if not exact_value_groups:
         return None
-
-    quantity_totals = _quantity_totals_by_unit(selected_rows)
     normalized_ud_quantities = {
         normalize_quantity_unit(unit): Decimal(str(amount))
         for unit, amount in quantity_by_unit.items()
     }
-    quantity_error = _structured_quantity_error(
-        workbook_quantities=quantity_totals,
-        ud_quantities=normalized_ud_quantities,
-        excess_threshold=excess_threshold,
-    )
-    if quantity_error is not None:
+    viable_candidates: list[UDAllocationCandidate] = []
+    for selected_rows in exact_value_groups:
+        quantity_totals = _quantity_totals_by_unit(selected_rows)
+        if not quantity_totals:
+            continue
+        quantity_error = _structured_quantity_error(
+            workbook_quantities=quantity_totals,
+            ud_quantities=normalized_ud_quantities,
+            excess_threshold=excess_threshold,
+        )
+        if quantity_error is not None:
+            continue
+        workbook_value_sum = sum(
+            (row.export_amount or Decimal("0") for row in selected_rows),
+            Decimal("0"),
+        )
+        viable_candidates.append(
+            _structured_candidate(
+                selected_rows=selected_rows,
+                workbook_value_sum=workbook_value_sum,
+                lc_sc_value=target_value,
+                workbook_quantities=quantity_totals,
+                ud_quantities=normalized_ud_quantities,
+                selected=True,
+                rejection_reason=None,
+            )
+        )
+    if not viable_candidates:
         return None
 
-    candidate = _structured_candidate(
-        selected_rows=selected_rows,
-        workbook_value_sum=running_value,
-        lc_sc_value=target_value,
-        workbook_quantities=quantity_totals,
-        ud_quantities=normalized_ud_quantities,
-        selected=True,
-        rejection_reason=None,
-    )
+    candidate = sorted(viable_candidates, key=_candidate_sort_key)[0]
     return UDAllocationResult(
         required_quantity=_format_quantity_map(normalized_ud_quantities),
         quantity_unit="MULTI",
-        candidate_count=1,
-        candidates=[candidate],
+        candidate_count=len(viable_candidates),
+        candidates=[
+            replace(
+                item,
+                selected=item.candidate_id == candidate.candidate_id,
+                rejection_reason=None if item.candidate_id == candidate.candidate_id else "lower_priority_score",
+            )
+            for item in sorted(viable_candidates, key=_candidate_sort_key)
+        ],
         final_decision="already_recorded",
         final_decision_reason="ud_already_recorded",
         selected_candidate_id=candidate.candidate_id,
+    )
+
+
+def _select_structured_value_groups(
+    *,
+    workbook_rows: list,
+    mapping: dict[str, int],
+    target_value: Decimal,
+    value_tolerance: Decimal,
+) -> list[list[UDCandidateRow]]:
+    candidate_rows: list[UDCandidateRow] = []
+    for workbook_row in workbook_rows:
+        candidate_row = _build_structured_candidate_row(workbook_row, mapping)
+        if candidate_row is None:
+            continue
+        if candidate_row.export_amount is None:
+            continue
+        if candidate_row.export_amount > target_value + value_tolerance:
+            continue
+        candidate_rows.append(candidate_row)
+
+    matching_groups: list[list[UDCandidateRow]] = []
+    for size in range(1, len(candidate_rows) + 1):
+        for row_group in combinations(candidate_rows, size):
+            value_sum = sum((row.export_amount or Decimal("0") for row in row_group), Decimal("0"))
+            if abs(value_sum - target_value) <= value_tolerance:
+                matching_groups.append(list(row_group))
+    return matching_groups
+
+
+def _build_structured_candidate_row(workbook_row, mapping: dict[str, int]) -> UDCandidateRow | None:
+    amount = _parse_decimal(workbook_row.values.get(mapping["export_amount"], ""))
+    if amount is None:
+        return None
+    raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
+    quantity = _parse_quantity(raw_quantity) or Decimal("0")
+    quantity_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
+    return UDCandidateRow(
+        row_index=workbook_row.row_index,
+        lc_sc_number=workbook_row.values.get(mapping["lc_sc_no"], ""),
+        quantity=quantity,
+        quantity_unit=quantity_unit,
+        export_amount=amount,
+        ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
+        lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
+        lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
     )
 
 

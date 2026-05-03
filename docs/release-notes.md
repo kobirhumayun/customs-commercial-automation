@@ -45,6 +45,7 @@
 - phase 1 does not wait for or verify physical paper completion
 - for `ud_ip_exp`, the print-annotation checklist is a mandatory pre-print artifact gate
 - if checklist generation fails, print and post-run mail moves stay hard-blocked
+- if a no-write live run leaves `eligible_mail_count = 0`, the launcher now skips `execute-mail-moves` instead of generating a misleading downstream mail-move gate discrepancy
 - the checklist HTML is opened automatically only after successful post-run mail moves complete
 - when Acrobat times out after physical output, operators must use:
   `acknowledge-partial-print`
@@ -56,6 +57,9 @@
 ### Audit-trail note
 - completed runs may still retain discrepancy entries from earlier failed attempts in the same run history
 - terminal phase statuses are the authoritative operational state
+
+### UD allocation note
+- structured `ud_ip_exp` allocation now evaluates exact-value workbook row combinations within one LC/SC family instead of only the earliest contiguous prefix, so later exact matches and non-prefix exact combinations can still resolve deterministically
 
 ### Release readiness checklist
 - `report-live-readiness` returns `overall_status = "ready"`

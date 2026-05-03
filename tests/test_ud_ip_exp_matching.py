@@ -270,6 +270,40 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision, "hard_block")
         self.assertEqual(result.discrepancy_code, "ud_lc_value_match_unresolved")
 
+    def test_allocate_structured_ud_rows_skips_earlier_oversized_family_row(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=232, values={1: "2159260400035", 2: "33350 YDS", 3: "", 4: "", 5: "", 6: "106711"}),
+                    WorkbookRow(row_index=361, values={1: "2159260400035", 2: "16700 YDS", 3: "", 4: "", 5: "", 6: "43491"}),
+                    WorkbookRow(row_index=452, values={1: "2159260400035", 2: "6000 YDS", 3: "", 4: "", 5: "", 6: "14700"}),
+                ]
+            ),
+            lc_sc_number="2159260400035",
+            lc_sc_value=Decimal("14700"),
+            quantity_by_unit={"YDS": Decimal("6000")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "452")
+
+    def test_allocate_structured_ud_rows_can_select_non_prefix_exact_value_combination(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=308, values={1: "DPCBDA032674", 2: "10400 MTR", 3: "", 4: "", 5: "", 6: "38480"}),
+                    WorkbookRow(row_index=523, values={1: "DPCBDA032674", 2: "21100 MTR", 3: "", 4: "", 5: "", 6: "82290"}),
+                    WorkbookRow(row_index=560, values={1: "DPCBDA032674", 2: "8000 MTR", 3: "", 4: "", 5: "", 6: "29600"}),
+                ]
+            ),
+            lc_sc_number="DPCBDA032674",
+            lc_sc_value=Decimal("111890"),
+            quantity_by_unit={"MTR": Decimal("29100")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "523-560")
+
     def test_allocate_structured_ud_rows_recognizes_already_recorded_ud(self) -> None:
         result = allocate_structured_ud_rows(
             workbook_snapshot=_structured_snapshot(

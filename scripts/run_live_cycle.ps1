@@ -213,23 +213,41 @@ try {
 
     if ($stagedWriteOperationCount -eq 0) {
         Write-Host "No workbook writes were staged; skipping print planning and print execution." -ForegroundColor Yellow
-
-        Write-Section "Execute Mail Moves"
-        $mailMove = Invoke-ProjectJsonCommand -Arguments @(
-            "run", "python", "-m", "project",
-            "execute-mail-moves", $Workflow,
-            "--config", $Config,
-            "--run-id", $runId,
-            "--live-outlook"
-        )
-
-        Write-Section "Final Status"
         $status = Invoke-ProjectJsonCommand -Arguments @(
             "run", "python", "-m", "project",
             "report-run-status", $Workflow,
             "--config", $Config,
             "--run-id", $runId
         )
+        $eligibleMailMoveCount = [int]$status.Json.mail_move_policy_summary.eligible_mail_count
+
+        if ($eligibleMailMoveCount -gt 0) {
+            Write-Section "Execute Mail Moves"
+            $mailMove = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "execute-mail-moves", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId,
+                "--live-outlook"
+            )
+
+            Write-Section "Final Status"
+            $status = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "report-run-status", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId
+            )
+        } else {
+            Write-Host "No mails remain eligible for downstream movement; skipping mail moves." -ForegroundColor Yellow
+            Write-Section "Final Status"
+            $status = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "report-run-status", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId
+            )
+        }
 
         Write-Host ""
         Write-Host "Live cycle completed without workbook writes." -ForegroundColor Green

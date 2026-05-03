@@ -393,7 +393,19 @@ def _selection_by_saved_document_id(outcome: MailOutcomeRecord) -> dict[str, dic
             return mapping
         fallback_selection = selection
     else:
-        fallback_selection = _build_staged_write_selection_fallback(outcome)
+        fallback_selection = None
+
+    staged_write_mapping = _build_staged_write_selection_mapping(
+        outcome=outcome,
+        fallback_saved_documents=fallback_saved_documents,
+    )
+    if staged_write_mapping:
+        return staged_write_mapping
+
+    fallback_selection = _build_single_document_staged_write_selection_fallback(
+        fallback_saved_documents=fallback_saved_documents,
+        staged_write_operations=outcome.staged_write_operations,
+    ) or fallback_selection
 
     if len(fallback_saved_documents) != 1:
         return {}
@@ -409,18 +421,48 @@ def _selection_by_saved_document_id(outcome: MailOutcomeRecord) -> dict[str, dic
     }
 
 
-def _build_staged_write_selection_fallback(outcome: MailOutcomeRecord) -> dict[str, Any] | None:
-    row_indexes = _row_indexes_from_staged_write_operations(outcome.staged_write_operations)
+def _build_staged_write_selection_mapping(
+    *,
+    outcome: MailOutcomeRecord,
+    fallback_saved_documents: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if not fallback_saved_documents:
+        return {}
+    row_indexes_by_document_number = _row_indexes_by_document_number_from_staged_write_operations(
+        outcome.staged_write_operations
+    )
+    mapping: dict[str, dict[str, Any]] = {}
+    for document in fallback_saved_documents:
+        saved_document_id = str(document.get("saved_document_id", "")).strip()
+        if not saved_document_id:
+            continue
+        document_number = str(document.get("extracted_document_number", "")).strip()
+        row_indexes = row_indexes_by_document_number.get(document_number, [])
+        if not row_indexes:
+            continue
+        mapping[saved_document_id] = {
+            "source_saved_document_id": saved_document_id,
+            "document_number": document_number or document.get("extracted_document_number"),
+            "selection": {
+                **_build_selection_payload_from_row_indexes(row_indexes),
+                "selection_source": "staged_write_operations_fallback",
+            },
+        }
+    return mapping
+
+
+def _build_single_document_staged_write_selection_fallback(
+    *,
+    fallback_saved_documents: list[dict[str, Any]],
+    staged_write_operations: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if len(fallback_saved_documents) != 1:
+        return None
+    row_indexes = _row_indexes_from_staged_write_operations(staged_write_operations)
     if not row_indexes:
         return None
     return {
-        "candidates": [
-            {
-                "selected": True,
-                "row_indexes": row_indexes,
-            }
-        ],
-        "final_decision": "selected",
+        **_build_selection_payload_from_row_indexes(row_indexes),
         "selection_source": "staged_write_operations_fallback",
     }
 
@@ -434,6 +476,38 @@ def _row_indexes_from_staged_write_operations(staged_write_operations: list[dict
         if isinstance(row_index, int)
     }
     return sorted(row_indexes)
+
+
+def _row_indexes_by_document_number_from_staged_write_operations(
+    staged_write_operations: list[dict[str, Any]],
+) -> dict[str, list[int]]:
+    row_indexes_by_document_number: dict[str, set[int]] = {}
+    for operation in staged_write_operations:
+        if not isinstance(operation, dict):
+            continue
+        if str(operation.get("column_key", "")).strip() != "ud_ip_shared":
+            continue
+        document_number = str(operation.get("expected_post_write_value", "")).strip()
+        row_index = operation.get("row_index")
+        if not document_number or not isinstance(row_index, int):
+            continue
+        row_indexes_by_document_number.setdefault(document_number, set()).add(row_index)
+    return {
+        document_number: sorted(row_indexes)
+        for document_number, row_indexes in row_indexes_by_document_number.items()
+    }
+
+
+def _build_selection_payload_from_row_indexes(row_indexes: list[int]) -> dict[str, Any]:
+    return {
+        "candidates": [
+            {
+                "selected": True,
+                "row_indexes": row_indexes,
+            }
+        ],
+        "final_decision": "selected",
+    }
 
 
 def _selected_row_indexes(selection: Any) -> list[int]:
