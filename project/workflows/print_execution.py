@@ -13,12 +13,14 @@ from project.models import (
     PrintBatch,
     PrintPhaseStatus,
     RunReport,
+    WorkflowId,
 )
 from project.printing import PartialPrintExecutionError, PrintAdapterUnavailableError, PrintCommandReceipt, PrintGroupReceipt, PrintProvider
 from project.storage import RunArtifactPaths
 from project.storage.artifacts import write_json
 from project.utils.json import to_jsonable
 from project.utils.time import utc_timestamp
+from project.workflows.print_annotation import PrintAnnotationChecklistError, validate_print_annotation_checklist
 
 
 def execute_print_batches(
@@ -38,6 +40,26 @@ def execute_print_batches(
         raise ValueError("Print execution requires print_phase_status=planned, printing, or uncertain_incomplete.")
 
     discrepancies: list[DiscrepancyReport] = []
+    if run_report.workflow_id == WorkflowId.UD_IP_EXP:
+        try:
+            validate_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                print_batches=print_batches,
+            )
+        except PrintAnnotationChecklistError as exc:
+            hard_blocked_report = replace(run_report, print_phase_status=PrintPhaseStatus.HARD_BLOCKED)
+            _persist_run_report(run_report_persistor, hard_blocked_report)
+            discrepancies.append(
+                _build_print_discrepancy(
+                    run_report=run_report,
+                    code=exc.code,
+                    message=str(exc),
+                    details=exc.details,
+                    mail_id=None,
+                )
+            )
+            return hard_blocked_report, _block_print_mail_moves(mail_outcomes), discrepancies
     printing_report = replace(run_report, print_phase_status=PrintPhaseStatus.PRINTING)
     _persist_run_report(run_report_persistor, printing_report)
 

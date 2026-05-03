@@ -110,9 +110,10 @@ Required checklist fields per printed document:
 Audit-support fields may also include `row_indexes`, but operators must not be asked to infer `SL.No.` from row coordinates.
 
 Checklist delivery requirements:
-- The system should emit durable machine-readable checklist artifacts (JSON and/or CSV) under run artifacts.
-- A human-readable HTML checklist view should be generated as the final checklist artifact.
-- After generation, the HTML checklist should be opened automatically in the workstation's default browser so operators can immediately print/use it at the printer station.
+- Checklist generation is a mandatory pre-print gate for workflows that print UD/Amendment documents; if checklist generation fails, the run must hard-block before any print or post-run mail-move execution can begin.
+- The system should emit durable machine-readable checklist artifacts as JSON under run artifacts.
+- A human-readable HTML checklist view should be generated before print execution from the same deterministic print-plan evidence.
+- The generated HTML checklist should be opened automatically in the workstation's default browser only after the run reaches terminal mail-move success, so operators finish the full run with the final report already visible.
 
 #### `SL.No.` mapping rule (normative)
 - `SL.No.` is a business field and must be resolved from the workbook `SL.No.` header column value for each selected target row.

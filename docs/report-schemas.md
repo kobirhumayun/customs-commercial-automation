@@ -130,7 +130,35 @@ Each `candidates[]` item should include:
 
 Structured UD candidates may also emit `score_keys` entries for `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
 
-## 5) Recovery/idempotency artifact schema
+## 5) Print-annotation checklist schema
+- `schema_id`: `print_annotation_checklist`
+- `schema_version`: `1.0.0`
+
+### Required fields
+- `run_id`
+- `workflow_id`
+- `generated_at_utc`
+- `print_group_order`
+- `checklist_row_count`
+- `rows`
+
+Each `rows[]` item must include:
+- `print_sequence`
+- `print_group_id`
+- `mail_id`
+- `workflow_id`
+- `ud_or_amendment_no`
+- `sl_no_values`
+- `mail_subject`
+- `document_filename`
+- `saved_document_id`
+- `document_path_hash`
+- `row_indexes`
+
+The checklist JSON must be derived from the same persisted print plan that drives physical print order.
+For `ud_ip_exp`, any mismatch between the current print plan and the persisted checklist JSON is a hard-block before print execution.
+
+## 6) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`
 - `schema_version`: `1.0.0`
 
@@ -148,7 +176,7 @@ Structured UD candidates may also emit `score_keys` entries for `lc_sc_value`, `
 - `print_completion_markers` (array of marker ids)
 - `mail_move_completion_markers` (array of marker ids)
 
-## 6) Minimal examples
+## 7) Minimal examples
 
 ### Run report (minimal)
 ```json

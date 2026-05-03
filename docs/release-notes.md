@@ -11,8 +11,9 @@
 1. `report-live-readiness`
 2. `validate-run`
 3. `plan-print`
-4. `execute-print`
-5. `execute-mail-moves`
+4. `generate-print-annotation-html` for `ud_ip_exp`
+5. `execute-print`
+6. `execute-mail-moves`
 
 ### Proven live behavior
 - live Outlook snapshot and folder move execution
@@ -42,6 +43,9 @@
 ### Printing behavior
 - phase 1 print completion means deterministic silent submission order completed
 - phase 1 does not wait for or verify physical paper completion
+- for `ud_ip_exp`, the print-annotation checklist is a mandatory pre-print artifact gate
+- if checklist generation fails, print and post-run mail moves stay hard-blocked
+- the checklist HTML is opened automatically only after successful post-run mail moves complete
 - when Acrobat times out after physical output, operators must use:
   `acknowledge-partial-print`
 - when printer-specific JSObject submission is unavailable, the adapter may:

@@ -46,6 +46,10 @@ Every discrepancy payload should include:
 | `print_marker_mismatch` | `hard_block` | shared | A persisted print completion marker conflicted with the planned print group identity. |
 | `print_source_document_missing` | `hard_block` | shared | A planned print document path was missing at print execution time. |
 | `print_group_runtime_error` | `hard_block` | shared | A runtime error interrupted print execution for a planned print group. |
+| `print_annotation_generation_failed` | `hard_block` | shared | The mandatory pre-print annotation checklist could not be generated from the persisted run evidence. |
+| `print_annotation_sl_no_unresolved` | `hard_block` | shared | One or more selected checklist target rows did not yield a readable workbook `SL.No.` value. |
+| `print_annotation_checklist_missing_or_invalid` | `hard_block` | shared | The mandatory pre-print annotation checklist artifact was missing or did not match the active print plan. |
+| `print_annotation_browser_open_failed` | `warning` | shared | The print-annotation checklist HTML was generated successfully, but the system could not open it automatically in the default browser. |
 | `mail_move_gate_unsatisfied` | `hard_block` | shared | Mail moves were attempted before required upstream phases reached terminal success. |
 | `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
 | `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |

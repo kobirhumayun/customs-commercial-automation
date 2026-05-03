@@ -248,6 +248,17 @@ try {
         "--run-id", $runId
     )
 
+    if ($Workflow -eq "ud_ip_exp") {
+        Write-Section "Generate Print Annotation"
+        $printAnnotation = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "generate-print-annotation-html", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId,
+            "--live-workbook"
+        )
+    }
+
     Write-Section "Execute Print"
     $print = Invoke-ProjectJsonCommand -Arguments @(
         "run", "python", "-m", "project",

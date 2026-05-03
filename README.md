@@ -31,6 +31,7 @@ For normal phase-1 operation, the primary operator commands are:
 - `report-live-readiness`
 - `validate-run`
 - `plan-print`
+- `generate-print-annotation-html` for `ud_ip_exp`
 - `execute-print`
 - `acknowledge-partial-print` when Acrobat times out after physical paper output
 - `execute-mail-moves`
@@ -39,7 +40,7 @@ For normal phase-1 operation, the primary operator commands are:
 
 The expected terminal paths are:
 - `new writes`:
-  `validate-run` stages and commits workbook rows, `plan-print`/`execute-print` handle newly saved PDFs, then `execute-mail-moves` moves the mail
+  `validate-run` stages and commits workbook rows, `plan-print` prepares print order, `ud_ip_exp` runs `generate-print-annotation-html`, `execute-print` submits newly saved PDFs, then `execute-mail-moves` moves the mail
 - `duplicate-only`:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
 
@@ -84,8 +85,9 @@ The released operator sequence is:
 1. `report-live-readiness`
 2. `validate-run`
 3. `plan-print`
-4. `execute-print`
-5. `execute-mail-moves`
+4. `generate-print-annotation-html` for `ud_ip_exp`
+5. `execute-print`
+6. `execute-mail-moves`
 
 Operational notes:
 - `acknowledge-partial-print` is the only supported recovery step when Acrobat times out after physical paper output.
@@ -100,6 +102,7 @@ Use this as the normal day-to-day workflow guide after release:
 1. Start with `validate-run`.
 2. Use `report-live-readiness` at session start, after environment/config changes, or whenever something looks off.
 3. If `validate-run` commits new writes and printable documents exist, run `plan-print` and `execute-print`.
+   For `ud_ip_exp`, insert `generate-print-annotation-html` between those two commands.
 4. If `execute-print` completes, run `execute-mail-moves`.
 5. If the mail is duplicate-only and no print is required, move directly to `execute-mail-moves` when the run is move-eligible.
 6. If a run stops with a hard block or no-write status, run `explain-run-failure` first to identify the exact cause.
@@ -127,6 +130,7 @@ The launcher performs:
 - `report-live-readiness`
 - `validate-run --apply-live-writes`
 - `plan-print`
+- `generate-print-annotation-html --live-workbook` for `ud_ip_exp`
 - `execute-print`
 - `execute-mail-moves`
 - `report-run-status`
@@ -170,6 +174,12 @@ uv run python -m project plan-print $WORKFLOW --config $CONFIG --run-id $RUN_ID
 uv run python -m project execute-print $WORKFLOW --config $CONFIG --run-id $RUN_ID --live-print
 uv run python -m project execute-mail-moves $WORKFLOW --config $CONFIG --run-id $RUN_ID --live-outlook
 uv run python -m project report-run-status $WORKFLOW --config $CONFIG --run-id $RUN_ID
+```
+
+For `ud_ip_exp`, insert this checklist-generation step between `plan-print` and `execute-print`:
+
+```powershell
+uv run python -m project generate-print-annotation-html ud_ip_exp --config $CONFIG --run-id $RUN_ID --live-workbook
 ```
 
 Expected final state:
