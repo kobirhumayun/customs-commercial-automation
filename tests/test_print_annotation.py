@@ -101,11 +101,12 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
             headers=[
                 WorkbookHeader(column_index=1, text="SL.No."),
                 WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
             ],
             rows=[
-                WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043"}),
-                WorkbookRow(row_index=12, values={1: "18", 2: "LC-0043"}),
-                WorkbookRow(row_index=13, values={1: "21A", 2: "LC-0043"}),
+                WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"}),
+                WorkbookRow(row_index=12, values={1: "18", 2: "LC-0043", 3: "BB-001"}),
+                WorkbookRow(row_index=13, values={1: "21A", 2: "LC-0043", 3: "BB-002"}),
             ],
         )
 
@@ -119,16 +120,23 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         self.assertEqual(result.payload["checklist_row_count"], 2)
         self.assertEqual(result.payload["rows"][0]["print_sequence"], 1)
         self.assertEqual(result.payload["rows"][0]["ud_or_amendment_no"], "BGMEA/DHK/UD/2026/1001")
+        self.assertEqual(result.payload["rows"][0]["lc_sc"], "LC-0043")
+        self.assertEqual(result.payload["rows"][0]["bangladesh_bank_ref"], "BB-001")
         self.assertEqual(result.payload["rows"][0]["sl_no_values"], ["17", "18"])
         self.assertEqual(result.payload["rows"][1]["print_sequence"], 2)
+        self.assertEqual(result.payload["rows"][1]["bangladesh_bank_ref"], "BB-002")
         self.assertEqual(result.payload["rows"][1]["sl_no_values"], ["21A"])
         self.assertIn("Print Annotation Checklist", result.html)
 
     def test_build_print_annotation_checklist_raises_when_sl_no_value_is_missing(self) -> None:
         workbook_snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",
-            headers=[WorkbookHeader(column_index=1, text="SL.No.")],
-            rows=[WorkbookRow(row_index=11, values={1: ""})],
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[WorkbookRow(row_index=11, values={1: "", 2: "LC-0043", 3: "BB-001"})],
         )
 
         with self.assertRaises(PrintAnnotationChecklistError) as ctx:
@@ -155,8 +163,12 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
             print_batches = [_build_single_document_batch()]
             workbook_snapshot = WorkbookSnapshot(
                 sheet_name="Sheet1",
-                headers=[WorkbookHeader(column_index=1, text="SL.No.")],
-                rows=[WorkbookRow(row_index=11, values={1: "17"})],
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+                ],
+                rows=[WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"})],
             )
 
             result = build_print_annotation_checklist(
@@ -179,8 +191,12 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
     def test_build_print_annotation_checklist_falls_back_to_staged_write_rows_for_single_document_runs(self) -> None:
         workbook_snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",
-            headers=[WorkbookHeader(column_index=1, text="SL.No.")],
-            rows=[WorkbookRow(row_index=11, values={1: "17"})],
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"})],
         )
         mail_outcome = MailOutcomeRecord(
             run_id="run-1",
@@ -225,6 +241,8 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         )
 
         self.assertEqual(result.payload["checklist_row_count"], 1)
+        self.assertEqual(result.payload["rows"][0]["lc_sc"], "LC-0043")
+        self.assertEqual(result.payload["rows"][0]["bangladesh_bank_ref"], "BB-001")
         self.assertEqual(result.payload["rows"][0]["sl_no_values"], ["17"])
         self.assertEqual(result.payload["rows"][0]["row_indexes"], [11])
 

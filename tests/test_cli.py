@@ -3440,9 +3440,11 @@ class CLITests(unittest.TestCase):
                         "sheet_name": "Sheet1",
                         "headers": [
                             {"column_index": 1, "text": "SL.No."},
+                            {"column_index": 2, "text": "L/C & S/C No."},
+                            {"column_index": 3, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [
-                            {"row_index": 11, "values": {"1": "17"}},
+                            {"row_index": 11, "values": {"1": "17", "2": "LC-0043", "3": "BB-001"}},
                         ],
                     }
                 ),
@@ -3542,6 +3544,8 @@ class CLITests(unittest.TestCase):
             self.assertTrue(json_artifact.exists())
             self.assertTrue(html_artifact.exists())
             checklist_payload = json.loads(json_artifact.read_text(encoding="utf-8"))
+            self.assertEqual(checklist_payload["rows"][0]["lc_sc"], "LC-0043")
+            self.assertEqual(checklist_payload["rows"][0]["bangladesh_bank_ref"], "BB-001")
             self.assertEqual(checklist_payload["rows"][0]["sl_no_values"], ["17"])
 
     def test_execute_mail_moves_command_prints_completion_status(self) -> None:

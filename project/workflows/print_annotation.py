@@ -13,9 +13,19 @@ from project.storage import RunArtifactPaths
 from project.storage.artifacts import atomic_write_text
 from project.utils.json import pretty_json_dumps
 from project.utils.time import utc_timestamp
-from project.workbook import WorkbookSnapshot
+from project.workbook import HeaderMappingSpec, WorkbookSnapshot, resolve_header_mapping
 
 PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID = "print_annotation_checklist"
+LC_SC_HEADER_SPEC = HeaderMappingSpec(
+    "lc_sc",
+    "L/C & S/C No.",
+    ("L/C No.", "LC/SC No.", "LC No."),
+)
+BANGLADESH_BANK_REF_HEADER_SPEC = HeaderMappingSpec(
+    "bangladesh_bank_ref",
+    "Bangladesh Bank Ref.",
+    ("Bangladesh Bank Ref",),
+)
 
 
 class PrintAnnotationChecklistError(ValueError):
@@ -52,18 +62,49 @@ def build_print_annotation_checklist(
             details={"run_id": run_report.run_id},
         )
 
+    planned_row_indexes = _planned_row_indexes(mail_outcomes)
     sl_no_column_index = _resolve_sl_no_column_index(workbook_snapshot)
-    sl_no_values_by_row = _resolve_sl_no_values_by_row(
+    lc_sc_column_index = _resolve_required_column_index(
         workbook_snapshot=workbook_snapshot,
-        sl_no_column_index=sl_no_column_index,
+        spec=LC_SC_HEADER_SPEC,
+        error_message="Print-annotation checklist generation requires one deterministic L/C & S/C No. workbook header.",
+    )
+    bangladesh_bank_ref_column_index = _resolve_required_column_index(
+        workbook_snapshot=workbook_snapshot,
+        spec=BANGLADESH_BANK_REF_HEADER_SPEC,
+        error_message="Print-annotation checklist generation requires one deterministic Bangladesh Bank Ref. workbook header.",
+    )
+    sl_no_values_by_row = _resolve_column_values_by_row(
+        workbook_snapshot=workbook_snapshot,
+        column_index=sl_no_column_index,
         live_workbook_path=live_workbook_path,
-        row_indexes=_planned_row_indexes(mail_outcomes),
+        row_indexes=planned_row_indexes,
+        error_code="print_annotation_sl_no_unresolved",
+        error_message="The live workbook SL.No. display text could not be read for a selected checklist row.",
+    )
+    lc_sc_values_by_row = _resolve_column_values_by_row(
+        workbook_snapshot=workbook_snapshot,
+        column_index=lc_sc_column_index,
+        live_workbook_path=live_workbook_path,
+        row_indexes=planned_row_indexes,
+        error_code="print_annotation_generation_failed",
+        error_message="The live workbook L/C & S/C No. display text could not be read for a selected checklist row.",
+    )
+    bangladesh_bank_ref_values_by_row = _resolve_column_values_by_row(
+        workbook_snapshot=workbook_snapshot,
+        column_index=bangladesh_bank_ref_column_index,
+        live_workbook_path=live_workbook_path,
+        row_indexes=planned_row_indexes,
+        error_code="print_annotation_generation_failed",
+        error_message="The live workbook Bangladesh Bank Ref. display text could not be read for a selected checklist row.",
     )
     rows = _build_checklist_rows(
         run_report=run_report,
         mail_outcomes=mail_outcomes,
         print_batches=print_batches,
         sl_no_values_by_row=sl_no_values_by_row,
+        lc_sc_values_by_row=lc_sc_values_by_row,
+        bangladesh_bank_ref_values_by_row=bangladesh_bank_ref_values_by_row,
     )
     payload = {
         "schema_id": PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID,
@@ -207,6 +248,8 @@ def _build_checklist_rows(
     mail_outcomes: list[MailOutcomeRecord],
     print_batches: list,
     sl_no_values_by_row: dict[int, str],
+    lc_sc_values_by_row: dict[int, str],
+    bangladesh_bank_ref_values_by_row: dict[int, str],
 ) -> list[dict[str, Any]]:
     outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
     sequence = 1
@@ -275,6 +318,24 @@ def _build_checklist_rows(
                         },
                     )
                 sl_no_values.append(sl_no_value)
+            lc_sc_value = _join_distinct_row_values(
+                row_indexes=row_indexes,
+                values_by_row=lc_sc_values_by_row,
+                field_label="L/C & S/C No.",
+                allow_blank=False,
+                error_code="print_annotation_generation_failed",
+                mail_id=batch.mail_id,
+                saved_document_id=saved_document_id,
+            )
+            bangladesh_bank_ref = _join_distinct_row_values(
+                row_indexes=row_indexes,
+                values_by_row=bangladesh_bank_ref_values_by_row,
+                field_label="Bangladesh Bank Ref.",
+                allow_blank=True,
+                error_code="print_annotation_generation_failed",
+                mail_id=batch.mail_id,
+                saved_document_id=saved_document_id,
+            )
 
             rows.append(
                 {
@@ -283,6 +344,8 @@ def _build_checklist_rows(
                     "mail_id": batch.mail_id,
                     "workflow_id": run_report.workflow_id.value,
                     "ud_or_amendment_no": _selection_document_number(selection_item, saved_document),
+                    "lc_sc": lc_sc_value,
+                    "bangladesh_bank_ref": bangladesh_bank_ref,
                     "sl_no_values": sl_no_values,
                     "mail_subject": outcome.subject_raw,
                     "document_filename": str(saved_document.get("normalized_filename", "")),
@@ -396,36 +459,48 @@ def _planned_row_indexes(mail_outcomes: list[MailOutcomeRecord]) -> set[int]:
 
 
 def _resolve_sl_no_column_index(workbook_snapshot: WorkbookSnapshot) -> int:
-    matches = [
-        header.column_index
-        for header in workbook_snapshot.headers
-        if header.text.strip() == "SL.No."
-    ]
-    if len(matches) != 1:
-        raise PrintAnnotationChecklistError(
-            code="workbook_header_mapping_invalid",
-            message="Print-annotation checklist generation requires one deterministic SL.No. workbook header.",
-            details={
-                "sheet_name": workbook_snapshot.sheet_name,
-                "required_header_text": "SL.No.",
-                "matched_column_indexes": matches,
-            },
-        )
-    return matches[0]
+    return _resolve_required_column_index(
+        workbook_snapshot=workbook_snapshot,
+        spec=HeaderMappingSpec("sl_no", "SL.No.", ("SL.No",)),
+        error_message="Print-annotation checklist generation requires one deterministic SL.No. workbook header.",
+    )
 
 
-def _resolve_sl_no_values_by_row(
+def _resolve_required_column_index(
     *,
     workbook_snapshot: WorkbookSnapshot,
-    sl_no_column_index: int,
+    spec: HeaderMappingSpec,
+    error_message: str,
+) -> int:
+    mapping = resolve_header_mapping(workbook_snapshot, (spec,))
+    if mapping is None:
+        raise PrintAnnotationChecklistError(
+            code="workbook_header_mapping_invalid",
+            message=error_message,
+            details={
+                "sheet_name": workbook_snapshot.sheet_name,
+                "required_header_text": spec.required_header_text,
+            },
+        )
+    return mapping[spec.column_key]
+
+
+def _resolve_column_values_by_row(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    column_index: int,
     live_workbook_path: Path | None,
     row_indexes: set[int],
+    error_code: str,
+    error_message: str,
 ) -> dict[int, str]:
     if live_workbook_path is not None:
-        return _resolve_live_sl_no_values_by_row(
+        return _resolve_live_column_values_by_row(
             workbook_path=live_workbook_path,
-            sl_no_column_index=sl_no_column_index,
+            column_index=column_index,
             row_indexes=row_indexes,
+            error_code=error_code,
+            error_message=error_message,
         )
     rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
     resolved: dict[int, str] = {}
@@ -433,15 +508,17 @@ def _resolve_sl_no_values_by_row(
         row = rows_by_index.get(row_index)
         if row is None:
             continue
-        resolved[row_index] = str(row.values.get(sl_no_column_index, "") or "")
+        resolved[row_index] = str(row.values.get(column_index, "") or "")
     return resolved
 
 
-def _resolve_live_sl_no_values_by_row(
+def _resolve_live_column_values_by_row(
     *,
     workbook_path: Path,
-    sl_no_column_index: int,
+    column_index: int,
     row_indexes: set[int],
+    error_code: str,
+    error_message: str,
 ) -> dict[int, str]:
     if not row_indexes:
         return {}
@@ -462,15 +539,15 @@ def _resolve_live_sl_no_values_by_row(
         resolved: dict[int, str] = {}
         for row_index in sorted(row_indexes):
             try:
-                displayed_value = sheet.range((row_index, sl_no_column_index)).api.Text
+                displayed_value = sheet.range((row_index, column_index)).api.Text
             except Exception as exc:
                 raise PrintAnnotationChecklistError(
-                    code="print_annotation_sl_no_unresolved",
-                    message="The live workbook SL.No. display text could not be read for a selected checklist row.",
+                    code=error_code,
+                    message=error_message,
                     details={
                         "workbook_path": str(workbook_path),
                         "row_index": row_index,
-                        "column_index": sl_no_column_index,
+                        "column_index": column_index,
                         "error": str(exc),
                     },
                 ) from exc
@@ -482,6 +559,39 @@ def _resolve_live_sl_no_values_by_row(
         app.quit()
 
 
+def _join_distinct_row_values(
+    *,
+    row_indexes: list[int],
+    values_by_row: dict[int, str],
+    field_label: str,
+    allow_blank: bool,
+    error_code: str,
+    mail_id: str,
+    saved_document_id: str,
+) -> str:
+    values: list[str] = []
+    for row_index in row_indexes:
+        raw_value = values_by_row.get(row_index, "")
+        value = raw_value.strip()
+        if value:
+            if value not in values:
+                values.append(value)
+            continue
+        if allow_blank:
+            continue
+        raise PrintAnnotationChecklistError(
+            code=error_code,
+            message=f"A selected checklist row did not yield a readable workbook {field_label} value.",
+            details={
+                "mail_id": mail_id,
+                "saved_document_id": saved_document_id,
+                "row_index": row_index,
+                "field_label": field_label,
+            },
+        )
+    return ", ".join(values)
+
+
 def _build_print_annotation_html(payload: dict[str, Any]) -> str:
     rows = payload.get("rows", [])
     if not isinstance(rows, list):
@@ -490,6 +600,8 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "        <tr>"
         f"<td>{escape(str(row.get('print_sequence', '')))}</td>"
         f"<td>{escape(str(row.get('ud_or_amendment_no', '')))}</td>"
+        f"<td>{escape(str(row.get('lc_sc', '')))}</td>"
+        f"<td>{escape(str(row.get('bangladesh_bank_ref', '')))}</td>"
         f"<td>{escape(', '.join(str(value) for value in row.get('sl_no_values', [])))}</td>"
         f"<td>{escape(str(row.get('mail_subject', '')))}</td>"
         f"<td>{escape(str(row.get('document_filename', '')))}</td>"
@@ -499,7 +611,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
     )
     if not table_body:
         table_body = (
-            '        <tr><td colspan="5" class="empty">'
+            '        <tr><td colspan="7" class="empty">'
             "No printed UD/Amendment documents required annotation for this run."
             "</td></tr>"
         )
@@ -528,6 +640,8 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "        <tr>\n"
         "          <th>Print Sequence</th>\n"
         "          <th>UD/Amendment No.</th>\n"
+        "          <th>LC/SC</th>\n"
+        "          <th>Bangladesh Bank Ref.</th>\n"
         "          <th>SL.No.</th>\n"
         "          <th>Mail Subject</th>\n"
         "          <th>Document Filename</th>\n"

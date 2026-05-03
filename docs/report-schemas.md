@@ -148,6 +148,8 @@ Each `rows[]` item must include:
 - `mail_id`
 - `workflow_id`
 - `ud_or_amendment_no`
+- `lc_sc`
+- `bangladesh_bank_ref`
 - `sl_no_values`
 - `mail_subject`
 - `document_filename`

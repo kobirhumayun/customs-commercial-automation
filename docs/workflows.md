@@ -788,6 +788,7 @@ Rows where:
 - persist final print group order in run JSON metadata
 - for UD/Amendment operator handling, emit a per-run print-annotation checklist ordered by the same final print sequence used for physical submission
 - each checklist row must include: `print_sequence`, `workflow_id`, `ud_or_amendment_no`, `sl_no_values`, `mail_subject`, `document_filename`
+- each checklist row must also include `lc_sc` and `bangladesh_bank_ref`
 - checklist generation must resolve `sl_no_values` from workbook `SL.No.` column values for the selected target rows; do not infer `SL.No.` from workbook `row_index`
 - checklist output may include `row_indexes` for audit traceability, but `sl_no_values` is mandatory for operator use
 - if any selected target row cannot resolve a valid `SL.No.` value, checklist generation must hard-block and emit discrepancy evidence

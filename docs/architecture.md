@@ -103,6 +103,8 @@ Required checklist fields per printed document:
 - `print_sequence` (1-based sequence in physical print order)
 - `workflow_id`
 - `ud_or_amendment_no`
+- `lc_sc`
+- `bangladesh_bank_ref`
 - `sl_no_values` (list of workbook `SL.No.` values to annotate by hand)
 - `mail_subject`
 - `document_filename`
