@@ -37,8 +37,9 @@ class UDIPEXPDocumentClassificationTests(unittest.TestCase):
         self.assertEqual(result.saved_documents[0].document_type, "supporting_pdf")
         self.assertEqual(
             result.saved_documents[0].classification_reason,
-            "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped.",
+            "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped for extraction.",
         )
+        self.assertTrue(result.saved_documents[0].print_eligible)
         self.assertIsNone(result.saved_documents[0].extracted_document_number)
 
     def test_matching_ip_filename_uses_filename_when_ocr_identifier_is_low_confidence(self) -> None:

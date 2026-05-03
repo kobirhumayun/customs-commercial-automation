@@ -59,13 +59,13 @@ def classify_saved_ud_ip_exp_documents(
                     saved_document,
                     document_type="supporting_pdf",
                     classification_reason=(
-                        "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped."
+                        "Filename does not match UD/IP/EXP workflow naming conventions; document was skipped for extraction."
                     ),
-                    print_eligible=False,
+                    print_eligible=saved_document.save_decision == "saved_new",
                 )
             )
             decision_reasons.append(
-                f"Skipped saved document {saved_document.normalized_filename} because its filename does not match UD/IP/EXP naming conventions."
+                f"Skipped saved document {saved_document.normalized_filename} for UD/IP/EXP extraction because its filename does not match workflow naming conventions."
             )
             continue
 

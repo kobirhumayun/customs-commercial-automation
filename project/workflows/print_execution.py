@@ -46,6 +46,7 @@ def execute_print_batches(
                 artifact_paths=artifact_paths,
                 run_report=run_report,
                 print_batches=print_batches,
+                mail_outcomes=mail_outcomes,
             )
         except PrintAnnotationChecklistError as exc:
             hard_blocked_report = replace(run_report, print_phase_status=PrintPhaseStatus.HARD_BLOCKED)

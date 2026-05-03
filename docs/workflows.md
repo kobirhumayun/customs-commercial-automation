@@ -612,7 +612,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - if any IP document is present in a mail, at least one EXP document must also be present
 - the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
 - LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
-- the live `ud_ip_exp` reader processes only PDFs whose filenames begin `UD-`, begin `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP`; all other PDFs are skipped before UD/IP/EXP document analysis
+- the live `ud_ip_exp` reader saves all new PDF attachments for successful-mail downstream handling, but only PDFs whose filenames begin `UD-`, begin `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP` are used for UD/IP/EXP document analysis
 - EXP filenames with trailing descriptors, such as `123-EXP-INVOICE.pdf`, are skipped because the strict `123-EXP.pdf` form identifies the machine-generated text-layer file preferred for extraction accuracy
 - live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
 - live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
@@ -641,6 +641,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - blocked emails remain in `working`
 - successfully processed `ud_ip_exp` emails with new writes move using the same staged post-write/post-print movement model as `export_lc_sc`
 - print batches are built from successful `ud_ip_exp` mails in the active run snapshot, using all newly saved PDFs after the workbook write commit
+- the `ud_ip_exp` operator print-annotation checklist remains UD/Amendment-only; supporting PDFs may still print but do not require workbook row-selection evidence
 - duplicate-only/no-write movement behavior for `ud_ip_exp` follows the shared staged mail-move gates once validation succeeds and no print obligation exists
 
 ### Shared-column behavior

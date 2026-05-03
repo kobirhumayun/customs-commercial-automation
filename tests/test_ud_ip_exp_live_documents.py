@@ -187,7 +187,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             )
         )
 
-    def test_prepare_live_ud_ip_exp_documents_saves_only_strictly_named_ud_ip_exp_pdfs(self) -> None:
+    def test_prepare_live_ud_ip_exp_documents_saves_all_pdfs_but_only_extracts_processable_ud_ip_exp_documents(self) -> None:
         mail = _mail(
             "entry-live-strict-reader",
             "UD strict reader",
@@ -236,16 +236,21 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(result.document_save_result.issues, [])
         self.assertEqual(
             [document.normalized_filename for document in result.document_save_result.saved_documents],
-            ["UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf"],
+            [
+                "PDL-26-1755.pdf",
+                "UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf",
+                "LC-0113-ANANTA CASUAL WEAR LTD.pdf",
+            ],
         )
-        self.assertIn(
-            "Skipped attachment PDL-26-1755.pdf because its filename does not match UD/IP/EXP naming conventions.",
-            result.document_save_result.decision_reasons,
-        )
-        self.assertIn(
-            "Skipped attachment LC-0113-ANANTA CASUAL WEAR LTD.pdf because its filename does not match UD/IP/EXP naming conventions.",
-            result.document_save_result.decision_reasons,
-        )
+        self.assertEqual(len(result.classified_documents.documents), 1)
+        self.assertEqual(result.classified_documents.documents[0].document_number.value, "BGMEA/DHK/UD/2026/5483/113")
+        supporting_documents = [
+            document
+            for document in result.classified_documents.saved_documents
+            if document.document_type == "supporting_pdf"
+        ]
+        self.assertEqual(len(supporting_documents), 2)
+        self.assertTrue(all(document.print_eligible for document in supporting_documents))
 
     def test_prepare_live_ud_ip_exp_documents_ignores_exp_files_with_trailing_descriptors(self) -> None:
         mail = _mail(
@@ -294,12 +299,12 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(result.document_save_result.issues, [])
         self.assertEqual(
             [document.normalized_filename for document in result.document_save_result.saved_documents],
-            ["123-EXP.pdf"],
+            ["123-EXP.pdf", "123-EXP-INVOICE.pdf"],
         )
-        self.assertIn(
-            "Skipped attachment 123-EXP-INVOICE.pdf because its filename does not match UD/IP/EXP naming conventions.",
-            result.document_save_result.decision_reasons,
-        )
+        self.assertEqual(len(result.classified_documents.documents), 1)
+        self.assertEqual(result.classified_documents.documents[0].document_number.value, "EXP-123")
+        self.assertEqual(result.classified_documents.saved_documents[1].document_type, "supporting_pdf")
+        self.assertTrue(result.classified_documents.saved_documents[1].print_eligible)
 
     def test_validate_run_snapshot_uses_live_ud_saved_document_analysis(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)

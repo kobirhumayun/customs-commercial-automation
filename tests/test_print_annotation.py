@@ -186,6 +186,184 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
                 artifact_paths=artifact_paths,
                 run_report=run_report,
                 print_batches=print_batches,
+                mail_outcomes=mail_outcomes,
+            )
+
+    def test_build_print_annotation_checklist_skips_supporting_pdfs_without_ud_selection(self) -> None:
+        run_report = _build_run_report()
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-1",
+                workflow_id=WorkflowId.UD_IP_EXP,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=None,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=True,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-1",
+                subject_raw="UD subject",
+                sender_address="ud@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "normalized_filename": "UD-ONE.pdf",
+                        "destination_path": "C:/docs/UD-ONE.pdf",
+                        "document_type": "ud_document",
+                        "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                    },
+                    {
+                        "saved_document_id": "doc-2",
+                        "normalized_filename": "supporting.pdf",
+                        "destination_path": "C:/docs/supporting.pdf",
+                        "document_type": "supporting_pdf",
+                    },
+                ],
+                ud_selection={
+                    "document_count": 1,
+                    "final_decision": "selected",
+                    "documents": [
+                        {
+                            "document_index": 0,
+                            "document_number": "BGMEA/DHK/UD/2026/1001",
+                            "source_saved_document_id": "doc-1",
+                            "selection": {
+                                "candidates": [
+                                    {"selected": True, "row_indexes": [11]},
+                                ]
+                            },
+                        },
+                    ],
+                },
+            )
+        ]
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=["C:/docs/UD-ONE.pdf", "C:/docs/supporting.pdf"],
+                document_path_hashes=["hash-1", "hash-2"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"})],
+        )
+
+        result = build_print_annotation_checklist(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 1)
+        self.assertEqual([row["document_filename"] for row in result.payload["rows"]], ["UD-ONE.pdf"])
+
+    def test_validate_print_annotation_checklist_accepts_ud_only_subset_of_printed_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="ud_ip_exp",
+                run_id="run-1",
+            )
+            run_report = _build_run_report()
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.UD_IP_EXP,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="UD subject",
+                    sender_address="ud@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "UD-ONE.pdf",
+                            "destination_path": "C:/docs/UD-ONE.pdf",
+                            "document_type": "ud_document",
+                            "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                        },
+                        {
+                            "saved_document_id": "doc-2",
+                            "normalized_filename": "supporting.pdf",
+                            "destination_path": "C:/docs/supporting.pdf",
+                            "document_type": "supporting_pdf",
+                        },
+                    ],
+                    ud_selection={
+                        "documents": [
+                            {
+                                "document_index": 0,
+                                "document_number": "BGMEA/DHK/UD/2026/1001",
+                                "source_saved_document_id": "doc-1",
+                                "selection": {
+                                    "candidates": [
+                                        {"selected": True, "row_indexes": [11]},
+                                    ]
+                                },
+                            },
+                        ],
+                    },
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/UD-ONE.pdf", "C:/docs/supporting.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+                ],
+                rows=[WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"})],
+            )
+            result = build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+            persist_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                result=result,
+            )
+
+            validate_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                print_batches=print_batches,
+                mail_outcomes=mail_outcomes,
             )
 
     def test_build_print_annotation_checklist_falls_back_to_staged_write_rows_for_single_document_runs(self) -> None:

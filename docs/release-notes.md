@@ -44,6 +44,8 @@
 - phase 1 print completion means deterministic silent submission order completed
 - phase 1 does not wait for or verify physical paper completion
 - for `ud_ip_exp`, the print-annotation checklist is a mandatory pre-print artifact gate
+- for `ud_ip_exp`, all newly saved PDF attachments from successful mails are now included in print batches, even when a PDF is only supporting evidence and not a UD/IP/EXP extraction source
+- for `ud_ip_exp`, the print-annotation checklist remains UD/Amendment-only; supporting PDFs can print without checklist rows
 - if checklist generation fails, print and post-run mail moves stay hard-blocked
 - if a no-write live run leaves `eligible_mail_count = 0`, the launcher now skips `execute-mail-moves` instead of generating a misleading downstream mail-move gate discrepancy
 - the checklist HTML is opened automatically only after successful post-run mail moves complete

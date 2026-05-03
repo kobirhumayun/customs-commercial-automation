@@ -143,6 +143,7 @@ def validate_print_annotation_checklist(
     artifact_paths: RunArtifactPaths,
     run_report: RunReport,
     print_batches: list,
+    mail_outcomes: list[MailOutcomeRecord] | None = None,
 ) -> None:
     if run_report.workflow_id != WorkflowId.UD_IP_EXP:
         return
@@ -218,11 +219,10 @@ def validate_print_annotation_checklist(
             details={"json_path": str(json_path)},
         )
     observed_hashes = [str(row.get("document_path_hash", "")).strip() for row in rows if isinstance(row, dict)]
-    expected_hashes = [
-        document_hash
-        for batch in print_batches
-        for document_hash in batch.document_path_hashes
-    ]
+    expected_hashes = _expected_checklist_document_hashes(
+        print_batches=print_batches,
+        mail_outcomes=mail_outcomes or [],
+    )
     if observed_hashes != expected_hashes:
         raise PrintAnnotationChecklistError(
             code="print_annotation_checklist_missing_or_invalid",
@@ -282,6 +282,11 @@ def _build_checklist_rows(
                 )
             saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
             selection_item = selection_by_saved_document_id.get(saved_document_id)
+            if selection_item is None and not _saved_document_requires_checklist_row(
+                saved_document=saved_document,
+                selection_mapping=selection_by_saved_document_id,
+            ):
+                continue
             if selection_item is None:
                 raise PrintAnnotationChecklistError(
                     code="print_annotation_generation_failed",
@@ -356,6 +361,54 @@ def _build_checklist_rows(
             )
             sequence += 1
     return rows
+
+
+def _expected_checklist_document_hashes(
+    *,
+    print_batches: list,
+    mail_outcomes: list[MailOutcomeRecord],
+) -> list[str]:
+    if not mail_outcomes:
+        return [
+            document_hash
+            for batch in print_batches
+            for document_hash in batch.document_path_hashes
+        ]
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    expected_hashes: list[str] = []
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        if outcome is None:
+            expected_hashes.extend(batch.document_path_hashes)
+            continue
+        saved_documents_by_path = {
+            str(document.get("destination_path", "")).strip(): document
+            for document in outcome.saved_documents
+            if str(document.get("destination_path", "")).strip()
+        }
+        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
+        for document_path, document_hash in zip(batch.document_paths, batch.document_path_hashes):
+            saved_document = saved_documents_by_path.get(document_path)
+            if not isinstance(saved_document, dict):
+                expected_hashes.append(document_hash)
+                continue
+            if _saved_document_requires_checklist_row(
+                saved_document=saved_document,
+                selection_mapping=selection_by_saved_document_id,
+            ):
+                expected_hashes.append(document_hash)
+    return expected_hashes
+
+
+def _saved_document_requires_checklist_row(
+    *,
+    saved_document: dict[str, Any],
+    selection_mapping: dict[str, dict[str, Any]],
+) -> bool:
+    saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+    if saved_document_id and saved_document_id in selection_mapping:
+        return True
+    return str(saved_document.get("document_type", "")).strip() == "ud_document"
 
 
 def _selection_document_number(selection_item: dict[str, Any], saved_document: dict[str, Any]) -> str:
