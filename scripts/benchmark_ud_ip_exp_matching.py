@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from decimal import Decimal
+from math import comb
 from statistics import mean, median
 from time import perf_counter
 
@@ -32,6 +33,7 @@ class Scenario:
     quantity_by_unit: dict[str, Decimal]
     expected_final_decision: str
     expected_selected_candidate_id: str | None
+    expected_candidate_count: int | None = None
 
 
 def main() -> int:
@@ -51,12 +53,40 @@ def main() -> int:
         default=[12, 24, 36, 48],
         help="Synthetic family sizes to benchmark. Defaults to 12 24 36 48.",
     )
+    parser.add_argument(
+        "--include-dense",
+        action="store_true",
+        help="Include dense many-exact-match scenarios that stress candidate enumeration.",
+    )
+    parser.add_argument(
+        "--dense-sizes",
+        type=int,
+        nargs="+",
+        default=[10, 12, 14, 16],
+        help="Family sizes for dense many-match scenarios when --include-dense is enabled.",
+    )
+    parser.add_argument(
+        "--dense-iterations",
+        type=int,
+        default=20,
+        help="Iterations per dense scenario. Defaults to 20.",
+    )
     args = parser.parse_args()
 
-    scenarios = build_scenarios(sizes=args.sizes)
-    results = [benchmark_scenario(scenario, iterations=args.iterations) for scenario in scenarios]
+    benchmark_plan = build_benchmark_plan(
+        sparse_sizes=args.sizes,
+        sparse_iterations=args.iterations,
+        include_dense=args.include_dense,
+        dense_sizes=args.dense_sizes,
+        dense_iterations=args.dense_iterations,
+    )
+    results = [
+        benchmark_scenario(scenario, iterations=iterations)
+        for scenario, iterations in benchmark_plan
+    ]
     payload = {
-        "iterations_per_scenario": args.iterations,
+        "sparse_iterations_per_scenario": args.iterations,
+        "dense_iterations_per_scenario": args.dense_iterations if args.include_dense else 0,
         "scenario_count": len(results),
         "results": results,
     }
@@ -64,12 +94,23 @@ def main() -> int:
     return 0
 
 
-def build_scenarios(*, sizes: list[int]) -> list[Scenario]:
-    scenarios: list[Scenario] = []
-    for size in sizes:
-        scenarios.append(_build_sparse_unique_match_scenario(size=size))
-        scenarios.append(_build_sparse_conflict_match_scenario(size=size))
-    return scenarios
+def build_benchmark_plan(
+    *,
+    sparse_sizes: list[int],
+    sparse_iterations: int,
+    include_dense: bool,
+    dense_sizes: list[int],
+    dense_iterations: int,
+) -> list[tuple[Scenario, int]]:
+    benchmark_plan: list[tuple[Scenario, int]] = []
+    for size in sparse_sizes:
+        benchmark_plan.append((_build_sparse_unique_match_scenario(size=size), sparse_iterations))
+        benchmark_plan.append((_build_sparse_conflict_match_scenario(size=size), sparse_iterations))
+    if include_dense:
+        for size in dense_sizes:
+            benchmark_plan.append((_build_dense_many_matches_scenario(size=size), dense_iterations))
+            benchmark_plan.append((_build_dense_conflict_many_matches_scenario(size=size), dense_iterations))
+    return benchmark_plan
 
 
 def benchmark_scenario(scenario: Scenario, *, iterations: int) -> dict[str, object]:
@@ -97,9 +138,18 @@ def benchmark_scenario(scenario: Scenario, *, iterations: int) -> dict[str, obje
             f"{scenario.name}: expected selected_candidate_id {scenario.expected_selected_candidate_id!r}, "
             f"got {last_result.selected_candidate_id!r}."
         )
+    if (
+        scenario.expected_candidate_count is not None
+        and last_result.candidate_count != scenario.expected_candidate_count
+    ):
+        raise AssertionError(
+            f"{scenario.name}: expected candidate_count {scenario.expected_candidate_count}, "
+            f"got {last_result.candidate_count}."
+        )
 
     return {
         "scenario": scenario.name,
+        "iterations": iterations,
         "row_count": len(scenario.workbook_snapshot.rows),
         "candidate_count": last_result.candidate_count,
         "final_decision": last_result.final_decision,
@@ -134,6 +184,73 @@ def _build_sparse_conflict_match_scenario(*, size: int) -> Scenario:
         quantity_by_unit={"YDS": Decimal("1500")},
         expected_final_decision="hard_block",
         expected_selected_candidate_id="11-12",
+    )
+
+
+def _build_dense_many_matches_scenario(*, size: int) -> Scenario:
+    if size % 2 != 0:
+        raise ValueError("Dense many-match benchmark size must be even.")
+    target_row_count = size // 2
+    row_indexes = list(range(11, 11 + size))
+    rows = [
+        WorkbookRow(
+            row_index=row_index,
+            values={
+                1: "LC-BENCH-001",
+                2: "100 YDS",
+                3: "",
+                4: "",
+                5: "",
+                6: "100",
+                7: "",
+                8: "",
+            },
+        )
+        for row_index in row_indexes
+    ]
+    return Scenario(
+        name=f"dense_many_matches_{size}",
+        workbook_snapshot=_structured_snapshot(rows),
+        lc_sc_number="LC-BENCH-001",
+        lc_sc_value=Decimal(str(target_row_count * 100)),
+        quantity_by_unit={"YDS": Decimal(str(target_row_count * 100))},
+        expected_final_decision="selected",
+        expected_selected_candidate_id="-".join(str(row_index) for row_index in row_indexes[:target_row_count]),
+        expected_candidate_count=comb(size, target_row_count),
+    )
+
+
+def _build_dense_conflict_many_matches_scenario(*, size: int) -> Scenario:
+    if size % 2 != 0:
+        raise ValueError("Dense conflict benchmark size must be even.")
+    target_row_count = (size // 2) + 1
+    claimed_row_count = size - (target_row_count - 1)
+    row_indexes = list(range(11, 11 + size))
+    rows = [
+        WorkbookRow(
+            row_index=row_index,
+            values={
+                1: "LC-BENCH-001",
+                2: "100 YDS",
+                3: "BGMEA/DHK/UD/2026/9999/001" if offset < claimed_row_count else "",
+                4: "",
+                5: "",
+                6: "100",
+                7: "",
+                8: "",
+            },
+        )
+        for offset, row_index in enumerate(row_indexes)
+    ]
+    return Scenario(
+        name=f"dense_conflict_many_matches_{size}",
+        workbook_snapshot=_structured_snapshot(rows),
+        lc_sc_number="LC-BENCH-001",
+        lc_sc_value=Decimal(str(target_row_count * 100)),
+        quantity_by_unit={"YDS": Decimal(str(target_row_count * 100))},
+        expected_final_decision="hard_block",
+        expected_selected_candidate_id="-".join(str(row_index) for row_index in row_indexes[:target_row_count]),
+        expected_candidate_count=comb(size, target_row_count),
     )
 
 
