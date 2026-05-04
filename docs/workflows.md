@@ -635,7 +635,12 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
 - live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
 - ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
-- until IP/EXP business rules are finalized, IP/EXP documents remain allowed only as explicit unresolved-policy hard-block evidence rather than a completed processing path
+- EXP-only and EXP+IP mails now follow a conservative family-wide phase-1 path:
+  - at most one deterministic EXP payload and at most one deterministic IP payload are allowed in one mail
+  - all IP/EXP documents in the mail must resolve to one normalized document date because the workbook exposes one shared `UD & IP Date` field per target row
+  - PDF-derived LC/SC evidence remains validation-only and must agree with the ERP-derived family when present
+  - the target row set is every existing workbook row in the verified ERP LC/SC family
+  - quantity and value evidence on IP/EXP documents is retained for reporting/provenance only and does not drive row selection in phase 1
 
 ### Batch execution behavior
 - blocked emails remain in `working`
@@ -648,7 +653,11 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - Column `UD No. & IP No.` uses plain UD values, `EXP: ` prefixes for EXP, and `IP: ` prefixes for IP.
 - When both EXP and IP are formatted together, EXP must be listed before IP.
 - Multiple entries are line-break separated.
-- In the current code, only UD values are staged into the workbook. EXP/IP formatting is used for proposed shared-column evidence while IP/EXP staging remains hard-blocked.
+- For EXP-only and EXP+IP mails, the formatted shared-column value is written identically to every workbook row in the verified ERP family.
+- `UD & IP Date` is written from the normalized IP/EXP document date as `DD/MM/YYYY`.
+- `UD Recv. Date` is written from the current workflow date as `DD/MM/YYYY`.
+- Exact already-recorded family-wide matches are treated as duplicate-only/no-write.
+- If any target row already contains a different non-blank shared/date value, the mail hard-blocks; phase 1 does not append, merge, or replace existing values.
 
 ### UD allocation logic
 - extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
@@ -745,9 +754,14 @@ Result: UD is written to rows 11 and 19 only; report records all four candidates
 ### IP / EXP rules
 - valid non-UD mail shapes are EXP-only and EXP+IP; IP-only is invalid
 - a mail mixing UD with any IP/EXP document is invalid
-- no completed workbook-staging path is active for IP/EXP in the current code
-- when IP and/or EXP payloads appear in one mail, the workflow formats the proposed shared-column text (`EXP: ...` before `IP: ...`) and then hard-blocks with `ip_exp_policy_unresolved`
-- unresolved areas are workbook target-row matching keys, total value/quantity reconciliation, date-column mapping, and shared-column append/replacement/duplicate policy
+- phase 1 allows at most one deterministic EXP payload and at most one deterministic IP payload in one mail; additional EXP or IP payloads hard-block as ambiguous duplicate/update evidence
+- each IP/EXP payload must include a document number, a parseable document date, and LC/SC evidence that does not contradict the ERP-derived family
+- all IP/EXP payloads in the same mail must normalize to one shared document date because the workbook exposes one `UD & IP Date` value per target row
+- target workbook rows are every existing row in the ERP-verified LC/SC family; IP/EXP does not use quantity/value subset selection in phase 1
+- quantity and value fields from IP/EXP documents remain audit/report evidence only in phase 1 and do not gate row selection
+- when the formatted shared-column value and normalized IP/EXP date are already recorded across the full target family, the mail is a duplicate-only/no-write success
+- otherwise, `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date` must all be blank across the full target family before staging is allowed
+- if any target row already contains a different non-blank shared/date value, the mail hard-blocks; phase 1 does not append, merge, or replace existing family-wide IP/EXP values
 
 ## Import / BTB LC processing
 

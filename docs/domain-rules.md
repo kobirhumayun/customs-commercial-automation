@@ -241,7 +241,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `file_no` | `Commercial File No.` | `File No.`, `FILE NO`, `File Number` | Email body canonical file number | `append_only` (export) / `update_if_blank` (others) | target blank unless explicitly update-only workflow rule allows replacement |
 | `lc_sc_no` | `L/C & S/C No.` | `L/C No.`, `LC/SC No.`, `LC No.` | ERP canonical family field | `append_only` / `update_if_blank` | target blank |
 | `buyer_name` | `Name of Buyers` | `Buyer Name`, `Buyer` | ERP canonical buyer | `append_only` / `update_if_blank` | target blank |
-| `ud_ip_shared` | `UD No. & IP No.` | none | UD direct-write values plus EXP/IP formatting rules for unresolved-policy evidence | `update_if_blank` | phase-1 `ud_ip_exp` writes require blank target cells; exact already-recorded matches no-op instead of appending |
+| `ud_ip_shared` | `UD No. & IP No.` | none | UD direct-write values plus family-wide EXP/IP shared-column values | `update_if_blank` | phase-1 `ud_ip_exp` writes require blank target cells; exact already-recorded matches no-op instead of appending |
 | `up_no` | `UP No.` | `UP` | workflow filters only in phase 1 | `never_write` (except future approved workflow) | n/a |
 
 #### Mapping matrix — workflow-specific minimum fields
@@ -250,9 +250,9 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
 | `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; ERP row value may be blank; target blank |
-| `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank` | selected UD target rows only; exact already-recorded matches no-op instead of appending |
-| `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows; source UD/AM document date formatted `DD/MM/YYYY` |
-| `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows; source current workflow date formatted `DD/MM/YYYY` |
+| `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank` | selected UD target rows, or all verified-family rows for EXP-only / EXP+IP mails; exact already-recorded matches no-op instead of appending |
+| `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source normalized document date formatted `DD/MM/YYYY` |
+| `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source current workflow date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by ascending blank-row accumulation |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
@@ -295,10 +295,11 @@ Mail-shape contract for `ud_ip_exp`:
 - a mail may be UD-only, EXP-only, or EXP+IP only
 - a mail containing IP must also contain EXP
 - a mail must never mix any UD document with any IP/EXP document
+- phase 1 allows at most one deterministic EXP payload and at most one deterministic IP payload per mail; additional EXP or IP payloads hard-block as ambiguous duplicate/update evidence
 
-Current phase-1 write behavior is narrower:
-- only UD values are staged into the workbook
-- IP/EXP formatting is still used for discrepancy and proposed-value evidence
+Current phase-1 write behavior is:
+- UD values are staged using the row-selection rules below
+- EXP-only and EXP+IP mails stage the same shared-column/date values to all rows in the verified LC/SC family
 - `ud_ip_exp` does not append to existing shared-column cell values; exact already-recorded matches no-op and unexpected non-blank targets hard-block
 
 ## UD candidate combination determinism rule

@@ -139,9 +139,12 @@ Current docs confirm:
 - IP and EXP do not use the UD amendment model.
 - EXP/IP values share `UD No. & IP No.` with UD values.
 - EXP must be ordered before IP when both are present.
-- the current code still hard-blocks workbook staging for IP/EXP with `ip_exp_policy_unresolved`
-
-The remaining unresolved areas are workbook target-row matching keys, total reconciliation, date-column mapping, and shared-column append/replacement/duplicate policy.
+- phase-1 IP/EXP staging is family-wide rather than quantity/value-subset-based
+- phase 1 allows at most one deterministic EXP payload and at most one deterministic IP payload in a mail
+- EXP-only and EXP+IP mails write the same formatted shared-column value to every workbook row in the verified ERP LC/SC family
+- all IP/EXP payloads in the same mail must normalize to one document date because the workbook exposes one shared `UD & IP Date` value per target row
+- quantity and value fields from IP/EXP payloads remain report evidence only in phase 1 and do not drive target-row selection
+- exact already-recorded family-wide matches no-op; any different non-blank shared/date target value hard-blocks because phase 1 does not append, merge, or replace existing values
 
 ## Confirmed Exclusions
 
@@ -228,7 +231,7 @@ Implemented behavior:
 
 Still deferred:
 - append/update behavior for non-blank shared-column cells beyond the current hard-block path
-- IP/EXP shared-column staging beyond explicit unresolved-policy hard-block reporting
+- any phase-2+ append/merge policy for non-blank family-wide IP/EXP rows
 
 ### 5. Rule Pack
 
@@ -236,15 +239,15 @@ Implemented rule categories:
 - file number present for ERP family resolution
 - ERP rows present
 - ERP family consistent
-- required UD document present
+- required processable document present
 - required UD extraction fields present
 - deterministic UD allocation selected
-- unresolved IP/EXP policy hard-block when IP/EXP documents are present
+- valid phase-1 IP/EXP mail shape
+- required IP/EXP fields present and valid
 
 Still expected before workflow completion:
 - required document classification present
-- IP/EXP workbook target matching policy
-- IP/EXP total/date/update policy completion
+- richer live IP/EXP extraction fixtures and proofs
 
 Any new discrepancy code must first be added to `docs/discrepancy-codes.md`.
 
@@ -266,7 +269,7 @@ Current implementation:
 - `ud_ip_exp` print and mail-move eligibility follows `export_lc_sc`
 - all newly saved PDFs for successful `ud_ip_exp` mails are print-eligible after the workbook write commit
 - successful `ud_ip_exp` mails follow the same staged post-write/post-print movement gate as `export_lc_sc`
-- IP/EXP document processing can still hard-block before transport because IP/EXP matching and write policies remain unresolved
+- IP/EXP document processing can still hard-block before transport when mail shape, required fields, family row resolution, or non-blank target conflicts violate the conservative phase-1 contract
 
 ## Deterministic Fixture Manifest
 
@@ -321,7 +324,7 @@ Implemented scenarios include:
 Still valuable to add later:
 - more live document-analysis fixtures covering mixed-quality PDFs
 - explicit tests for additional live-document ambiguity patterns beyond family/date/quantity disagreement
-- eventual IP/EXP completion-path tests once the business rules are finalized
+- broader live IP/EXP completion-path tests beyond the conservative phase-1 family-wide write contract
 
 ## Open Questions Before Production Completion
 
@@ -331,8 +334,8 @@ These must be answered or intentionally hard-blocked before production release:
 2. Which extracted fields are mandatory for UD?
 3. Which extracted fields are mandatory for IP?
 4. Which extracted fields are mandatory for EXP?
-5. Which workbook columns besides `UD No. & IP No.` are written by this workflow?
-6. How should dates be stored if UD/IP/EXP has date columns?
+5. Does the conservative family-wide IP/EXP write policy remain acceptable once live evidence accumulates?
+6. Are any future non-blank append/merge rules needed for repeated EXP/IP updates on the same family?
 7. What source/destination Outlook folders should production use for this workflow?
 
 Until answered, default to hard-block with comprehensive discrepancy reporting rather than guessing.
@@ -342,12 +345,12 @@ Until answered, default to hard-block with comprehensive discrepancy reporting r
 The next highest-value work is whichever of these the team wants to unblock first:
 1. Update this handoff and adjacent durable docs whenever the implementation boundary changes.
 2. Continue improving live UD extraction quality with deterministic saved-document analysis fixtures and hard-block reporting inside the confirmed office-use-only-row plus ERP LC/SC + `Ship. Remarks` linkage rules.
-3. Finalize IP/EXP business rules in docs, then replace the current unresolved-policy hard-block path with deterministic matching and staging logic.
+3. Add broader live-proof coverage for the documented conservative phase-1 IP/EXP path, then revisit whether later business-approved append/merge behavior is needed.
 
 ## Guardrails for New Sessions
 
 When starting a new session, use this prompt:
 
 ```text
-Read AGENTS.md, docs/architecture.md, docs/workflows.md, docs/domain-rules.md, docs/discrepancy-codes.md, PLANS.md, README.md, and docs/ud-ip-exp-implementation-handoff.md. We are implementing workflow ud_ip_exp. Preserve existing export_lc_sc behavior and tests. Do not invent unresolved business rules; hard-block or ask for clarification when the handoff marks a rule open.
+Read AGENTS.md, docs/architecture.md, docs/workflows.md, docs/domain-rules.md, docs/discrepancy-codes.md, PLANS.md, README.md, and docs/ud-ip-exp-implementation-handoff.md. We are implementing workflow ud_ip_exp. Preserve existing export_lc_sc behavior and tests. Follow the documented conservative phase-1 IP/EXP contract exactly; hard-block anything outside it rather than inventing append/merge behavior.
 ```

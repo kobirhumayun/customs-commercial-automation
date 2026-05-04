@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from project.erp.normalization import normalize_lc_sc_number
 from project.erp.normalization import normalize_lc_sc_date
 from project.models import FinalDecision, WriteOperation
 from project.utils.ids import build_write_operation_id
@@ -242,6 +243,9 @@ def stage_ip_exp_shared_column_operations(
     documents: list[UDIPEXPDocumentPayload],
     workbook_snapshot: WorkbookSnapshot | None,
     target_row_indexes: list[int] | None = None,
+    family_lc_sc_number: str | None = None,
+    ip_exp_receive_date: str | None = None,
+    operation_index_start: int = 0,
 ) -> UDIPEXPWriteStagingResult:
     ip_exp_documents = [
         document
@@ -277,37 +281,129 @@ def stage_ip_exp_shared_column_operations(
             decision_reasons=["UD/IP/EXP workbook header mapping failed."],
         )
 
-    unresolved_policies = [
-        "IP/EXP workbook target-row matching keys are not confirmed.",
-        "IP/EXP total value and quantity reconciliation is not fully specified.",
-        "IP/EXP date column mapping and line-by-line date write policy are not confirmed.",
-        "IP/EXP append, replacement, and duplicate handling for the shared column are not confirmed.",
-    ]
-    return UDIPEXPWriteStagingResult(
-        staged_write_operations=[],
-        discrepancies=[
-            UDIPEXPStagingDiscrepancy(
-                code="ip_exp_policy_unresolved",
-                severity=FinalDecision.HARD_BLOCK,
-                message=(
-                    "IP/EXP shared-column staging is blocked because required matching, date, "
-                    "total-check, and update policies are not fully confirmed."
-                ),
-                details={
-                    "run_id": run_id,
-                    "mail_id": mail_id,
-                    "sheet_name": workbook_snapshot.sheet_name,
-                    "target_column_key": "ud_ip_shared",
-                    "target_column_index": header_mapping["ud_ip_shared"],
-                    "target_row_indexes": list(target_row_indexes or []),
-                    "proposed_shared_column_value": format_shared_column_values(ip_exp_documents),
-                    "documents": [_document_summary(document) for document in ip_exp_documents],
-                    "unresolved_policies": unresolved_policies,
-                },
+    target_values = _ip_exp_target_values(
+        documents=ip_exp_documents,
+        header_mapping=header_mapping,
+        ip_exp_receive_date=ip_exp_receive_date,
+    )
+    if isinstance(target_values, UDIPEXPStagingDiscrepancy):
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[target_values],
+            decision_reasons=["IP/EXP staging blocked because required shared-column/date targets were not available."],
+        )
+
+    resolved_target_row_indexes = list(target_row_indexes or [])
+    if not resolved_target_row_indexes and family_lc_sc_number is not None:
+        resolved_target_row_indexes = _collect_family_row_indexes(
+            workbook_snapshot=workbook_snapshot,
+            header_mapping=header_mapping,
+            family_lc_sc_number=family_lc_sc_number,
+        )
+    if not resolved_target_row_indexes:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[
+                UDIPEXPStagingDiscrepancy(
+                    code="ip_exp_family_row_missing",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message="IP/EXP family-wide staging requires existing workbook rows in the verified ERP family.",
+                    details={
+                        "run_id": run_id,
+                        "mail_id": mail_id,
+                        "sheet_name": workbook_snapshot.sheet_name,
+                        "family_lc_sc_number": family_lc_sc_number,
+                        "documents": [_document_summary(document) for document in ip_exp_documents],
+                    },
+                )
+            ],
+            decision_reasons=["IP/EXP staging blocked because the verified ERP family has no workbook rows."],
+        )
+
+    rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
+    if _family_rows_already_match_ip_exp_targets(
+        rows_by_index=rows_by_index,
+        target_row_indexes=resolved_target_row_indexes,
+        header_mapping=header_mapping,
+        target_values=target_values,
+    ):
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[],
+            decision_reasons=[
+                "Skipped IP/EXP family-wide write because the requested shared-column value is already recorded in the workbook."
+            ],
+        )
+
+    nonblank_targets = _family_nonblank_targets(
+        rows_by_index=rows_by_index,
+        target_row_indexes=resolved_target_row_indexes,
+        header_mapping=header_mapping,
+        target_values=target_values,
+    )
+    if nonblank_targets:
+        return UDIPEXPWriteStagingResult(
+            staged_write_operations=[],
+            discrepancies=[
+                UDIPEXPStagingDiscrepancy(
+                    code="ip_exp_target_row_conflict",
+                    severity=FinalDecision.HARD_BLOCK,
+                    message=(
+                        "One or more family-wide IP/EXP target rows already contain a different non-blank "
+                        "shared/date value, so phase 1 staging cannot append, merge, or replace them."
+                    ),
+                    details={
+                        "run_id": run_id,
+                        "mail_id": mail_id,
+                        "sheet_name": workbook_snapshot.sheet_name,
+                        "target_column_keys": list(target_values),
+                        "target_row_indexes": resolved_target_row_indexes,
+                        "target_rows": nonblank_targets,
+                        "proposed_shared_column_value": target_values["ud_ip_shared"],
+                        "documents": [_document_summary(document) for document in ip_exp_documents],
+                    },
+                )
+            ],
+            decision_reasons=[
+                "IP/EXP staging blocked because at least one family-wide target cell is already populated with a different value."
+            ],
+        )
+
+    staged_write_operations: list[WriteOperation] = []
+    operation_index = operation_index_start
+    for row_index in resolved_target_row_indexes:
+        for column_key, post_write_value in target_values.items():
+            staged_write_operations.append(
+                WriteOperation(
+                    write_operation_id=build_write_operation_id(
+                        run_id=run_id,
+                        mail_id=mail_id,
+                        operation_index_within_mail=operation_index,
+                        sheet_name=workbook_snapshot.sheet_name,
+                        row_index=row_index,
+                        column_key=column_key,
+                    ),
+                    run_id=run_id,
+                    mail_id=mail_id,
+                    operation_index_within_mail=operation_index,
+                    sheet_name=workbook_snapshot.sheet_name,
+                    row_index=row_index,
+                    column_key=column_key,
+                    expected_pre_write_value=None,
+                    expected_post_write_value=post_write_value,
+                    row_eligibility_checks=["target_cell_blank_by_construction"],
+                    number_format=DATE_NUMBER_FORMAT
+                    if column_key in {"ud_ip_date", "ud_recv_date"}
+                    else None,
+                )
             )
-        ],
+            operation_index += 1
+
+    return UDIPEXPWriteStagingResult(
+        staged_write_operations=staged_write_operations,
+        discrepancies=[],
         decision_reasons=[
-            "IP/EXP staging blocked because matching, date, total-check, and shared-column update policies remain unresolved."
+            f"Staged IP/EXP family-wide write to rows {resolved_target_row_indexes}."
         ],
     )
 
@@ -408,6 +504,74 @@ def _target_values(
     return values
 
 
+def _ip_exp_target_values(
+    *,
+    documents: list[UDIPEXPDocumentPayload],
+    header_mapping: dict[str, int],
+    ip_exp_receive_date: str | None,
+) -> dict[str, str] | UDIPEXPStagingDiscrepancy:
+    missing = [
+        column_key
+        for column_key in ("ud_ip_date", "ud_recv_date")
+        if column_key not in header_mapping
+    ]
+    if missing:
+        return UDIPEXPStagingDiscrepancy(
+            code="workbook_header_mapping_invalid",
+            severity=FinalDecision.HARD_BLOCK,
+            message="IP/EXP family-wide writes require UD/IP date and receive-date workbook headers.",
+            details={"missing_column_keys": missing},
+        )
+    if ip_exp_receive_date is None or not ip_exp_receive_date.strip():
+        return UDIPEXPStagingDiscrepancy(
+            code="ip_exp_required_field_missing",
+            severity=FinalDecision.HARD_BLOCK,
+            message="IP/EXP family-wide writes require a current workflow receive date.",
+            details={"missing_fields": ["ip_exp_receive_date"]},
+        )
+    normalized_dates = sorted(
+        {
+            normalized
+            for normalized in (
+                normalize_lc_sc_date(document.document_date.value)
+                if document.document_date is not None and document.document_date.value.strip()
+                else None
+                for document in documents
+            )
+            if normalized is not None
+        }
+    )
+    if len(normalized_dates) != 1:
+        return UDIPEXPStagingDiscrepancy(
+            code="ip_exp_required_field_invalid",
+            severity=FinalDecision.HARD_BLOCK,
+            message="IP/EXP family-wide writes require one normalized document date across the mail.",
+            details={
+                "invalid_fields": ["document_date"],
+                "document_dates": [
+                    document.document_date.value if document.document_date is not None else None
+                    for document in documents
+                ],
+            },
+        )
+    recv_date = _format_ddmmyyyy(ip_exp_receive_date)
+    if recv_date is None:
+        return UDIPEXPStagingDiscrepancy(
+            code="ip_exp_required_field_invalid",
+            severity=FinalDecision.HARD_BLOCK,
+            message="IP/EXP family-wide writes require a parseable workflow receive date.",
+            details={
+                "invalid_fields": ["ip_exp_receive_date"],
+                "ip_exp_receive_date": ip_exp_receive_date,
+            },
+        )
+    return {
+        "ud_ip_shared": format_shared_column_values(documents),
+        "ud_ip_date": date.fromisoformat(normalized_dates[0]).strftime("%d/%m/%Y"),
+        "ud_recv_date": recv_date,
+    }
+
+
 def _format_ddmmyyyy(value: str | object) -> str | None:
     normalized_date = normalize_lc_sc_date(value)
     if normalized_date is None:
@@ -458,3 +622,70 @@ def _selected_rows_already_match_ud_targets(
             if normalize_lc_sc_date(observed_value) != expected_ud_date:
                 return False
     return saw_shared
+
+
+def _collect_family_row_indexes(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    header_mapping: dict[str, int],
+    family_lc_sc_number: str,
+) -> list[int]:
+    expected = normalize_lc_sc_number(family_lc_sc_number or "")
+    if expected is None:
+        return []
+    return [
+        row.row_index
+        for row in sorted(workbook_snapshot.rows, key=lambda item: item.row_index)
+        if normalize_lc_sc_number(row.values.get(header_mapping["lc_sc_no"], "")) == expected
+    ]
+
+
+def _family_rows_already_match_ip_exp_targets(
+    *,
+    rows_by_index: dict[int, object],
+    target_row_indexes: list[int],
+    header_mapping: dict[str, int],
+    target_values: dict[str, str],
+) -> bool:
+    expected_shared = target_values["ud_ip_shared"].strip()
+    expected_date = normalize_lc_sc_date(target_values["ud_ip_date"])
+    if expected_date is None:
+        return False
+    for row_index in target_row_indexes:
+        row = rows_by_index.get(row_index)
+        if row is None:
+            return False
+        shared_value = str(row.values.get(header_mapping["ud_ip_shared"], "") or "").strip()
+        if shared_value != expected_shared:
+            return False
+        observed_date = normalize_lc_sc_date(row.values.get(header_mapping["ud_ip_date"], ""))
+        if observed_date != expected_date:
+            return False
+    return True
+
+
+def _family_nonblank_targets(
+    *,
+    rows_by_index: dict[int, object],
+    target_row_indexes: list[int],
+    header_mapping: dict[str, int],
+    target_values: dict[str, str],
+) -> list[dict[str, object]]:
+    targets: list[dict[str, object]] = []
+    for row_index in target_row_indexes:
+        row = rows_by_index.get(row_index)
+        for column_key in target_values:
+            observed_value = (
+                row.values.get(header_mapping[column_key], "")
+                if row is not None
+                else None
+            )
+            if str(observed_value or "").strip():
+                targets.append(
+                    {
+                        "row_index": row_index,
+                        "column_key": column_key,
+                        "observed_value": observed_value,
+                    }
+                )
+    return targets

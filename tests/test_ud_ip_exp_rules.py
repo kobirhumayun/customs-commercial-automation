@@ -26,7 +26,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
 
         self.assertEqual(rule_pack.rule_pack_id, "ud_ip_exp.default")
-        self.assertEqual(rule_pack.rule_pack_version, "1.0.0")
+        self.assertEqual(rule_pack.rule_pack_version, "1.1.0")
         self.assertEqual(
             [rule.rule_id for rule in rule_pack.rule_definitions],
             [
@@ -35,7 +35,8 @@ class UDIPEXPRuleTests(unittest.TestCase):
                 "ud_ip_exp.erp_rows_present.v1",
                 "ud_ip_exp.family_consistent.v1",
                 "ud_ip_exp.file_number_present.v1",
-                "ud_ip_exp.ip_exp_policy_resolved.v1",
+                "ud_ip_exp.ip_exp_mail_shape_valid.v1",
+                "ud_ip_exp.ip_exp_required_fields_present.v1",
                 "ud_ip_exp.ud_allocation_selected.v1",
                 "ud_ip_exp.ud_document_present.v1",
                 "ud_ip_exp.ud_required_fields_present.v1",
@@ -73,7 +74,6 @@ class UDIPEXPRuleTests(unittest.TestCase):
 
         self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
         self.assertIn("ud_required_document_missing", [item.code for item in result.discrepancies])
-        self.assertIn("ud_allocation_unresolved", [item.code for item in result.discrepancies])
 
     def test_rule_pack_hard_blocks_missing_confirmed_ud_fields(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
@@ -178,16 +178,33 @@ class UDIPEXPRuleTests(unittest.TestCase):
         self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
         self.assertEqual([item.code for item in result.discrepancies], ["ud_candidate_tie_after_full_tiebreak"])
 
-    def test_rule_pack_hard_blocks_ip_exp_payloads_until_policy_resolved(self) -> None:
+    def test_rule_pack_passes_exp_ip_payloads_when_shape_and_fields_are_valid(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        payload = UDIPEXPWorkflowPayload(
+            documents=[
+                IPDocumentPayload(
+                    document_number=DocumentExtractionField("IP-002"),
+                    document_date=DocumentExtractionField("2026-04-02"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+                EXPDocumentPayload(
+                    document_number=DocumentExtractionField("EXP-001"),
+                    document_date=DocumentExtractionField("2026-04-02"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                ),
+            ],
+        )
+
+        result = evaluate_rule_pack(_context(payload), rule_pack)
+
+        self.assertEqual(result.final_decision, FinalDecision.PASS)
+        self.assertEqual(result.discrepancies, [])
+
+    def test_rule_pack_hard_blocks_mixed_ud_and_ip_exp_mail_shape(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[
                 _ud_document(),
-                IPDocumentPayload(
-                    document_number=DocumentExtractionField("IP-002"),
-                    document_date=DocumentExtractionField("2026-04-03"),
-                    lc_sc_number=DocumentExtractionField("LC-0043"),
-                ),
                 EXPDocumentPayload(
                     document_number=DocumentExtractionField("EXP-001"),
                     document_date=DocumentExtractionField("2026-04-02"),
@@ -211,11 +228,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         result = evaluate_rule_pack(_context(payload), rule_pack)
 
         self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
-        self.assertEqual([item.code for item in result.discrepancies], ["ip_exp_policy_unresolved"])
-        self.assertEqual(
-            result.discrepancies[0].details["proposed_shared_column_value"],
-            "EXP: EXP-001\nIP: IP-002",
-        )
+        self.assertEqual([item.code for item in result.discrepancies], ["ud_ip_exp_mail_shape_invalid"])
 
     def test_rule_pack_hard_blocks_missing_body_file_number_when_erp_family_payload_is_supplied(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)

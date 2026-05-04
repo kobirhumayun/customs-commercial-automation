@@ -347,14 +347,14 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual(result.staged_write_operations, [])
         self.assertEqual(result.discrepancies[0].code, "workbook_header_mapping_invalid")
 
-    def test_stage_ip_exp_shared_column_operations_hard_blocks_until_policy_confirmed(self) -> None:
+    def test_stage_ip_exp_shared_column_operations_stages_family_wide_rows(self) -> None:
         result = stage_ip_exp_shared_column_operations(
             run_id="run-1",
             mail_id="mail-1",
             documents=[
                 IPDocumentPayload(
                     document_number=DocumentExtractionField("IP-002"),
-                    document_date=DocumentExtractionField("2026-04-03"),
+                    document_date=DocumentExtractionField("2026-04-02"),
                     lc_sc_number=DocumentExtractionField("LC-0043"),
                 ),
                 EXPDocumentPayload(
@@ -363,24 +363,60 @@ class UDIPEXPStagingTests(unittest.TestCase):
                     lc_sc_number=DocumentExtractionField("LC-0043"),
                 ),
             ],
-            workbook_snapshot=_snapshot(
+            workbook_snapshot=_structured_snapshot(
                 rows=[
-                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: ""}),
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
+                    WorkbookRow(row_index=12, values={1: "LC-0043", 2: "500", 3: "", 4: "", 5: "", 6: "500", 7: "", 8: ""}),
+                ]
+            ),
+            target_row_indexes=[11, 12],
+            ip_exp_receive_date="2026-04-22",
+        )
+
+        self.assertEqual(result.discrepancies, [])
+        self.assertEqual(
+            [
+                (operation.row_index, operation.column_key, operation.expected_post_write_value)
+                for operation in result.staged_write_operations
+            ],
+            [
+                (11, "ud_ip_shared", "EXP: EXP-001\nIP: IP-002"),
+                (11, "ud_ip_date", "02/04/2026"),
+                (11, "ud_recv_date", "22/04/2026"),
+                (12, "ud_ip_shared", "EXP: EXP-001\nIP: IP-002"),
+                (12, "ud_ip_date", "02/04/2026"),
+                (12, "ud_recv_date", "22/04/2026"),
+            ],
+        )
+
+    def test_stage_ip_exp_shared_column_operations_noops_when_family_already_recorded(self) -> None:
+        result = stage_ip_exp_shared_column_operations(
+            run_id="run-1",
+            mail_id="mail-1",
+            documents=[
+                EXPDocumentPayload(
+                    document_number=DocumentExtractionField("EXP-001"),
+                    document_date=DocumentExtractionField("2026-04-02"),
+                    lc_sc_number=DocumentExtractionField("LC-0043"),
+                )
+            ],
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={1: "LC-0043", 2: "1000", 3: "EXP: EXP-001", 4: "", 5: "", 6: "1000", 7: "02/04/2026", 8: "20/04/2026"},
+                    ),
                 ]
             ),
             target_row_indexes=[11],
+            ip_exp_receive_date="2026-04-22",
         )
 
         self.assertEqual(result.staged_write_operations, [])
-        self.assertEqual(result.discrepancies[0].code, "ip_exp_policy_unresolved")
+        self.assertEqual(result.discrepancies, [])
         self.assertEqual(
-            result.discrepancies[0].details["proposed_shared_column_value"],
-            "EXP: EXP-001\nIP: IP-002",
-        )
-        self.assertEqual(result.discrepancies[0].details["target_row_indexes"], [11])
-        self.assertIn(
-            "date column mapping",
-            "\n".join(result.discrepancies[0].details["unresolved_policies"]),
+            result.decision_reasons,
+            ["Skipped IP/EXP family-wide write because the requested shared-column value is already recorded in the workbook."],
         )
 
     def test_stage_ip_exp_shared_column_operations_noops_when_no_ip_exp_documents(self) -> None:

@@ -228,7 +228,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             "ud_already_recorded",
         )
 
-    def test_validate_run_snapshot_hard_blocks_mixed_ud_ip_exp_manifest_until_policy_resolved(self) -> None:
+    def test_validate_run_snapshot_hard_blocks_mixed_ud_ip_exp_manifest_with_invalid_mail_shape(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail("entry-ud-001", "UD-LC-0043-ANANTA")
         validation_result = validate_run_snapshot(
@@ -264,13 +264,62 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.staged_write_plan, [])
         self.assertEqual(
             [report.code for report in validation_result.discrepancy_reports],
-            ["ip_exp_policy_unresolved"],
-        )
-        self.assertEqual(
-            validation_result.discrepancy_reports[0].details["proposed_shared_column_value"],
-            "EXP: EXP-001\nIP: IP-002",
+            ["ud_ip_exp_mail_shape_invalid"],
         )
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["selected_candidate_id"], "11")
+
+    def test_validate_run_snapshot_stages_exp_ip_manifest_family_wide(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail("entry-ud-001", "EXP-LC-0043-ANANTA")
+        validation_result = validate_run_snapshot(
+            descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+            run_report=_run_report(rule_pack, [mail]),
+            rule_pack=rule_pack,
+            erp_row_provider=_erp_provider(),
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
+                    WorkbookRow(row_index=12, values={1: "LC-0043", 2: "500 YDS", 3: "", 4: "", 5: "", 6: "500", 7: "", 8: ""}),
+                ]
+            ),
+            ud_document_provider=MappingUDDocumentPayloadProvider(
+                {
+                    mail.entry_id: [
+                        EXPDocumentPayload(
+                            document_number=DocumentExtractionField("EXP-001"),
+                            document_date=DocumentExtractionField("2026-04-02"),
+                            lc_sc_number=DocumentExtractionField("LC-0043"),
+                        ),
+                        IPDocumentPayload(
+                            document_number=DocumentExtractionField("IP-002"),
+                            document_date=DocumentExtractionField("2026-04-02"),
+                            lc_sc_number=DocumentExtractionField("LC-0043"),
+                        ),
+                    ]
+                }
+            ),
+        )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(
+            [
+                (operation.row_index, operation.column_key, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+            ],
+            [
+                (11, "ud_ip_shared", "EXP: EXP-001\nIP: IP-002"),
+                (11, "ud_ip_date", "02/04/2026"),
+                (11, "ud_recv_date", "01/04/2026"),
+                (12, "ud_ip_shared", "EXP: EXP-001\nIP: IP-002"),
+                (12, "ud_ip_date", "02/04/2026"),
+                (12, "ud_recv_date", "01/04/2026"),
+            ],
+        )
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
+        self.assertIsNone(validation_result.mail_outcomes[0].ud_selection)
 
     def test_validate_run_snapshot_stages_multiple_ud_documents_in_one_mail_without_reusing_rows(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
@@ -384,7 +433,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         self.assertEqual(validation_result.staged_write_plan, [])
         self.assertEqual(
             [report.code for report in validation_result.discrepancy_reports],
-            ["ud_allocation_unresolved", "ud_required_document_missing"],
+            ["ud_required_document_missing"],
         )
         self.assertIsNone(validation_result.mail_outcomes[0].ud_selection)
 

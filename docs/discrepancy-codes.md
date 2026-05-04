@@ -89,8 +89,9 @@ Every discrepancy payload should include:
 | `ud_file_number_missing` | `hard_block` | ud_ip_exp | UD/IP/EXP mail body did not yield any canonical file numbers for ERP family resolution. |
 | `ud_erp_row_missing` | `hard_block` | ud_ip_exp | One or more extracted UD/IP/EXP file numbers did not resolve to a canonical ERP row. |
 | `ud_family_inconsistent` | `hard_block` | ud_ip_exp | Resolved ERP rows for extracted UD/IP/EXP file numbers did not belong to one LC/SC family. |
+| `ud_ip_exp_mail_shape_invalid` | `hard_block` | ud_ip_exp | The mail's deterministic document composition is invalid for phase 1, such as UD mixed with IP/EXP, IP without EXP, or more than one EXP/IP payload of the same kind. |
 | `ud_filename_lc_suffix_mismatch` | `hard_block` | ud_ip_exp | A UD/IP/EXP attachment filename explicitly carrying a `UD-LC-...` or `UD-SC-...` suffix does not agree with the ERP-derived LC/SC family suffix. |
-| `ud_required_document_missing` | `hard_block` | ud_ip_exp | No UD document payload was available for deterministic UD processing. |
+| `ud_required_document_missing` | `hard_block` | ud_ip_exp | No deterministic UD/IP/EXP document payload was available for processing. |
 | `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
 | `ud_required_field_invalid` | `hard_block` | ud_ip_exp | A UD document payload contains a mandatory field that is present but invalid, such as an unparseable date or non-BGMEA UD/AM number. |
 | `ud_document_number_pattern_mismatch` | `hard_block` | ud_ip_exp | A UD attachment did not yield an extracted BGMEA UD/AM number matching the required workbook-write pattern; filename fallback is not allowed. |
@@ -101,7 +102,11 @@ Every discrepancy payload should include:
 | `ud_quantity_excess_below_threshold` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity exceeded workbook quantity by less than the required 50-unit threshold. |
 | `ud_target_row_conflict` | `hard_block` | ud_ip_exp | The candidate UD/AM row group is already assigned to a different UD/AM document, or the existing UD date conflicts with the candidate document. |
 | `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row has one or more non-blank UD target cells; phase 1 does not write to any workbook target cell that already contains a value. |
-| `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | IP/EXP matching, date-column, total-check, or shared-column update policy remains unresolved, so staging is blocked with document evidence. |
+| `ip_exp_required_field_missing` | `hard_block` | ud_ip_exp | An EXP or IP document payload is missing one or more mandatory extracted fields required for deterministic phase-1 staging. |
+| `ip_exp_required_field_invalid` | `hard_block` | ud_ip_exp | An EXP or IP document payload contains an invalid or contradictory required field, such as an unparseable date, conflicting family LC/SC number, or inconsistent same-mail document date. |
+| `ip_exp_family_row_missing` | `hard_block` | ud_ip_exp | The verified ERP LC/SC family did not resolve to any existing workbook row for family-wide IP/EXP staging. |
+| `ip_exp_target_row_conflict` | `hard_block` | ud_ip_exp | One or more family-wide IP/EXP target rows already contain a different non-blank shared/date value, so phase 1 staging cannot append, merge, or replace them. |
+| `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | Historical pre-policy code retained for backward compatibility with older run artifacts created before the deterministic phase-1 IP/EXP path was documented and implemented. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

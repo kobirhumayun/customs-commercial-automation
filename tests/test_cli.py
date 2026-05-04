@@ -4926,10 +4926,10 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("transport_policy", payload)
         self.assertEqual(
             [item["code"] for item in discrepancies],
-            ["ud_allocation_unresolved", "ud_required_document_missing"],
+            ["ud_required_document_missing"],
         )
 
-    def test_validate_run_ud_ip_exp_mixed_manifest_hard_blocks_ip_exp_policy(self) -> None:
+    def test_validate_run_ud_ip_exp_mixed_manifest_hard_blocks_invalid_mail_shape(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = _write_cli_config(root, workflow_year=datetime.datetime.now().year)
@@ -5027,12 +5027,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["summary"], {"pass": 0, "warning": 0, "hard_block": 1})
         self.assertEqual(payload["staged_write_operation_count"], 0)
         self.assertNotIn("transport_policy", payload)
-        self.assertEqual([item["code"] for item in discrepancies], ["ip_exp_policy_unresolved"])
-        self.assertEqual(
-            discrepancies[0]["details"]["proposed_shared_column_value"],
-            "EXP: EXP-001\nIP: IP-002",
-        )
-        self.assertIn("date column mapping", "\n".join(discrepancies[0]["details"]["unresolved_policies"]))
+        self.assertEqual([item["code"] for item in discrepancies], ["ud_ip_exp_mail_shape_invalid"])
         self.assertEqual(mail_outcomes[0]["ud_selection"]["selected_candidate_id"], "11")
         self.assertFalse(mail_outcomes[0]["eligible_for_write"])
         self.assertFalse(mail_outcomes[0]["eligible_for_print"])

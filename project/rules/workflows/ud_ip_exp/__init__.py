@@ -1,7 +1,7 @@
 from project.models import FinalDecision
 from project.models.enums import RuleStage
 from project.rules.types import RuleDefinition, RuleDiscrepancy, RuleEvaluationResult
-from project.erp.normalization import normalize_lc_sc_date
+from project.erp.normalization import normalize_lc_sc_date, normalize_lc_sc_number
 from project.workflows.ud_ip_exp.parsing import is_bgmea_ud_am_document_number
 from project.workflows.ud_ip_exp.payloads import (
     UDDocumentPayload,
@@ -12,7 +12,7 @@ from project.workflows.ud_ip_exp.payloads import (
 )
 
 RULE_PACK_ID = "ud_ip_exp.default"
-RULE_PACK_VERSION = "1.0.0"
+RULE_PACK_VERSION = "1.1.0"
 
 
 def evaluate_ud_file_number_present(context) -> RuleEvaluationResult:
@@ -138,21 +138,21 @@ def evaluate_ud_family_consistent(context) -> RuleEvaluationResult:
 
 def evaluate_ud_document_present(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
-    if _ud_documents(payload):
+    if payload.documents:
         return RuleEvaluationResult(
             rule_id="ud_ip_exp.ud_document_present.v1",
             outcome=FinalDecision.PASS,
-            rationale="At least one UD document payload is available for deterministic UD processing.",
+            rationale="At least one deterministic UD/IP/EXP document payload is available for processing.",
         )
     return RuleEvaluationResult(
         rule_id="ud_ip_exp.ud_document_present.v1",
         outcome=FinalDecision.HARD_BLOCK,
-        rationale="UD processing requires at least one UD document payload.",
+        rationale="UD/IP/EXP processing requires at least one deterministic document payload.",
         discrepancies=(
             RuleDiscrepancy(
                 code="ud_required_document_missing",
                 severity=FinalDecision.HARD_BLOCK,
-                message="No UD document payload was available for deterministic UD processing.",
+                message="No deterministic UD/IP/EXP document payload was available for processing.",
                 subject_scope="mail",
                 target_ref=context.mail.mail_id,
                 details={
@@ -167,6 +167,12 @@ def evaluate_ud_document_present(context) -> RuleEvaluationResult:
 
 def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    if not _ud_documents(payload):
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ud_required_fields_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="No UD documents are present, so UD-only field validation is not required.",
+        )
     missing_by_document = []
     invalid_by_document = []
     for index, document in enumerate(_ud_documents(payload)):
@@ -256,6 +262,12 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
 
 def evaluate_ud_allocation_selected(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    if not _ud_documents(payload):
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ud_allocation_selected.v1",
+            outcome=FinalDecision.PASS,
+            rationale="No UD documents are present, so UD row allocation is not required.",
+        )
     allocation = payload.ud_allocation_result
     if allocation is not None and allocation.final_decision in {"selected", "already_recorded"}:
         rationale = (
@@ -294,46 +306,155 @@ def evaluate_ud_allocation_selected(context) -> RuleEvaluationResult:
     )
 
 
-def evaluate_ip_exp_policy_resolved(context) -> RuleEvaluationResult:
+def evaluate_ip_exp_mail_shape_valid(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
     ip_exp_documents = _ip_exp_documents(payload)
     if not ip_exp_documents:
         return RuleEvaluationResult(
-            rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+            rule_id="ud_ip_exp.ip_exp_mail_shape_valid.v1",
             outcome=FinalDecision.PASS,
-            rationale="No IP/EXP document payloads are present for unresolved IP/EXP policy checks.",
+            rationale="No IP/EXP document payloads are present for IP/EXP mail-shape checks.",
         )
-
-    unresolved_policies = [
-        "IP/EXP workbook target-row matching keys are not confirmed.",
-        "IP/EXP total value and quantity reconciliation is not fully specified.",
-        "IP/EXP date column mapping and line-by-line date write policy are not confirmed.",
-        "IP/EXP append, replacement, and duplicate handling for the shared column are not confirmed.",
-    ]
+    issues = _ip_exp_mail_shape_issues(payload)
+    document_kinds = [document.document_kind.value for document in payload.documents]
+    if not issues:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ip_exp_mail_shape_valid.v1",
+            outcome=FinalDecision.PASS,
+            rationale="The mail's IP/EXP document composition matches the conservative phase-1 contract.",
+        )
     return RuleEvaluationResult(
-        rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+        rule_id="ud_ip_exp.ip_exp_mail_shape_valid.v1",
         outcome=FinalDecision.HARD_BLOCK,
-        rationale="IP/EXP document payloads are present but required processing policies remain unresolved.",
+        rationale="The mail's IP/EXP document composition violates the conservative phase-1 contract.",
         discrepancies=(
             RuleDiscrepancy(
-                code="ip_exp_policy_unresolved",
+                code="ud_ip_exp_mail_shape_invalid",
                 severity=FinalDecision.HARD_BLOCK,
-                message=(
-                    "IP/EXP documents were supplied, but matching, date, total-check, "
-                    "and shared-column update policies are not fully confirmed."
-                ),
+                message="The mail's deterministic IP/EXP document composition is invalid for phase 1.",
                 subject_scope="mail",
                 target_ref=context.mail.mail_id,
                 details={
                     "mail_id": context.mail.mail_id,
-                    "document_count": len(ip_exp_documents),
-                    "document_kinds": [document.document_kind.value for document in ip_exp_documents],
+                    "document_count": len(payload.documents),
+                    "document_kinds": document_kinds,
                     "proposed_shared_column_value": format_shared_column_values(ip_exp_documents),
                     "documents": [_document_summary(document) for document in ip_exp_documents],
-                    "unresolved_policies": unresolved_policies,
+                    "issues": issues,
                 },
             ),
         ),
+    )
+
+
+def evaluate_ip_exp_required_fields_present(context) -> RuleEvaluationResult:
+    payload = _require_ud_ip_exp_payload(context.workflow_payload)
+    ip_exp_documents = _ip_exp_documents(payload)
+    if not ip_exp_documents:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ip_exp_required_fields_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="No IP/EXP document payloads are present for IP/EXP field validation.",
+        )
+    if _ip_exp_mail_shape_issues(payload):
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ip_exp_required_fields_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="IP/EXP field validation is skipped because the mail-shape contract already failed.",
+        )
+    missing_by_document = []
+    invalid_by_document = []
+    normalized_dates: set[str] = set()
+    expected_family = _expected_family_lc_sc_number(payload)
+    for index, document in enumerate(ip_exp_documents):
+        missing_fields = []
+        invalid_fields = []
+        if not document.document_number.value.strip():
+            missing_fields.append("document_number")
+        if document.document_date is None or not document.document_date.value.strip():
+            missing_fields.append("document_date")
+        else:
+            normalized_date = normalize_lc_sc_date(document.document_date.value)
+            if normalized_date is None:
+                invalid_fields.append("document_date")
+            else:
+                normalized_dates.add(normalized_date)
+        if not document.lc_sc_number.value.strip():
+            missing_fields.append("lc_sc_number")
+        elif expected_family is not None:
+            normalized_lc_sc = normalize_lc_sc_number(document.lc_sc_number.value)
+            if normalized_lc_sc != expected_family:
+                invalid_fields.append("lc_sc_number")
+        if missing_fields:
+            missing_by_document.append(
+                {
+                    "document_index": index,
+                    "document_kind": document.document_kind.value,
+                    "document_number": document.document_number.value,
+                    "missing_fields": missing_fields,
+                }
+            )
+        if invalid_fields:
+            invalid_by_document.append(
+                {
+                    "document_index": index,
+                    "document_kind": document.document_kind.value,
+                    "document_number": document.document_number.value,
+                    "invalid_fields": invalid_fields,
+                    "expected_family_lc_sc_number": expected_family,
+                }
+            )
+    if len(normalized_dates) > 1:
+        invalid_by_document.append(
+            {
+                "document_index": None,
+                "document_kind": "mail",
+                "document_number": None,
+                "invalid_fields": ["document_date"],
+                "normalized_document_dates": sorted(normalized_dates),
+                "reason": "same_mail_document_dates_must_match",
+            }
+        )
+    if not missing_by_document and not invalid_by_document:
+        return RuleEvaluationResult(
+            rule_id="ud_ip_exp.ip_exp_required_fields_present.v1",
+            outcome=FinalDecision.PASS,
+            rationale="IP/EXP document payloads contain the confirmed phase-1 required fields.",
+        )
+    discrepancies = []
+    if missing_by_document:
+        discrepancies.append(
+            RuleDiscrepancy(
+                code="ip_exp_required_field_missing",
+                severity=FinalDecision.HARD_BLOCK,
+                message="One or more IP/EXP document payloads are missing confirmed required fields.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "missing_by_document": missing_by_document,
+                },
+            )
+        )
+    if invalid_by_document:
+        discrepancies.append(
+            RuleDiscrepancy(
+                code="ip_exp_required_field_invalid",
+                severity=FinalDecision.HARD_BLOCK,
+                message="One or more IP/EXP document payloads contain invalid or contradictory required fields.",
+                subject_scope="mail",
+                target_ref=context.mail.mail_id,
+                details={
+                    "mail_id": context.mail.mail_id,
+                    "invalid_by_document": invalid_by_document,
+                },
+            )
+        )
+    return RuleEvaluationResult(
+        rule_id="ud_ip_exp.ip_exp_required_fields_present.v1",
+        outcome=FinalDecision.HARD_BLOCK,
+        rationale="IP/EXP document payloads must satisfy the conservative phase-1 field contract before staging.",
+        discrepancies=tuple(discrepancies),
     )
 
 
@@ -377,6 +498,34 @@ def _document_summary(document: UDIPEXPDocumentPayload) -> dict:
     }
 
 
+def _expected_family_lc_sc_number(payload: UDIPEXPWorkflowPayload) -> str | None:
+    export_payload = payload.export_payload
+    if export_payload is None:
+        return None
+    for match in export_payload.erp_matches:
+        if match.canonical_row is not None:
+            return normalize_lc_sc_number(match.canonical_row.lc_sc_number)
+    return None
+
+
+def _ip_exp_mail_shape_issues(payload: UDIPEXPWorkflowPayload) -> list[str]:
+    ip_exp_documents = _ip_exp_documents(payload)
+    if not ip_exp_documents:
+        return []
+    issues: list[str] = []
+    if _ud_documents(payload):
+        issues.append("UD and IP/EXP documents cannot be mixed in one mail.")
+    exp_count = sum(1 for document in ip_exp_documents if document.document_kind == UDIPEXPDocumentKind.EXP)
+    ip_count = sum(1 for document in ip_exp_documents if document.document_kind == UDIPEXPDocumentKind.IP)
+    if ip_count and not exp_count:
+        issues.append("IP documents require an EXP document in the same mail.")
+    if exp_count > 1:
+        issues.append("Phase 1 allows at most one deterministic EXP payload per mail.")
+    if ip_count > 1:
+        issues.append("Phase 1 allows at most one deterministic IP payload per mail.")
+    return issues
+
+
 def _is_structured_bgmea_ud(document: UDIPEXPDocumentPayload) -> bool:
     return (
         document.lc_sc_date is not None
@@ -402,9 +551,14 @@ RULE_DEFINITIONS = (
         evaluator=evaluate_ud_file_number_present,
     ),
     RuleDefinition(
-        rule_id="ud_ip_exp.ip_exp_policy_resolved.v1",
+        rule_id="ud_ip_exp.ip_exp_mail_shape_valid.v1",
         stage=RuleStage.WORKFLOW_STANDARD,
-        evaluator=evaluate_ip_exp_policy_resolved,
+        evaluator=evaluate_ip_exp_mail_shape_valid,
+    ),
+    RuleDefinition(
+        rule_id="ud_ip_exp.ip_exp_required_fields_present.v1",
+        stage=RuleStage.WORKFLOW_STANDARD,
+        evaluator=evaluate_ip_exp_required_fields_present,
     ),
     RuleDefinition(
         rule_id="ud_ip_exp.ud_allocation_selected.v1",

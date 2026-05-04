@@ -43,7 +43,10 @@ from project.workflows.payloads import build_workflow_payload
 from project.workflows.registry import WorkflowDescriptor
 from project.workflows.ud_ip_exp.payloads import UDDocumentPayload, UDIPEXPWorkflowPayload
 from project.workflows.ud_ip_exp.providers import UDDocumentPayloadProvider
-from project.workflows.ud_ip_exp.staging import UDIPEXPWriteStagingResult
+from project.workflows.ud_ip_exp.staging import (
+    UDIPEXPWriteStagingResult,
+    stage_ip_exp_shared_column_operations,
+)
 from project.workflows.ud_ip_exp.live_documents import prepare_live_ud_ip_exp_documents
 from project.erp.normalization import normalize_lc_sc_date
 
@@ -634,9 +637,33 @@ def _evaluate_ud_ip_exp_mail(
         mail=mail,
         workflow_payload=workflow_payload,
     )
+    aggregated = evaluate_rule_pack(context, rule_pack)
+    if documents:
+        from project.workflows.ud_ip_exp.validation import workflow_date_from_started_at
+
+        staging_result = (
+            stage_ip_exp_shared_column_operations(
+                run_id=run_report.run_id,
+                mail_id=mail.mail_id,
+                documents=documents,
+                workbook_snapshot=workbook_snapshot,
+                family_lc_sc_number=_canonical_erp_family_lc_sc_number(export_payload),
+                ip_exp_receive_date=workflow_date_from_started_at(
+                    run_report.started_at_utc,
+                    state_timezone=run_report.state_timezone,
+                ),
+            )
+            if aggregated.final_decision != FinalDecision.HARD_BLOCK
+            else UDIPEXPWriteStagingResult(
+                staged_write_operations=[],
+                discrepancies=[],
+                decision_reasons=["IP/EXP staging skipped because rule evaluation did not pass."],
+            )
+        )
+        return context, aggregated, staging_result, None
     return (
         context,
-        evaluate_rule_pack(context, rule_pack),
+        aggregated,
         UDIPEXPWriteStagingResult(
             staged_write_operations=[],
             discrepancies=[],
@@ -935,6 +962,15 @@ def _extend_aggregated_rule_evaluation(
         final_decision=final_decision,
         decision_reasons=list(aggregated.decision_reasons) + list(decision_reasons),
     )
+
+
+def _canonical_erp_family_lc_sc_number(export_payload: ExportMailPayload | None) -> str | None:
+    if export_payload is None:
+        return None
+    for match in export_payload.erp_matches:
+        if match.canonical_row is not None:
+            return match.canonical_row.lc_sc_number
+    return None
 
 
 def _same_run_ud_duplicate_warning(
