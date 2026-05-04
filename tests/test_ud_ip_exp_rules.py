@@ -12,11 +12,10 @@ from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
     EXPDocumentPayload,
     IPDocumentPayload,
-    UDCandidateRow,
+    UDAllocationCandidate,
+    UDAllocationResult,
     UDDocumentPayload,
     UDIPEXPWorkflowPayload,
-    UDIPEXPQuantity,
-    allocate_ud_rows,
 )
 from project.workflows.validation import WorkflowValidationContext
 
@@ -26,7 +25,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
 
         self.assertEqual(rule_pack.rule_pack_id, "ud_ip_exp.default")
-        self.assertEqual(rule_pack.rule_pack_version, "1.1.0")
+        self.assertEqual(rule_pack.rule_pack_version, "1.2.0")
         self.assertEqual(
             [rule.rule_id for rule in rule_pack.rule_definitions],
             [
@@ -39,7 +38,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
                 "ud_ip_exp.ip_exp_required_fields_present.v1",
                 "ud_ip_exp.ud_allocation_selected.v1",
                 "ud_ip_exp.ud_document_present.v1",
-                "ud_ip_exp.ud_required_fields_present.v1",
+                "ud_ip_exp.ud_required_fields_present.v2",
             ],
         )
 
@@ -47,18 +46,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[_ud_document()],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
         )
 
         result = evaluate_rule_pack(_context(payload), rule_pack)
@@ -75,7 +63,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         self.assertEqual(result.final_decision, FinalDecision.HARD_BLOCK)
         self.assertIn("ud_required_document_missing", [item.code for item in result.discrepancies])
 
-    def test_rule_pack_hard_blocks_missing_confirmed_ud_fields(self) -> None:
+    def test_rule_pack_hard_blocks_missing_value_first_ud_fields(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[
@@ -83,21 +71,12 @@ class UDIPEXPRuleTests(unittest.TestCase):
                     document_number=DocumentExtractionField(" "),
                     document_date=None,
                     lc_sc_number=DocumentExtractionField("LC-0043"),
-                    quantity=None,
+                    lc_sc_date=None,
+                    lc_sc_value=None,
+                    quantity_by_unit={},
                 )
             ],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
         )
 
         result = evaluate_rule_pack(_context(payload), rule_pack)
@@ -106,10 +85,10 @@ class UDIPEXPRuleTests(unittest.TestCase):
         self.assertEqual([item.code for item in result.discrepancies], ["ud_required_field_missing"])
         self.assertEqual(
             result.discrepancies[0].details["missing_by_document"][0]["missing_fields"],
-            ["document_number", "document_date", "quantity"],
+            ["document_number", "document_date", "lc_sc_date", "lc_sc_value", "quantity_by_unit"],
         )
 
-    def test_rule_pack_hard_blocks_invalid_ud_number_and_date(self) -> None:
+    def test_rule_pack_hard_blocks_invalid_ud_number_and_dates(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[
@@ -117,21 +96,12 @@ class UDIPEXPRuleTests(unittest.TestCase):
                     document_number=DocumentExtractionField("UD-LC-0127-COTTONEX FASHIONS LTD"),
                     document_date=DocumentExtractionField("2026-99-99"),
                     lc_sc_number=DocumentExtractionField("LC-0127"),
-                    quantity=UDIPEXPQuantity(amount=Decimal("1000"), unit="YDS"),
+                    lc_sc_date=DocumentExtractionField("2026-99-99"),
+                    lc_sc_value=DocumentExtractionField("1000"),
+                    quantity_by_unit={"YDS": Decimal("1000")},
                 )
             ],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0127",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
         )
 
         result = evaluate_rule_pack(_context(payload), rule_pack)
@@ -144,7 +114,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
                 {
                     "document_index": 0,
                     "document_number": "UD-LC-0127-COTTONEX FASHIONS LTD",
-                    "invalid_fields": ["document_number", "document_date"],
+                    "invalid_fields": ["document_number", "document_date", "lc_sc_date"],
                 }
             ],
         )
@@ -153,23 +123,9 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[_ud_document()],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    ),
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    ),
-                ],
+            ud_allocation_result=_hard_block_allocation_result(
+                reason="ud_candidate_tie_after_full_tiebreak",
+                code="ud_candidate_tie_after_full_tiebreak",
             ),
         )
 
@@ -211,18 +167,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
                     lc_sc_number=DocumentExtractionField("LC-0043"),
                 ),
             ],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
         )
 
         result = evaluate_rule_pack(_context(payload), rule_pack)
@@ -234,18 +179,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[_ud_document()],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
             export_payload=ExportMailPayload(
                 parsed_subject=None,
                 file_numbers=[],
@@ -264,18 +198,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         payload = UDIPEXPWorkflowPayload(
             documents=[_ud_document()],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
             export_payload=ExportMailPayload(
                 parsed_subject=None,
                 file_numbers=["P/26/0042"],
@@ -302,18 +225,7 @@ class UDIPEXPRuleTests(unittest.TestCase):
         second_row = _erp_row(file_number="P/26/0043", lc_sc_number="LC-0099")
         payload = UDIPEXPWorkflowPayload(
             documents=[_ud_document()],
-            ud_allocation_result=allocate_ud_rows(
-                required_quantity=Decimal("1000"),
-                quantity_unit="YDS",
-                candidate_rows=[
-                    UDCandidateRow(
-                        row_index=11,
-                        lc_sc_number="LC-0043",
-                        quantity=Decimal("1000"),
-                        quantity_unit="YDS",
-                    )
-                ],
-            ),
+            ud_allocation_result=_selected_allocation_result(),
             export_payload=ExportMailPayload(
                 parsed_subject=None,
                 file_numbers=["P/26/0042", "P/26/0043"],
@@ -345,7 +257,52 @@ def _ud_document() -> UDDocumentPayload:
         document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
         document_date=DocumentExtractionField("2026-04-01"),
         lc_sc_number=DocumentExtractionField("LC-0043"),
-        quantity=UDIPEXPQuantity(amount=Decimal("1000"), unit="YDS"),
+        lc_sc_date=DocumentExtractionField("2026-01-10"),
+        lc_sc_value=DocumentExtractionField("1000"),
+        quantity_by_unit={"YDS": Decimal("1000")},
+    )
+
+
+def _selected_allocation_result() -> UDAllocationResult:
+    candidate = UDAllocationCandidate(
+        candidate_id="11",
+        row_indexes=[11],
+        matched_quantities=["YDS:1000"],
+        quantity_sum="YDS:1000",
+        ignored_excess_quantity="YDS:0",
+        score_keys={
+            "row_index_key": [11],
+            "amendment_recency_key": [],
+            "blank_field_priority_key": {
+                "blank_target_count_desc": -1,
+                "nonblank_optional_count_asc": 0,
+            },
+            "stable_candidate_id_key": "11",
+        },
+        prewrite_blank_targets_count=1,
+        prewrite_nonblank_optional_count=0,
+        selected=True,
+    )
+    return UDAllocationResult(
+        required_quantity="YDS:1000",
+        quantity_unit="MULTI",
+        candidate_count=1,
+        candidates=[candidate],
+        final_decision="selected",
+        final_decision_reason="selected_structured_lc_value_and_quantity",
+        selected_candidate_id="11",
+    )
+
+
+def _hard_block_allocation_result(*, reason: str, code: str | None = None) -> UDAllocationResult:
+    return UDAllocationResult(
+        required_quantity="YDS:1000",
+        quantity_unit="MULTI",
+        candidate_count=0,
+        candidates=[],
+        final_decision="hard_block",
+        final_decision_reason=reason,
+        discrepancy_code=code,
     )
 
 
@@ -365,7 +322,7 @@ def _context(payload: UDIPEXPWorkflowPayload) -> WorkflowValidationContext:
         run_id="run-1",
         workflow_id=WorkflowId.UD_IP_EXP,
         rule_pack_id="ud_ip_exp.default",
-        rule_pack_version="1.0.0",
+        rule_pack_version="1.2.0",
         state_timezone="Asia/Dhaka",
         operator_context=None,
         mail=mail,

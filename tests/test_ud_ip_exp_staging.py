@@ -8,9 +8,9 @@ from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
     EXPDocumentPayload,
     IPDocumentPayload,
-    UDCandidateRow,
+    UDAllocationCandidate,
+    UDAllocationResult,
     UDDocumentPayload,
-    allocate_ud_rows,
     stage_ip_exp_shared_column_operations,
     stage_ud_shared_column_operations,
 )
@@ -24,14 +24,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 WorkbookRow(row_index=19, values={1: "LC-0043", 2: "2000", 3: "", 4: "", 5: ""}),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("3000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-                UDCandidateRow(row_index=19, lc_sc_number="LC-0043", quantity=Decimal("2000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11, 19])
 
         result = stage_ud_shared_column_operations(
             run_id="run-1",
@@ -60,13 +53,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
         ud_document = UDDocumentPayload(
             document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
             document_date=DocumentExtractionField("2026-03-31"),
@@ -111,13 +98,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 ),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
         ud_document = UDDocumentPayload(
             document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
             document_date=DocumentExtractionField("2026-03-31"),
@@ -151,22 +132,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 ),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
-        allocation = type(allocation)(
-            required_quantity=allocation.required_quantity,
-            quantity_unit=allocation.quantity_unit,
-            candidate_count=allocation.candidate_count,
-            candidates=allocation.candidates,
-            final_decision="already_recorded",
-            final_decision_reason="ud_already_recorded",
-            selected_candidate_id=allocation.selected_candidate_id,
-        )
+        allocation = _already_recorded_allocation_result([11])
         ud_document = UDDocumentPayload(
             document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
             document_date=DocumentExtractionField("2026-03-31"),
@@ -194,12 +160,8 @@ class UDIPEXPStagingTests(unittest.TestCase):
         )
 
     def test_stage_ud_shared_column_operations_blocks_unselected_allocation(self) -> None:
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("951"), quantity_unit="YDS"),
-            ],
+        allocation = _hard_block_allocation_result(
+            reason="quantity_excess_below_threshold",
         )
 
         result = stage_ud_shared_column_operations(
@@ -215,13 +177,9 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual(result.discrepancies[0].details["final_decision_reason"], "quantity_excess_below_threshold")
 
     def test_stage_ud_shared_column_operations_preserves_tie_code(self) -> None:
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
+        allocation = _hard_block_allocation_result(
+            reason="ud_candidate_tie_after_full_tiebreak",
+            code="ud_candidate_tie_after_full_tiebreak",
         )
 
         result = stage_ud_shared_column_operations(
@@ -241,13 +199,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "UD-OLD", 4: "", 5: ""}),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
 
         result = stage_ud_shared_column_operations(
             run_id="run-1",
@@ -262,13 +214,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
         self.assertEqual(result.discrepancies[0].details["target_rows"][0]["observed_value"], "UD-OLD")
 
     def test_stage_ud_shared_column_operations_blocks_filename_style_ud_number(self) -> None:
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
 
         result = stage_ud_shared_column_operations(
             run_id="run-1",
@@ -288,13 +234,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
                 WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000", 3: "", 4: "", 5: "", 6: "1000", 7: "", 8: ""}),
             ]
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
         ud_document = UDDocumentPayload(
             document_number=DocumentExtractionField("BGMEA/DHK/UD/2026/5483/003"),
             document_date=DocumentExtractionField("2026-99-99"),
@@ -328,13 +268,7 @@ class UDIPEXPStagingTests(unittest.TestCase):
             ],
             rows=[],
         )
-        allocation = allocate_ud_rows(
-            required_quantity=Decimal("1000"),
-            quantity_unit="YDS",
-            candidate_rows=[
-                UDCandidateRow(row_index=11, lc_sc_number="LC-0043", quantity=Decimal("1000"), quantity_unit="YDS"),
-            ],
-        )
+        allocation = _selected_allocation_result([11])
 
         result = stage_ud_shared_column_operations(
             run_id="run-1",
@@ -433,6 +367,64 @@ class UDIPEXPStagingTests(unittest.TestCase):
             result.decision_reasons,
             ["No IP/EXP document payloads supplied; no IP/EXP staging needed."],
         )
+
+
+def _selected_allocation_result(row_indexes: list[int]) -> UDAllocationResult:
+    candidates = [
+        UDAllocationCandidate(
+            candidate_id="-".join(str(row_index) for row_index in row_indexes),
+            row_indexes=list(row_indexes),
+            matched_quantities=[],
+            quantity_sum="",
+            ignored_excess_quantity="",
+            score_keys={
+                "row_index_key": list(row_indexes),
+                "amendment_recency_key": [],
+                "blank_field_priority_key": {
+                    "blank_target_count_desc": -len(row_indexes),
+                    "nonblank_optional_count_asc": 0,
+                },
+                "stable_candidate_id_key": "-".join(str(row_index) for row_index in row_indexes),
+            },
+            prewrite_blank_targets_count=len(row_indexes),
+            prewrite_nonblank_optional_count=0,
+            selected=True,
+        )
+    ]
+    return UDAllocationResult(
+        required_quantity="",
+        quantity_unit="MULTI",
+        candidate_count=1,
+        candidates=candidates,
+        final_decision="selected",
+        final_decision_reason="selected_structured_lc_value_and_quantity",
+        selected_candidate_id=candidates[0].candidate_id,
+    )
+
+
+def _already_recorded_allocation_result(row_indexes: list[int]) -> UDAllocationResult:
+    selected = _selected_allocation_result(row_indexes)
+    return UDAllocationResult(
+        required_quantity=selected.required_quantity,
+        quantity_unit=selected.quantity_unit,
+        candidate_count=selected.candidate_count,
+        candidates=selected.candidates,
+        final_decision="already_recorded",
+        final_decision_reason="ud_already_recorded",
+        selected_candidate_id=selected.selected_candidate_id,
+    )
+
+
+def _hard_block_allocation_result(*, reason: str, code: str | None = None) -> UDAllocationResult:
+    return UDAllocationResult(
+        required_quantity="",
+        quantity_unit="MULTI",
+        candidate_count=0,
+        candidates=[],
+        final_decision="hard_block",
+        final_decision_reason=reason,
+        discrepancy_code=code,
+    )
 
 
 def _ud_document(document_number: str) -> UDDocumentPayload:

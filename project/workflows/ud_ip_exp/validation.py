@@ -12,8 +12,6 @@ from project.utils.time import validate_timezone
 from project.workflows.ud_ip_exp.matching import (
     UDAllocationResult,
     allocate_structured_ud_rows,
-    allocate_ud_rows,
-    collect_ud_candidate_rows,
 )
 from project.workflows.ud_ip_exp.payloads import (
     UDDocumentPayload,
@@ -119,32 +117,7 @@ def _build_allocation_result(
         export_payload=export_payload,
         excluded_row_indexes=excluded_row_indexes,
     )
-    if structured_result is not None:
-        return structured_result
-
-    if ud_document.quantity is None:
-        return None
-
-    candidate_rows = collect_ud_candidate_rows(
-        workbook_snapshot=workbook_snapshot,
-        lc_sc_number=ud_document.lc_sc_number.value,
-        quantity_unit=ud_document.quantity.unit,
-        header_mapping=header_mapping,
-    )
-    excluded = set(excluded_row_indexes or set())
-    if excluded:
-        candidate_rows = [
-            row for row in candidate_rows if row.row_index not in excluded
-        ]
-    return allocate_ud_rows(
-        required_quantity=ud_document.quantity.amount,
-        quantity_unit=ud_document.quantity.unit,
-        candidate_rows=candidate_rows,
-        expected_shared_value=format_shared_column_entry(
-            ud_document.document_kind,
-            ud_document.document_number.value,
-        ),
-    )
+    return structured_result
 
 
 def _stage_after_rules(
@@ -171,7 +144,6 @@ def _stage_after_rules(
 
     if (
         allocation_result is None
-        and ud_document.quantity is not None
         and workbook_snapshot is not None
         and resolve_ud_ip_exp_header_mapping(workbook_snapshot) is None
     ):
@@ -180,8 +152,8 @@ def _stage_after_rules(
             mail_id=mail.mail_id,
             ud_document=ud_document,
             allocation_result=UDAllocationResult(
-                required_quantity=_format_decimal(ud_document.quantity.amount),
-                quantity_unit=ud_document.quantity.unit,
+                required_quantity="",
+                quantity_unit="",
                 candidate_count=0,
                 candidates=[],
                 final_decision="hard_block",

@@ -4805,9 +4805,12 @@ class CLITests(unittest.TestCase):
                             {"column_index": 3, "text": "UD No. & IP No."},
                             {"column_index": 4, "text": "L/C Amnd No."},
                             {"column_index": 5, "text": "L/C Amnd Date"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "UD & IP Date"},
+                            {"column_index": 8, "text": "UD Recv. Date"},
                         ],
                         "rows": [
-                            {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": ""}},
+                            {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": "", "6": "1000", "7": "", "8": ""}},
                         ],
                     }
                 ),
@@ -4822,8 +4825,9 @@ class CLITests(unittest.TestCase):
                             "document_number": "BGMEA/DHK/UD/2026/5483/003",
                             "document_date": "2026-04-01",
                             "lc_sc_number": "LC-0043",
-                            "quantity": "1000",
-                            "quantity_unit": "YDS",
+                            "lc_sc_date": "2026-01-10",
+                            "lc_sc_value": "1000",
+                            "quantity_by_unit": {"YDS": "1000"},
                         }
                     ]
                 ),
@@ -4855,7 +4859,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["workflow_id"], "ud_ip_exp")
         self.assertEqual(payload["summary"], {"pass": 1, "warning": 0, "hard_block": 0})
-        self.assertEqual(payload["staged_write_operation_count"], 1)
+        self.assertEqual(payload["staged_write_operation_count"], 3)
         self.assertNotIn("transport_policy", payload)
         self.assertEqual(mail_outcomes[0]["ud_selection"]["selected_candidate_id"], "11")
         self.assertTrue(mail_outcomes[0]["eligible_for_write"])
@@ -4959,9 +4963,12 @@ class CLITests(unittest.TestCase):
                             {"column_index": 3, "text": "UD No. & IP No."},
                             {"column_index": 4, "text": "L/C Amnd No."},
                             {"column_index": 5, "text": "L/C Amnd Date"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "UD & IP Date"},
+                            {"column_index": 8, "text": "UD Recv. Date"},
                         ],
                         "rows": [
-                            {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": ""}},
+                            {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": "", "6": "1000", "7": "", "8": ""}},
                         ],
                     }
                 ),
@@ -4977,8 +4984,9 @@ class CLITests(unittest.TestCase):
                             "document_number": "BGMEA/DHK/UD/2026/5483/003",
                             "document_date": "2026-04-01",
                             "lc_sc_number": "LC-0043",
-                            "quantity": "1000",
-                            "quantity_unit": "YDS",
+                            "lc_sc_date": "2026-01-10",
+                            "lc_sc_value": "1000",
+                            "quantity_by_unit": {"YDS": "1000"},
                         },
                         {
                             "entry_id": "entry-ud-001",
@@ -5293,8 +5301,11 @@ def _write_ud_workbook_json(root: Path) -> Path:
                     {"column_index": 3, "text": "LC Issue Date"},
                     {"column_index": 4, "text": "Quantity of Fabrics (Yds/Mtr)"},
                     {"column_index": 5, "text": "UD No. & IP No."},
-                    {"column_index": 6, "text": "L/C Amnd No."},
-                    {"column_index": 7, "text": "L/C Amnd Date"},
+                    {"column_index": 6, "text": "Amount"},
+                    {"column_index": 7, "text": "L/C Amnd No."},
+                    {"column_index": 8, "text": "L/C Amnd Date"},
+                    {"column_index": 9, "text": "UD & IP Date"},
+                    {"column_index": 10, "text": "UD Recv. Date"},
                 ],
                 "rows": [
                     {
@@ -5305,8 +5316,11 @@ def _write_ud_workbook_json(root: Path) -> Path:
                             "3": "2025-05-05",
                             "4": "1000 YDS",
                             "5": "",
-                            "6": "",
+                            "6": "1000",
                             "7": "",
+                            "8": "",
+                            "9": "",
+                            "10": "",
                         },
                     }
                 ],
@@ -5327,8 +5341,9 @@ def _write_ud_saved_document_analysis_json(root: Path) -> Path:
                     "document_number": "BGMEA/DHK/UD/2026/5483/003",
                     "document_date": "2026-04-01",
                     "lc_sc_number": "LC-0043",
-                    "quantity": "1000",
-                    "quantity_unit": "YDS",
+                    "lc_sc_date": "2026-01-10",
+                    "lc_sc_value": "1000",
+                    "quantity_by_unit": {"YDS": "1000"},
                 }
             ]
         ),
@@ -5372,9 +5387,12 @@ def _run_validate_ud_ip_exp_with_payload_records(records: list[dict]) -> tuple[i
                         {"column_index": 3, "text": "UD No. & IP No."},
                         {"column_index": 4, "text": "L/C Amnd No."},
                         {"column_index": 5, "text": "L/C Amnd Date"},
+                        {"column_index": 6, "text": "Amount"},
+                        {"column_index": 7, "text": "UD & IP Date"},
+                        {"column_index": 8, "text": "UD Recv. Date"},
                     ],
                     "rows": [
-                        {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": ""}},
+                        {"row_index": 11, "values": {"1": "LC-0043", "2": "1000 YDS", "3": "", "6": "1000", "7": "", "8": ""}},
                     ],
                 }
             ),

@@ -56,14 +56,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
 
         class Provider:
             def analyze(self, *, saved_document):
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
-                    extracted_document_date="2026-04-01",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/003", document_date="2026-04-01")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -366,14 +359,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
 
         class Provider:
             def analyze(self, *, saved_document):
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
-                    extracted_document_date="2026-04-01",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/003", document_date="2026-04-01")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -421,14 +407,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
 
         class Provider:
             def analyze(self, *, saved_document):
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
-                    extracted_document_date="2026-04-01",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/003", document_date="2026-04-01")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_result = validate_run_snapshot(
@@ -464,8 +443,11 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_mail_move)
-        self.assertEqual(len(validation_result.staged_write_plan), 1)
-        self.assertEqual(validation_result.staged_write_plan[0].row_index, 11)
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
+        self.assertEqual(
+            [(operation.row_index, operation.column_key) for operation in validation_result.staged_write_plan],
+            [(11, "ud_ip_shared"), (11, "ud_ip_date"), (11, "ud_recv_date")],
+        )
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[0]["document_type"],
             "ud_document",
@@ -485,14 +467,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
 
         class Provider:
             def analyze(self, *, saved_document):
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
-                    extracted_document_date="2026-04-01",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/003", document_date="2026-04-01")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1003,22 +978,8 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         class Provider:
             def analyze(self, *, saved_document):
                 if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
-                    return SavedDocumentAnalysis(
-                        analysis_basis="fixture",
-                        extracted_document_number="BGMEA/DHK/UD/2026/5483/001",
-                        extracted_document_date="2026-04-01",
-                        extracted_lc_sc_number="LC-0043",
-                        extracted_quantity="1000",
-                        extracted_quantity_unit="YDS",
-                    )
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/002",
-                    extracted_document_date="2026-04-02",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                    return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/001", document_date="2026-04-01")
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/002", document_date="2026-04-02")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_result = validate_run_snapshot(
@@ -1071,6 +1032,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             [
                 (operation.row_index, operation.expected_post_write_value)
                 for operation in validation_result.staged_write_plan
+                if operation.column_key == "ud_ip_shared"
             ],
             [
                 (11, "BGMEA/DHK/UD/2026/5483/001"),
@@ -1100,14 +1062,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                         extracted_document_date="2026-04-01",
                         extracted_lc_sc_number="LC-0043",
                     )
-                return SavedDocumentAnalysis(
-                    analysis_basis="fixture",
-                    extracted_document_number="BGMEA/DHK/UD/2026/5483/002",
-                    extracted_document_date="2026-04-01",
-                    extracted_lc_sc_number="LC-0043",
-                    extracted_quantity="1000",
-                    extracted_quantity_unit="YDS",
-                )
+                return _saved_ud_analysis("BGMEA/DHK/UD/2026/5483/002", document_date="2026-04-01")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             validation_result = validate_run_snapshot(
@@ -1154,7 +1109,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
                 {
                     "document_index": 0,
                     "document_number": "BGMEA/DHK/UD/2026/5483/001",
-                    "missing_fields": ["quantity"],
+                    "missing_fields": ["lc_sc_date", "lc_sc_value", "quantity_by_unit"],
                 }
             ],
         )
@@ -1162,7 +1117,7 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "hard_block")
         self.assertEqual(
             validation_result.mail_outcomes[0].ud_selection["documents"][1]["selection"]["required_quantity"],
-            "1000",
+            "YDS:1000",
         )
         self.assertEqual(
             validation_result.mail_outcomes[0].saved_documents[0]["extracted_document_number"],
@@ -1307,6 +1262,21 @@ def _run_report(rule_pack, mails):
 
 
 def _full_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    normalized_rows = [
+        WorkbookRow(
+            row_index=row.row_index,
+            values={
+                **row.values,
+                6: _default_amount_value(row.values.get(4, "")),
+                7: row.values.get(6, ""),
+                8: row.values.get(7, ""),
+                9: row.values.get(9, ""),
+                10: row.values.get(10, ""),
+            },
+            number_formats=dict(row.number_formats),
+        )
+        for row in rows
+    ]
     return WorkbookSnapshot(
         sheet_name="Sheet1",
         headers=[
@@ -1315,10 +1285,13 @@ def _full_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
             WorkbookHeader(column_index=3, text="LC Issue Date"),
             WorkbookHeader(column_index=4, text="Quantity of Fabrics (Yds/Mtr)"),
             WorkbookHeader(column_index=5, text="UD No. & IP No."),
-            WorkbookHeader(column_index=6, text="L/C Amnd No."),
-            WorkbookHeader(column_index=7, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="L/C Amnd No."),
+            WorkbookHeader(column_index=8, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=9, text="UD & IP Date"),
+            WorkbookHeader(column_index=10, text="UD Recv. Date"),
         ],
-        rows=rows,
+        rows=normalized_rows,
     )
 
 
@@ -1364,6 +1337,33 @@ def _structured_workbook_snapshot() -> WorkbookSnapshot:
             ),
         ],
     )
+
+
+def _saved_ud_analysis(
+    document_number: str,
+    *,
+    document_date: str,
+    lc_sc_number: str = "LC-0043",
+    lc_sc_date: str = "2026-01-10",
+    lc_sc_value: str = "1000",
+    quantity: str = "1000",
+) -> SavedDocumentAnalysis:
+    return SavedDocumentAnalysis(
+        analysis_basis="fixture",
+        extracted_document_number=document_number,
+        extracted_document_date=document_date,
+        extracted_lc_sc_number=lc_sc_number,
+        extracted_lc_sc_date=lc_sc_date,
+        extracted_lc_sc_value=lc_sc_value,
+        extracted_quantity=quantity,
+        extracted_quantity_unit="YDS",
+        extracted_quantity_by_unit={"YDS": quantity},
+    )
+
+
+def _default_amount_value(raw_quantity: str) -> str:
+    token = str(raw_quantity).replace(",", "").strip().split(" ")[0]
+    return token or "0"
 
 
 class _ERPProvider:

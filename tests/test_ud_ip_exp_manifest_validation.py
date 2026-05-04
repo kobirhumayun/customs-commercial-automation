@@ -26,7 +26,6 @@ from project.workflows.ud_ip_exp import (
     JsonManifestUDDocumentPayloadProvider,
     MappingUDDocumentPayloadProvider,
     UDDocumentPayload,
-    UDIPEXPQuantity,
 )
 from project.workflows.validation import validate_run_snapshot
 
@@ -168,8 +167,11 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
-        self.assertEqual(len(validation_result.staged_write_plan), 1)
-        self.assertEqual(validation_result.staged_write_plan[0].row_index, 11)
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
+        self.assertEqual(
+            [(operation.row_index, operation.column_key) for operation in validation_result.staged_write_plan],
+            [(11, "ud_ip_shared"), (11, "ud_ip_date"), (11, "ud_recv_date")],
+        )
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_write)
         self.assertTrue(validation_result.mail_outcomes[0].eligible_for_print)
@@ -350,10 +352,11 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
             [
                 (operation.operation_index_within_mail, operation.row_index, operation.expected_post_write_value)
                 for operation in validation_result.staged_write_plan
+                if operation.column_key == "ud_ip_shared"
             ],
             [
                 (0, 11, "BGMEA/DHK/UD/2026/5483/003"),
-                (1, 12, "BGMEA/DHK/UD/2026/5483/004"),
+                (3, 12, "BGMEA/DHK/UD/2026/5483/004"),
             ],
         )
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
@@ -381,7 +384,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(validation_result.run_report.summary, {"pass": 0, "warning": 1, "hard_block": 0})
-        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.WARNING)
         self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "mixed_duplicate_and_new_writes")
         self.assertEqual(
@@ -460,7 +463,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 1, "hard_block": 0})
-        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
         self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.WARNING)
         self.assertEqual(validation_result.mail_outcomes[1].write_disposition, "duplicate_only_noop")
@@ -534,7 +537,7 @@ class UDIPEXPManifestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 1})
-        self.assertEqual(len(validation_result.staged_write_plan), 1)
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
         self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
         self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.HARD_BLOCK)
         self.assertEqual(
@@ -553,7 +556,9 @@ def _ud_document(
         document_number=DocumentExtractionField(document_number),
         document_date=DocumentExtractionField(document_date),
         lc_sc_number=DocumentExtractionField("LC-0043"),
-        quantity=UDIPEXPQuantity(amount=quantity, unit="YDS") if quantity is not None else None,
+        lc_sc_date=DocumentExtractionField("2026-01-10"),
+        lc_sc_value=DocumentExtractionField(str(quantity) if quantity is not None else "1000"),
+        quantity_by_unit={"YDS": Decimal(quantity) if quantity is not None else Decimal("1000")},
     )
 
 
@@ -614,6 +619,19 @@ def _run_report(rule_pack, mails):
 
 
 def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
+    normalized_rows = [
+        WorkbookRow(
+            row_index=row.row_index,
+            values={
+                **row.values,
+                6: row.values.get(6, _default_amount_value(row.values.get(2, ""))),
+                7: row.values.get(7, ""),
+                8: row.values.get(8, ""),
+            },
+            number_formats=dict(row.number_formats),
+        )
+        for row in rows
+    ]
     return WorkbookSnapshot(
         sheet_name="Sheet1",
         headers=[
@@ -622,8 +640,11 @@ def _snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
             WorkbookHeader(column_index=3, text="UD No. & IP No."),
             WorkbookHeader(column_index=4, text="L/C Amnd No."),
             WorkbookHeader(column_index=5, text="L/C Amnd Date"),
+            WorkbookHeader(column_index=6, text="Amount"),
+            WorkbookHeader(column_index=7, text="UD & IP Date"),
+            WorkbookHeader(column_index=8, text="UD Recv. Date"),
         ],
-        rows=rows,
+        rows=normalized_rows,
     )
 
 
@@ -642,6 +663,11 @@ def _structured_snapshot(*, rows: list[WorkbookRow]) -> WorkbookSnapshot:
         ],
         rows=rows,
     )
+
+
+def _default_amount_value(raw_quantity: str) -> str:
+    token = str(raw_quantity).replace(",", "").strip().split(" ")[0]
+    return token or "0"
 
 
 class _ERPProvider:

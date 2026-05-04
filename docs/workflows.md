@@ -661,21 +661,19 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 
 ### UD allocation logic
 - extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
-- when structured UD evidence is present (`lc_sc_date`, `lc_sc_value`, and `quantity_by_unit`), first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
-- otherwise, for the structured path, filter workbook rows to the ERP LC/SC family, exclude rows where `UD No. & IP No.` is already populated, keep ascending workbook row order, and accumulate workbook `Amount` column 6 until the extracted UD LC/SC value matches numerically within tolerance
-- the current structured path does not search arbitrary row combinations once value evidence is present; the first ascending blank-row accumulation that reaches the target value is the only candidate row group
-- sum workbook quantities for only that structured target row group by unit
-- derive workbook quantity units for the selected structured target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
+- UD allocation requires value-first evidence for every write-capable UD payload: `lc_sc_date`, `lc_sc_value`, and `quantity_by_unit`
+- first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
+- otherwise, filter workbook rows to the ERP LC/SC family, exclude rows where `UD No. & IP No.` is already populated, and identify candidate row groups only by exact workbook `Amount` column 6 matches against the extracted UD LC/SC value within tolerance
+- after a value-matched row group is identified, sum workbook quantities for only that row group by unit
+- derive workbook quantity units for the selected target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
 - compare each workbook unit total against the corresponding UD supplier quantity total
 - pass quantity validation only when UD quantity equals workbook quantity or the UD excess is at least 50 yards/meters; hard-block when UD quantity is less than workbook quantity or excess is greater than zero but below 50
+- if no exact workbook value group exists for the extracted LC/SC value, hard-block with `ud_lc_value_match_unresolved`
 - structured UD writes stage the UD/AM number, UD/AM date, and current workflow receive date only if value and quantity rules are satisfied and every target cell for those fields is blank
 - `UD & IP Date` is written from the UD/AM document date as `DD/MM/YYYY`; `UD Recv. Date` is written as the current workflow date in the same format
-- if structured value evidence is absent but a deterministic UD quantity payload is present, fall back to the legacy/non-structured row-combination path
-- legacy/non-structured UD allocation must also check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, treat the mail as duplicate-only/no-write
-- legacy candidate selection may use non-sequential row combinations and follows the deterministic tie-break contract below
 
-#### Legacy UD row-combination candidate scoring and tie-break order (normative)
-When more than one valid legacy row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
+#### UD value-matched candidate scoring and tie-break order (normative)
+When more than one exact workbook value group can satisfy UD row identification, the workflow must score each candidate group, then apply this deterministic tie-break sequence:
 
 1. **Primary key — workbook row index sequence (ascending)**
    - Compare combinations lexicographically by sorted workbook row indexes.
@@ -729,8 +727,8 @@ For every mail that reaches UD allocation, the mail-level JSON report must inclu
 Structured UD selections reuse the same report shape but typically emit one candidate and may include extra `score_keys` fields such as `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
 If `ud_selection.candidates_truncated = true`, `ud_selection.candidate_count` is still the full exact total and `ud_selection.candidates[]` is a bounded deterministic subset that must include the selected candidate.
 
-#### Worked example (legacy duplicated quantities + non-sequential matches)
-UD extracted quantity = `3000 YDS`.
+#### Historical example (superseded)
+The quantity-combination example below is retained only as historical context. Current UD row identification must rely on LC/SC value first, then compare quantities only within the value-matched rows.
 Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
 - row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
 - row 14 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`

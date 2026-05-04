@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import heapq
-from itertools import combinations
 from typing import Any
 
 from project.erp.normalization import normalize_lc_sc_date
@@ -27,7 +26,6 @@ class UDCandidateRow:
     ud_ip_shared_value: str = ""
     lc_amnd_no: str = ""
     lc_amnd_date: str = ""
-    optional_values: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "quantity", Decimal(str(self.quantity)))
@@ -74,270 +72,6 @@ class _ReverseCandidateKey:
 
     def __lt__(self, other: "_ReverseCandidateKey") -> bool:
         return self.value > other.value
-
-
-def collect_ud_candidate_rows(
-    *,
-    workbook_snapshot: WorkbookSnapshot,
-    lc_sc_number: str,
-    quantity_unit: str,
-    header_mapping: dict[str, int] | None = None,
-) -> list[UDCandidateRow]:
-    mapping = header_mapping or resolve_ud_ip_exp_header_mapping(workbook_snapshot)
-    if mapping is None:
-        return []
-
-    requested_unit = normalize_quantity_unit(quantity_unit)
-    expected_lc_sc = _normalize_match_text(lc_sc_number)
-    rows: list[UDCandidateRow] = []
-    for workbook_row in sorted(workbook_snapshot.rows, key=lambda row: row.row_index):
-        row_lc_sc_number = workbook_row.values.get(mapping["lc_sc_no"], "")
-        if _normalize_match_text(row_lc_sc_number) != expected_lc_sc:
-            continue
-
-        raw_quantity = workbook_row.values.get(mapping["quantity_fabrics"], "")
-        parsed_quantity = _parse_quantity(raw_quantity)
-        if parsed_quantity is None:
-            continue
-        parsed_unit = _workbook_quantity_unit(workbook_row, mapping["quantity_fabrics"], raw_quantity)
-        if parsed_unit != requested_unit:
-            continue
-
-        rows.append(
-            UDCandidateRow(
-                row_index=workbook_row.row_index,
-                lc_sc_number=row_lc_sc_number,
-                quantity=parsed_quantity,
-                quantity_unit=parsed_unit,
-                ud_ip_shared_value=workbook_row.values.get(mapping["ud_ip_shared"], ""),
-                lc_amnd_no=workbook_row.values.get(mapping["lc_amnd_no"], ""),
-                lc_amnd_date=workbook_row.values.get(mapping["lc_amnd_date"], ""),
-                optional_values={
-                    "lc_amnd_no": workbook_row.values.get(mapping["lc_amnd_no"], ""),
-                    "lc_amnd_date": workbook_row.values.get(mapping["lc_amnd_date"], ""),
-                },
-            )
-        )
-    return rows
-
-
-def allocate_ud_rows(
-    *,
-    required_quantity: Decimal | int | str,
-    quantity_unit: str,
-    candidate_rows: list[UDCandidateRow],
-    expected_shared_value: str | None = None,
-    excess_threshold: Decimal = DEFAULT_UD_EXCESS_THRESHOLD,
-) -> UDAllocationResult:
-    required = Decimal(str(required_quantity))
-    unit = normalize_quantity_unit(quantity_unit)
-    compatible_rows = [
-        row
-        for row in sorted(candidate_rows, key=lambda item: item.row_index)
-        if row.quantity_unit == unit and row.quantity > 0
-    ]
-    already_recorded = _allocate_already_recorded_legacy_rows(
-        required_quantity=required,
-        candidate_rows=compatible_rows,
-        expected_shared_value=expected_shared_value,
-        excess_threshold=excess_threshold,
-    )
-    if already_recorded is not None:
-        return already_recorded
-
-    blank_candidate_rows = [
-        row
-        for row in compatible_rows
-        if not row.ud_ip_shared_value.strip()
-    ]
-    candidate_scope, final_reason = _select_legacy_candidate_scope(
-        required_quantity=required,
-        candidate_rows=blank_candidate_rows,
-        excess_threshold=excess_threshold,
-    )
-    if candidate_scope is None:
-        occupied_scope, occupied_reason = _select_legacy_candidate_scope(
-            required_quantity=required,
-            candidate_rows=compatible_rows,
-            excess_threshold=excess_threshold,
-        )
-        if occupied_scope:
-            best_occupied_candidate = sorted(occupied_scope, key=_candidate_sort_key)[0]
-            return UDAllocationResult(
-                required_quantity=_format_decimal(required),
-                quantity_unit=unit,
-                candidate_count=len(occupied_scope),
-                candidates=[
-                    replace(candidate, selected=False, rejection_reason="target_row_conflict")
-                    for candidate in occupied_scope
-                ],
-                final_decision="hard_block",
-                final_decision_reason="target_row_conflict",
-                selected_candidate_id=best_occupied_candidate.candidate_id,
-                discrepancy_code="ud_target_row_conflict",
-            )
-        if occupied_reason == "quantity_excess_below_threshold":
-            return UDAllocationResult(
-                required_quantity=_format_decimal(required),
-                quantity_unit=unit,
-                candidate_count=0,
-                candidates=[],
-                final_decision="hard_block",
-                final_decision_reason="quantity_excess_below_threshold",
-            )
-        return UDAllocationResult(
-            required_quantity=_format_decimal(required),
-            quantity_unit=unit,
-            candidate_count=0,
-            candidates=[],
-            final_decision="hard_block",
-            final_decision_reason="no_valid_ud_quantity_combination",
-        )
-
-    sorted_candidates = sorted(candidate_scope, key=_candidate_sort_key)
-    best_candidate = sorted_candidates[0]
-    tied_candidates = [
-        candidate
-        for candidate in sorted_candidates
-        if _candidate_sort_key(candidate) == _candidate_sort_key(best_candidate)
-    ]
-    if len(tied_candidates) > 1:
-        return UDAllocationResult(
-            required_quantity=_format_decimal(required),
-            quantity_unit=unit,
-            candidate_count=len(sorted_candidates),
-            candidates=[
-                replace(candidate, selected=False, rejection_reason="tied_after_full_tiebreak")
-                for candidate in sorted_candidates
-            ],
-            final_decision="hard_block",
-            final_decision_reason="ud_candidate_tie_after_full_tiebreak",
-            discrepancy_code="ud_candidate_tie_after_full_tiebreak",
-        )
-
-    selected_candidates = [
-        replace(
-            candidate,
-            selected=candidate.candidate_id == best_candidate.candidate_id,
-            rejection_reason=None
-            if candidate.candidate_id == best_candidate.candidate_id
-            else "lower_priority_score",
-        )
-        for candidate in sorted_candidates
-    ]
-    return UDAllocationResult(
-        required_quantity=_format_decimal(required),
-        quantity_unit=unit,
-        candidate_count=len(selected_candidates),
-        candidates=selected_candidates,
-        final_decision="selected",
-        final_decision_reason=final_reason,
-        selected_candidate_id=best_candidate.candidate_id,
-    )
-
-
-def _select_legacy_candidate_scope(
-    *,
-    required_quantity: Decimal,
-    candidate_rows: list[UDCandidateRow],
-    excess_threshold: Decimal,
-) -> tuple[list[UDAllocationCandidate] | None, str | None]:
-    exact_candidates = _build_allocation_candidates(
-        required_quantity=required_quantity,
-        candidate_rows=candidate_rows,
-        allowed_excess=lambda excess: excess == 0,
-    )
-    if exact_candidates:
-        return exact_candidates, "selected_exact_quantity"
-
-    threshold_candidates = _build_allocation_candidates(
-        required_quantity=required_quantity,
-        candidate_rows=candidate_rows,
-        allowed_excess=lambda excess: excess >= excess_threshold,
-    )
-    if threshold_candidates:
-        minimum_excess = min(
-            Decimal(candidate.ignored_excess_quantity)
-            for candidate in threshold_candidates
-        )
-        return (
-            [
-                candidate
-                for candidate in threshold_candidates
-                if Decimal(candidate.ignored_excess_quantity) == minimum_excess
-            ],
-            "selected_with_ignored_excess_at_or_above_threshold",
-        )
-
-    smallest_positive_excess = _smallest_positive_excess(required_quantity, candidate_rows)
-    if smallest_positive_excess is not None and smallest_positive_excess < excess_threshold:
-        return None, "quantity_excess_below_threshold"
-    return None, "no_valid_ud_quantity_combination"
-
-
-def _allocate_already_recorded_legacy_rows(
-    *,
-    required_quantity: Decimal,
-    candidate_rows: list[UDCandidateRow],
-    expected_shared_value: str | None,
-    excess_threshold: Decimal,
-) -> UDAllocationResult | None:
-    if not expected_shared_value:
-        return None
-
-    matching_rows = [
-        row
-        for row in candidate_rows
-        if _shared_value_matches(row.ud_ip_shared_value, expected_shared_value)
-    ]
-    candidate_scope, _reason = _select_legacy_candidate_scope(
-        required_quantity=required_quantity,
-        candidate_rows=matching_rows,
-        excess_threshold=excess_threshold,
-    )
-    if not candidate_scope:
-        return None
-
-    sorted_candidates = sorted(candidate_scope, key=_candidate_sort_key)
-    best_candidate = sorted_candidates[0]
-    tied_candidates = [
-        candidate
-        for candidate in sorted_candidates
-        if _candidate_sort_key(candidate) == _candidate_sort_key(best_candidate)
-    ]
-    if len(tied_candidates) > 1:
-        return UDAllocationResult(
-            required_quantity=_format_decimal(required_quantity),
-            quantity_unit=best_candidate.score_keys.get("quantity_unit", matching_rows[0].quantity_unit),
-            candidate_count=len(sorted_candidates),
-            candidates=[
-                replace(candidate, selected=False, rejection_reason="tied_after_full_tiebreak")
-                for candidate in sorted_candidates
-            ],
-            final_decision="hard_block",
-            final_decision_reason="ud_candidate_tie_after_full_tiebreak",
-            discrepancy_code="ud_candidate_tie_after_full_tiebreak",
-        )
-
-    selected_candidates = [
-        replace(
-            candidate,
-            selected=candidate.candidate_id == best_candidate.candidate_id,
-            rejection_reason=None
-            if candidate.candidate_id == best_candidate.candidate_id
-            else "lower_priority_score",
-        )
-        for candidate in sorted_candidates
-    ]
-    return UDAllocationResult(
-        required_quantity=_format_decimal(required_quantity),
-        quantity_unit=matching_rows[0].quantity_unit,
-        candidate_count=len(selected_candidates),
-        candidates=selected_candidates,
-        final_decision="already_recorded",
-        final_decision_reason="ud_already_recorded",
-        selected_candidate_id=best_candidate.candidate_id,
-    )
 
 
 def allocate_structured_ud_rows(
@@ -912,55 +646,6 @@ def _shared_value_matches(observed_value: str, expected_value: str) -> bool:
     return _normalize_match_text(observed_value) == _normalize_match_text(expected_value)
 
 
-def _build_allocation_candidates(
-    *,
-    required_quantity: Decimal,
-    candidate_rows: list[UDCandidateRow],
-    allowed_excess,
-) -> list[UDAllocationCandidate]:
-    candidates: list[UDAllocationCandidate] = []
-    for size in range(1, len(candidate_rows) + 1):
-        for row_group in combinations(candidate_rows, size):
-            quantity_sum = sum((row.quantity for row in row_group), Decimal("0"))
-            excess = required_quantity - quantity_sum
-            if excess < 0 or not allowed_excess(excess):
-                continue
-            row_indexes = sorted(row.row_index for row in row_group)
-            candidate_id = "-".join(str(row_index) for row_index in row_indexes)
-            amendment_recency_key = [
-                _amendment_recency_key(row)
-                for row in sorted(row_group, key=lambda item: item.row_index)
-            ]
-            blank_count = sum(1 for row in row_group if not row.ud_ip_shared_value.strip())
-            nonblank_optional_count = sum(
-                1
-                for row in row_group
-                for value in row.optional_values.values()
-                if str(value).strip()
-            )
-            candidates.append(
-                UDAllocationCandidate(
-                    candidate_id=candidate_id,
-                    row_indexes=row_indexes,
-                    matched_quantities=[_format_decimal(row.quantity) for row in row_group],
-                    quantity_sum=_format_decimal(quantity_sum),
-                    ignored_excess_quantity=_format_decimal(excess),
-                    score_keys={
-                        "row_index_key": row_indexes,
-                        "amendment_recency_key": amendment_recency_key,
-                        "blank_field_priority_key": {
-                            "blank_target_count_desc": -blank_count,
-                            "nonblank_optional_count_asc": nonblank_optional_count,
-                        },
-                        "stable_candidate_id_key": candidate_id,
-                    },
-                    prewrite_blank_targets_count=blank_count,
-                    prewrite_nonblank_optional_count=nonblank_optional_count,
-                )
-            )
-    return candidates
-
-
 def _candidate_sort_key(candidate: UDAllocationCandidate) -> tuple:
     blank_key = candidate.score_keys["blank_field_priority_key"]
     return (
@@ -970,22 +655,6 @@ def _candidate_sort_key(candidate: UDAllocationCandidate) -> tuple:
         blank_key["nonblank_optional_count_asc"],
         candidate.score_keys["stable_candidate_id_key"],
     )
-
-
-def _smallest_positive_excess(
-    required_quantity: Decimal,
-    candidate_rows: list[UDCandidateRow],
-) -> Decimal | None:
-    excess_values: list[Decimal] = []
-    for size in range(1, len(candidate_rows) + 1):
-        for row_group in combinations(candidate_rows, size):
-            quantity_sum = sum((row.quantity for row in row_group), Decimal("0"))
-            excess = required_quantity - quantity_sum
-            if excess > 0:
-                excess_values.append(excess)
-    if not excess_values:
-        return None
-    return min(excess_values)
 
 
 def _amendment_recency_key(row: UDCandidateRow) -> tuple[str, int]:

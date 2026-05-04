@@ -12,7 +12,7 @@ from project.workflows.ud_ip_exp.payloads import (
 )
 
 RULE_PACK_ID = "ud_ip_exp.default"
-RULE_PACK_VERSION = "1.1.0"
+RULE_PACK_VERSION = "1.2.0"
 
 
 def evaluate_ud_file_number_present(context) -> RuleEvaluationResult:
@@ -169,7 +169,7 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
     payload = _require_ud_ip_exp_payload(context.workflow_payload)
     if not _ud_documents(payload):
         return RuleEvaluationResult(
-            rule_id="ud_ip_exp.ud_required_fields_present.v1",
+            rule_id="ud_ip_exp.ud_required_fields_present.v2",
             outcome=FinalDecision.PASS,
             rationale="No UD documents are present, so UD-only field validation is not required.",
         )
@@ -188,17 +188,14 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
             invalid_fields.append("document_date")
         if not document.lc_sc_number.value.strip():
             missing_fields.append("lc_sc_number")
-        if _is_structured_bgmea_ud(document):
-            if document.lc_sc_date is None or not document.lc_sc_date.value.strip():
-                missing_fields.append("lc_sc_date")
-            elif normalize_lc_sc_date(document.lc_sc_date.value) is None:
-                invalid_fields.append("lc_sc_date")
-            if document.lc_sc_value is None or not document.lc_sc_value.value.strip():
-                missing_fields.append("lc_sc_value")
-            if not document.quantity_by_unit:
-                missing_fields.append("quantity_by_unit")
-        elif document.quantity is None:
-            missing_fields.append("quantity")
+        if document.lc_sc_date is None or not document.lc_sc_date.value.strip():
+            missing_fields.append("lc_sc_date")
+        elif normalize_lc_sc_date(document.lc_sc_date.value) is None:
+            invalid_fields.append("lc_sc_date")
+        if document.lc_sc_value is None or not document.lc_sc_value.value.strip():
+            missing_fields.append("lc_sc_value")
+        if not document.quantity_by_unit:
+            missing_fields.append("quantity_by_unit")
         if missing_fields:
             missing_by_document.append(
                 {
@@ -218,9 +215,9 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
 
     if not missing_by_document and not invalid_by_document:
         return RuleEvaluationResult(
-            rule_id="ud_ip_exp.ud_required_fields_present.v1",
+            rule_id="ud_ip_exp.ud_required_fields_present.v2",
             outcome=FinalDecision.PASS,
-            rationale="UD document payloads contain the confirmed required fields.",
+            rationale="UD document payloads contain the confirmed value-first required fields.",
         )
     discrepancies = []
     if missing_by_document:
@@ -253,9 +250,9 @@ def evaluate_ud_required_fields_present(context) -> RuleEvaluationResult:
             )
         )
     return RuleEvaluationResult(
-        rule_id="ud_ip_exp.ud_required_fields_present.v1",
+        rule_id="ud_ip_exp.ud_required_fields_present.v2",
         outcome=FinalDecision.HARD_BLOCK,
-        rationale="UD document payloads must contain all confirmed required fields.",
+        rationale="UD document payloads must contain all confirmed value-first required fields.",
         discrepancies=tuple(discrepancies),
     )
 
@@ -526,14 +523,6 @@ def _ip_exp_mail_shape_issues(payload: UDIPEXPWorkflowPayload) -> list[str]:
     return issues
 
 
-def _is_structured_bgmea_ud(document: UDIPEXPDocumentPayload) -> bool:
-    return (
-        document.lc_sc_date is not None
-        or document.lc_sc_value is not None
-        or bool(document.quantity_by_unit)
-    )
-
-
 RULE_DEFINITIONS = (
     RuleDefinition(
         rule_id="ud_ip_exp.erp_rows_present.v1",
@@ -571,7 +560,7 @@ RULE_DEFINITIONS = (
         evaluator=evaluate_ud_document_present,
     ),
     RuleDefinition(
-        rule_id="ud_ip_exp.ud_required_fields_present.v1",
+        rule_id="ud_ip_exp.ud_required_fields_present.v2",
         stage=RuleStage.WORKFLOW_STANDARD,
         evaluator=evaluate_ud_required_fields_present,
     ),

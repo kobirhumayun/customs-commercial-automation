@@ -89,18 +89,16 @@ Mail composition contract:
 
 For UD documents:
 - Extract UD number, UD date, LC/SC number, quantity data, and any additional fields required by the workbook mapping.
-- Structured/live UD payloads now prefer the value-first path: match ERP family, validate LC date, then accumulate blank family rows in ascending row order by workbook `Amount` until the extracted LC value matches within tolerance.
+- Write-capable UD payloads now require value-first evidence: match ERP family, validate LC date, identify exact workbook `Amount` groups that match the extracted LC value within tolerance, and only then compare workbook quantities.
 - Before staging a structured UD write, check for an already-recorded workbook group carrying the same UD value plus matching `UD & IP Date`; if found and quantity/value checks also pass, return `already_recorded` and stage no write.
-- Legacy fixture-style UD payloads without structured value evidence still use the older multiset/bag quantity-combination path.
-- Only the legacy path may select non-sequential row combinations.
 - Write UD values only to selected matched rows, and only when every target cell required for the write is blank.
 - Ignore excess quantity only when excess is at least `50` yards/meters.
 - If excess quantity is less than `50`, hard-block.
 - If required extraction fields are missing or below threshold, hard-block.
 
-### Legacy UD Candidate Tie-Breaking
+### UD Candidate Tie-Breaking
 
-When multiple valid legacy row combinations satisfy the same extracted quantity, apply this exact deterministic order:
+When multiple exact workbook value groups satisfy UD row identification, apply this exact deterministic order:
 
 1. Row-index key:
    Compare sorted row-index sequences lexicographically; smallest sequence wins.
@@ -130,7 +128,7 @@ Mail-level reports for UD allocation must include:
 - rejection reason for non-selected candidates
 - final decision and reason
 
-This evidence is mandatory because the legacy path may select non-sequential rows and the structured path still needs auditable candidate/value evidence.
+This evidence is mandatory because value-based selection may still produce multiple exact workbook groups and the final choice must remain auditable.
 When dense structured value matches produce very large exact candidate sets, the persisted `ud_selection.candidates[]` payload may be a bounded deterministic subset instead of the full exact universe, but it must still include the selected candidate and the report must preserve the true total through `candidate_count`.
 
 ### IP / EXP Rules
@@ -184,7 +182,7 @@ Current live-extraction boundary:
 - ERP LC/SC family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
 - structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`
 - structured UD/AM extraction now requires page-1 office-use-only-row UD/AM number/date extraction: Base UD must match `UD No (For office use only)` and Amendment must match `Amendment no. (For office use only)`; `For office use only` is mandatory, no alternate row-label fallback is allowed, and invalid BGMEA row values hard-block
-- structured UD/AM extraction also requires exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, value-first ascending blank-row accumulation by workbook `Amount` column 6, and supplier quantity validation for Pioneer Denim rows
+- structured UD/AM extraction also requires exact ERP `Ship. Remarks` or ERP `LC No.` row matching in the UD LC table, ERP LC date validation, exact workbook `Amount`-group matching by LC value, and supplier quantity validation for Pioneer Denim rows
 - ERP `LC No.` row matching is exact first, then may compare only after removing leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, internal spaces and all other characters remain unchanged, and `Ship. Remarks` remains exact-only
 - for UD Amendments only, if the matched row's `Increased/Decreased` value is numeric zero, extraction uses that row's `Value` column instead because the LC is treated as newly included in the amendment
 - structured UD/AM quantity validation uses the workbook `Quantity of Fabrics (Yds/Mtr)` cell number format as the unit source: `#,###.00 "Mtr"` means `MTR`; any other number format defaults to `YDS`
@@ -215,9 +213,7 @@ Do not assume additional workbook columns without verifying `docs/workflows.md`,
 
 Implemented:
 - Match rows by LC/SC family.
-- For structured UD, accumulate blank family rows in ascending workbook order until workbook `Amount` matches the extracted LC value, then validate workbook quantity totals by unit.
-- For legacy UD, compare quantities using normalized numeric values and unit compatibility.
-- For legacy UD, generate all valid candidate combinations and score them using the normative tie-break keys.
+- For UD, identify candidate row groups only from exact workbook `Amount` matches to the extracted LC value, then validate workbook quantity totals by unit.
 - Persist/report all candidate evidence.
 
 ### 4. Write Staging

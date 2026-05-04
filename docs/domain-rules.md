@@ -253,7 +253,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank` | selected UD target rows, or all verified-family rows for EXP-only / EXP+IP mails; exact already-recorded matches no-op instead of appending |
 | `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source normalized document date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source current workflow date formatted `DD/MM/YYYY` |
-| `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by ascending blank-row accumulation |
+| `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by exact LC-value group matching |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
@@ -303,7 +303,7 @@ Current phase-1 write behavior is:
 - `ud_ip_exp` does not append to existing shared-column cell values; exact already-recorded matches no-op and unexpected non-blank targets hard-block
 
 ## UD candidate combination determinism rule
-For structured Base UD and UD Amendment PDFs, target rows are selected by the value-first ascending-row rule below. The older quantity-combination rule remains available only for deterministic legacy payloads that do not carry structured UD LC value evidence.
+For structured Base UD and UD Amendment PDFs, target rows are selected by the value-first rule below. Quantity never drives initial row identification.
 
 ### Structured UD value-first row selection
 - Email body file number selects the canonical ERP row and therefore the ERP LC/SC family, ERP `LC No.`, ERP `Ship. Remarks`, and ERP LC/SC date.
@@ -318,19 +318,14 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number.
 - Same-mail duplicate UD/AM evidence is resolved first by BGMEA UD/AM number and then by duplicate filename evidence. Later duplicates are ignored only when their required extracted evidence matches exactly; any disagreement in date, LC/SC value, or quantity evidence is a hard block.
 - Duplicate attachment filename evidence is business-relevant for `ud_ip_exp`; same-mail repeated filenames must participate in duplicate/conflict checks even when the BGMEA number is unavailable from filename alone.
-- Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`, sorted by row index, then accumulated in ascending row order until the value matches within the configured tolerance.
-- The current structured path does not run an arbitrary alternative-group search after value evidence is available; if the ascending blank-row accumulation does not match the target value, the result is `ud_lc_value_match_unresolved`.
+- Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`. Candidate row groups are identified only by exact workbook `Amount` matches to the extracted LC value within the configured tolerance.
+- If no exact value-matched candidate group exists, the result is `ud_lc_value_match_unresolved`.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
 - Structured UD validation must identify the workbook quantity unit from the workbook cell number format for `Quantity of Fabrics (Yds/Mtr)`: if the format is `#,###.00 "Mtr"`, the unit is `MTR`; otherwise the unit defaults to `YDS`. This mirrors the export workflow, which writes MTR quantities by applying that number format.
 - During a multi-mail run, in-memory workbook snapshot advancement after staged writes must preserve row number formats so later mails still evaluate quantity units from the original workbook-authored evidence.
 - Workbook quantities in the selected group are summed by unit and compared against structured UD supplier quantities for `PIONEER DENIM LIMITED` / `PIONEER DENIM LTD`.
 - Quantity validation passes only when UD quantity equals workbook quantity or UD excess is at least 50 yards/meters. UD quantity below workbook quantity or excess above zero but below 50 is a hard block.
 - Selected rows receive `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; all target cells must be blank before write.
-
-### Legacy UD quantity-combination rule
-When multiple valid legacy UD row combinations satisfy the same extracted quantity, selection must be deterministic and fully reportable.
-- Before choosing a new legacy row combination, the workflow must first check whether the same BGMEA UD/AM number is already recorded on a matching row combination; if so, the outcome is duplicate-only/no-write.
-- New legacy selection considers blank `UD No. & IP No.` targets only. Occupied combinations may explain a `ud_target_row_conflict`, but must not outrank an equally valid blank combination.
 
 ### Tie-break key order (normative)
 Apply keys in this exact order:
@@ -356,19 +351,12 @@ Mail-level report payload must include:
 - selected/non-selected status per candidate and rejection reasons
 - final decision + final decision reason
 
-### Worked example (legacy duplicated quantities, non-sequential matches)
-For extracted UD quantity `3000 YDS`, candidate rows:
-- row 11 (`1000`, amnd date `2026-01-02`, amnd no `1`)
-- row 14 (`1000`, amnd date `2026-01-02`, amnd no `1`)
-- row 19 (`2000`, amnd date `2026-02-10`, amnd no `2`)
-- row 27 (`2000`, amnd date `2026-02-10`, amnd no `2`)
+### Worked example (multiple exact value groups)
+For extracted UD LC value `1500` and extracted quantity `1500 YDS`, candidate groups in one LC/SC family are:
+- `[11,12]` with workbook amounts `1000 + 500` and workbook quantity `1500 YDS`
+- `[13,14]` with workbook amounts `700 + 800` and workbook quantity `1500 YDS`
 
-Valid non-sequential combinations are `[11,19]`, `[14,19]`, `[11,27]`, `[14,27]`.
-Applying keys in order selects `[11,19]` because:
-1. row-index key eliminates `[14,*]`,
-2. amendment key ties between `[11,19]` and `[11,27]`,
-3. blank-field priority assumed tie,
-4. stable candidate id `11-19` sorts before `11-27`.
+Both groups are valid only because they match the LC value first. Quantity comparison happens only after those groups are identified. If both pass the quantity rule, the tie-break keys select `[11,12]` because its row-index key sorts first.
 
 ## Bangladesh Bank rules
 Verification uses:
