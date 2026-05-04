@@ -119,6 +119,9 @@ Mail-level reports for UD allocation must include:
 - `ud_selection.required_quantity`
 - `ud_selection.quantity_unit`
 - `ud_selection.candidate_count`
+- `ud_selection.reported_candidate_count`
+- `ud_selection.candidates_truncated`
+- `ud_selection.omitted_candidate_count`
 - `ud_selection.candidates[]`
 - candidate row indexes
 - matched quantities
@@ -128,6 +131,7 @@ Mail-level reports for UD allocation must include:
 - final decision and reason
 
 This evidence is mandatory because the legacy path may select non-sequential rows and the structured path still needs auditable candidate/value evidence.
+When dense structured value matches produce very large exact candidate sets, the persisted `ud_selection.candidates[]` payload may be a bounded deterministic subset instead of the full exact universe, but it must still include the selected candidate and the report must preserve the true total through `candidate_count`.
 
 ### IP / EXP Rules
 

@@ -110,6 +110,9 @@ When `ud_selection` is present for `ud_ip_exp`, it must include:
 - `required_quantity`
 - `quantity_unit`
 - `candidate_count`
+- `reported_candidate_count`
+- `candidates_truncated`
+- `omitted_candidate_count`
 - `candidates`
 - `final_decision` (`selected` | `already_recorded` | `hard_block` | `hard_block_tie`)
 - `final_decision_reason`
@@ -129,6 +132,14 @@ Each `candidates[]` item should include:
 - `rejection_reason`
 
 Structured UD candidates may also emit `score_keys` entries for `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
+When `candidate_count` is large, the persisted `candidates[]` array may be a bounded deterministic subset instead of the full exact candidate universe.
+In that case:
+- `candidate_count` remains the full exact total
+- `reported_candidate_count` equals `len(candidates[])`
+- `candidates_truncated = true`
+- `omitted_candidate_count = candidate_count - reported_candidate_count`
+
+For dense structured UD matches, the selected candidate must still be present in `candidates[]` even when truncation is active.
 
 ## 5) Print-annotation checklist schema
 - `schema_id`: `print_annotation_checklist`

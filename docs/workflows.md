@@ -687,13 +687,18 @@ When more than one valid legacy row combination can satisfy UD quantity allocati
 - If two or more candidate combinations remain exactly tied after all keys above, do **not** select arbitrarily.
 - Mark the mail outcome as `hard_block`.
 - Emit discrepancy reason `ud_candidate_tie_after_full_tiebreak`.
-- Include full candidate comparison details in the mail report so the operator can resolve data ambiguity offline.
+- Include deterministic candidate comparison evidence in the mail report so the operator can resolve data ambiguity offline.
+- When exact candidate volume is small, persist the full candidate set.
+- When exact candidate volume is large, persist a bounded deterministic subset while keeping the selected candidate, true total `candidate_count`, and explicit truncation metadata.
 
 #### Required UD selection-report fields (normative)
 For every mail that reaches UD allocation, the mail-level JSON report must include:
 - `ud_selection.required_quantity`
 - `ud_selection.quantity_unit`
 - `ud_selection.candidate_count`
+- `ud_selection.reported_candidate_count`
+- `ud_selection.candidates_truncated`
+- `ud_selection.omitted_candidate_count`
 - `ud_selection.candidates[]` with:
   - `candidate_id`
   - `row_indexes` (ascending)
@@ -713,6 +718,7 @@ For every mail that reaches UD allocation, the mail-level JSON report must inclu
 - `ud_selection.discrepancy_code`
 
 Structured UD selections reuse the same report shape but typically emit one candidate and may include extra `score_keys` fields such as `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
+If `ud_selection.candidates_truncated = true`, `ud_selection.candidate_count` is still the full exact total and `ud_selection.candidates[]` is a bounded deterministic subset that must include the selected candidate.
 
 #### Worked example (legacy duplicated quantities + non-sequential matches)
 UD extracted quantity = `3000 YDS`.

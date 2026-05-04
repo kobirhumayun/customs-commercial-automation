@@ -9,6 +9,8 @@ from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
 from project.workflows.snapshot import SourceEmailRecord, build_email_snapshot
 from project.workflows.ud_ip_exp import (
     DocumentExtractionField,
+    UDAllocationCandidate,
+    UDAllocationResult,
     UDCandidateRow,
     UDDocumentPayload,
     UDIPEXPQuantity,
@@ -48,6 +50,9 @@ class UDIPEXPReportingTests(unittest.TestCase):
         self.assertEqual(report["required_quantity"], "3000")
         self.assertEqual(report["quantity_unit"], "YDS")
         self.assertEqual(report["candidate_count"], 1)
+        self.assertEqual(report["reported_candidate_count"], 1)
+        self.assertFalse(report["candidates_truncated"])
+        self.assertEqual(report["omitted_candidate_count"], 0)
         self.assertEqual(report["final_decision"], "selected")
         self.assertEqual(report["selected_candidate_id"], "11-19")
         self.assertEqual(report["candidates"][0]["candidate_id"], "11-19")
@@ -85,6 +90,65 @@ class UDIPEXPReportingTests(unittest.TestCase):
             {candidate["rejection_reason"] for candidate in report["candidates"]},
             {"tied_after_full_tiebreak"},
         )
+
+    def test_build_ud_selection_report_marks_truncated_candidate_sets(self) -> None:
+        allocation = UDAllocationResult(
+            required_quantity="700",
+            quantity_unit="MULTI",
+            candidate_count=350,
+            candidates=[
+                UDAllocationCandidate(
+                    candidate_id="11-12",
+                    row_indexes=[11, 12],
+                    matched_quantities=["YDS:700"],
+                    quantity_sum="YDS:700",
+                    ignored_excess_quantity="YDS:0",
+                    score_keys={
+                        "row_index_key": [11, 12],
+                        "amendment_recency_key": [("0001-01-01", 0), ("0001-01-01", 0)],
+                        "blank_field_priority_key": {
+                            "blank_target_count_desc": -2,
+                            "nonblank_optional_count_asc": 0,
+                        },
+                        "stable_candidate_id_key": "11-12",
+                    },
+                    prewrite_blank_targets_count=2,
+                    prewrite_nonblank_optional_count=0,
+                    selected=True,
+                ),
+                UDAllocationCandidate(
+                    candidate_id="13-14",
+                    row_indexes=[13, 14],
+                    matched_quantities=["YDS:700"],
+                    quantity_sum="YDS:700",
+                    ignored_excess_quantity="YDS:0",
+                    score_keys={
+                        "row_index_key": [13, 14],
+                        "amendment_recency_key": [("0001-01-01", 0), ("0001-01-01", 0)],
+                        "blank_field_priority_key": {
+                            "blank_target_count_desc": -2,
+                            "nonblank_optional_count_asc": 0,
+                        },
+                        "stable_candidate_id_key": "13-14",
+                    },
+                    prewrite_blank_targets_count=2,
+                    prewrite_nonblank_optional_count=0,
+                    selected=False,
+                    rejection_reason="lower_priority_score",
+                ),
+            ],
+            final_decision="selected",
+            final_decision_reason="selected_structured_lc_value_and_quantity",
+            selected_candidate_id="11-12",
+            candidates_truncated=True,
+        )
+
+        report = build_ud_selection_report(allocation)
+
+        self.assertEqual(report["candidate_count"], 350)
+        self.assertEqual(report["reported_candidate_count"], 2)
+        self.assertTrue(report["candidates_truncated"])
+        self.assertEqual(report["omitted_candidate_count"], 348)
 
     def test_assemble_ud_validation_exposes_ud_selection_report(self) -> None:
         result = assemble_ud_validation(

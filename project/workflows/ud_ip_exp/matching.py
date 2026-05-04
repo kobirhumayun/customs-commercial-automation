@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import heapq
 from itertools import combinations
 from typing import Any
 
@@ -13,6 +14,7 @@ from project.workflows.ud_ip_exp.payloads import normalize_quantity_unit
 DEFAULT_UD_EXCESS_THRESHOLD = Decimal("50")
 DEFAULT_UD_VALUE_TOLERANCE = Decimal("0.01")
 MTR_QUANTITY_NUMBER_FORMAT = '#,###.00 "Mtr"'
+MAX_UD_SELECTION_REPORT_CANDIDATES = 200
 
 
 @dataclass(slots=True, frozen=True)
@@ -56,6 +58,22 @@ class UDAllocationResult:
     final_decision_reason: str
     selected_candidate_id: str | None = None
     discrepancy_code: str | None = None
+    candidates_truncated: bool = False
+
+
+@dataclass(slots=True)
+class _BoundedStructuredCandidateState:
+    kept_candidates: list[tuple["_ReverseCandidateKey", tuple, UDAllocationCandidate, str | None]]
+    total_candidate_count: int = 0
+    best_viable_candidate: tuple[tuple, UDAllocationCandidate] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class _ReverseCandidateKey:
+    value: tuple
+
+    def __lt__(self, other: "_ReverseCandidateKey") -> bool:
+        return self.value > other.value
 
 
 def collect_ud_candidate_rows(
@@ -406,7 +424,7 @@ def allocate_structured_ud_rows(
             discrepancy_code="ud_lc_value_match_unresolved",
         )
 
-    evaluated_candidates: list[tuple[UDAllocationCandidate, str | None]] = []
+    candidate_state = _empty_bounded_structured_candidate_state()
     for selected_rows in exact_value_groups:
         workbook_value_sum = sum(
             (row.export_amount or Decimal("0") for row in selected_rows),
@@ -422,58 +440,38 @@ def allocate_structured_ud_rows(
                 excess_threshold=excess_threshold,
             )
         )
-        evaluated_candidates.append(
-            (
-                _structured_candidate(
-                    selected_rows=selected_rows,
-                    workbook_value_sum=workbook_value_sum,
-                    lc_sc_value=target_value,
-                    workbook_quantities=quantity_totals,
-                    ud_quantities=normalized_ud_quantities,
-                    selected=False,
-                    rejection_reason=quantity_error,
-                ),
-                quantity_error,
-            )
+        _record_bounded_structured_candidate(
+            state=candidate_state,
+            candidate=_structured_candidate(
+                selected_rows=selected_rows,
+                workbook_value_sum=workbook_value_sum,
+                lc_sc_value=target_value,
+                workbook_quantities=quantity_totals,
+                ud_quantities=normalized_ud_quantities,
+                selected=False,
+                rejection_reason=quantity_error,
+            ),
+            quantity_error=quantity_error,
         )
 
-    viable_candidates = [
-        candidate
-        for candidate, quantity_error in evaluated_candidates
-        if quantity_error is None
-    ]
-    if viable_candidates:
-        sorted_candidates = sorted(
-            (candidate for candidate, _quantity_error in evaluated_candidates),
-            key=_candidate_sort_key,
+    if candidate_state.best_viable_candidate is not None:
+        selected_candidates, best_candidate, candidates_truncated = _finalize_structured_selected_candidates(
+            state=candidate_state,
         )
-        best_candidate = sorted(viable_candidates, key=_candidate_sort_key)[0]
-        selected_candidates = [
-            replace(
-                candidate,
-                selected=candidate.candidate_id == best_candidate.candidate_id,
-                rejection_reason=None
-                if candidate.candidate_id == best_candidate.candidate_id
-                else (
-                    "lower_priority_score"
-                    if candidate.candidate_id in {item.candidate_id for item in viable_candidates}
-                    else candidate.rejection_reason
-                ),
-            )
-            for candidate in sorted_candidates
-        ]
         return UDAllocationResult(
             required_quantity=_format_quantity_map(normalized_ud_quantities),
             quantity_unit="MULTI",
-            candidate_count=len(selected_candidates),
+            candidate_count=candidate_state.total_candidate_count,
             candidates=selected_candidates,
             final_decision="selected",
             final_decision_reason="selected_structured_lc_value_and_quantity",
-            selected_candidate_id=best_candidate.candidate_id,
+            selected_candidate_id=best_candidate.candidate_id if best_candidate is not None else None,
+            candidates_truncated=candidates_truncated,
         )
 
-    sorted_candidates = sorted(evaluated_candidates, key=lambda item: _candidate_sort_key(item[0]))
-    primary_candidate, primary_error = sorted_candidates[0]
+    final_candidates, primary_candidate, primary_error, candidates_truncated = _finalize_structured_hard_block_candidates(
+        state=candidate_state,
+    )
     code = (
         "ud_quantity_below_workbook"
         if primary_error == "ud_quantity_below_workbook"
@@ -482,11 +480,12 @@ def allocate_structured_ud_rows(
     return UDAllocationResult(
         required_quantity=_format_quantity_map(normalized_ud_quantities),
         quantity_unit="MULTI",
-        candidate_count=len(sorted_candidates),
-        candidates=[candidate for candidate, _quantity_error in sorted_candidates],
+        candidate_count=candidate_state.total_candidate_count,
+        candidates=[candidate for candidate, _quantity_error in final_candidates],
         final_decision="hard_block",
         final_decision_reason=primary_error or "ud_quantity_below_workbook",
         discrepancy_code=code,
+        candidates_truncated=candidates_truncated,
     )
 
 
@@ -509,7 +508,7 @@ def _allocate_conflicting_structured_rows(
     if not exact_value_groups:
         return None
 
-    conflicting_candidates: list[UDAllocationCandidate] = []
+    candidate_state = _empty_bounded_structured_candidate_state()
     for selected_rows in exact_value_groups:
         claimed_rows = [
             row
@@ -532,8 +531,9 @@ def _allocate_conflicting_structured_rows(
             (row.export_amount or Decimal("0") for row in selected_rows),
             Decimal("0"),
         )
-        conflicting_candidates.append(
-            _structured_candidate(
+        _record_bounded_structured_candidate(
+            state=candidate_state,
+            candidate=_structured_candidate(
                 selected_rows=selected_rows,
                 workbook_value_sum=workbook_value_sum,
                 lc_sc_value=target_value,
@@ -541,34 +541,37 @@ def _allocate_conflicting_structured_rows(
                 ud_quantities=quantity_by_unit,
                 selected=False,
                 rejection_reason="target_row_conflict",
-            )
+            ),
+            quantity_error="target_row_conflict",
         )
 
-    if not conflicting_candidates:
+    if candidate_state.total_candidate_count == 0:
         return None
 
-    sorted_candidates = sorted(conflicting_candidates, key=_candidate_sort_key)
-    best_candidate = sorted_candidates[0]
+    final_candidates, best_candidate, _primary_error, candidates_truncated = _finalize_structured_hard_block_candidates(
+        state=candidate_state,
+    )
     return UDAllocationResult(
         required_quantity=_format_quantity_map(quantity_by_unit),
         quantity_unit="MULTI",
-        candidate_count=len(sorted_candidates),
+        candidate_count=candidate_state.total_candidate_count,
         candidates=[
             replace(
                 candidate,
                 selected=False,
                 rejection_reason=(
                     "target_row_conflict"
-                    if candidate.candidate_id == best_candidate.candidate_id
+                    if best_candidate is not None and candidate.candidate_id == best_candidate.candidate_id
                     else "lower_priority_score"
                 ),
             )
-            for candidate in sorted_candidates
+            for candidate, _quantity_error in final_candidates
         ],
         final_decision="hard_block",
         final_decision_reason="target_row_conflict",
-        selected_candidate_id=best_candidate.candidate_id,
+        selected_candidate_id=best_candidate.candidate_id if best_candidate is not None else None,
         discrepancy_code="ud_target_row_conflict",
+        candidates_truncated=candidates_truncated,
     )
 
 
@@ -610,7 +613,7 @@ def _allocate_already_recorded_structured_rows(
         normalize_quantity_unit(unit): Decimal(str(amount))
         for unit, amount in quantity_by_unit.items()
     }
-    viable_candidates: list[UDAllocationCandidate] = []
+    candidate_state = _empty_bounded_structured_candidate_state()
     for selected_rows in exact_value_groups:
         quantity_totals = _quantity_totals_by_unit(selected_rows)
         if not quantity_totals:
@@ -626,8 +629,9 @@ def _allocate_already_recorded_structured_rows(
             (row.export_amount or Decimal("0") for row in selected_rows),
             Decimal("0"),
         )
-        viable_candidates.append(
-            _structured_candidate(
+        _record_bounded_structured_candidate(
+            state=candidate_state,
+            candidate=_structured_candidate(
                 selected_rows=selected_rows,
                 workbook_value_sum=workbook_value_sum,
                 lc_sc_value=target_value,
@@ -635,27 +639,24 @@ def _allocate_already_recorded_structured_rows(
                 ud_quantities=normalized_ud_quantities,
                 selected=True,
                 rejection_reason=None,
-            )
+            ),
+            quantity_error=None,
         )
-    if not viable_candidates:
+    if candidate_state.best_viable_candidate is None:
         return None
 
-    candidate = sorted(viable_candidates, key=_candidate_sort_key)[0]
+    candidates, candidate, candidates_truncated = _finalize_structured_selected_candidates(
+        state=candidate_state,
+    )
     return UDAllocationResult(
         required_quantity=_format_quantity_map(normalized_ud_quantities),
         quantity_unit="MULTI",
-        candidate_count=len(viable_candidates),
-        candidates=[
-            replace(
-                item,
-                selected=item.candidate_id == candidate.candidate_id,
-                rejection_reason=None if item.candidate_id == candidate.candidate_id else "lower_priority_score",
-            )
-            for item in sorted(viable_candidates, key=_candidate_sort_key)
-        ],
+        candidate_count=candidate_state.total_candidate_count,
+        candidates=candidates,
         final_decision="already_recorded",
         final_decision_reason="ud_already_recorded",
-        selected_candidate_id=candidate.candidate_id,
+        selected_candidate_id=candidate.candidate_id if candidate is not None else None,
+        candidates_truncated=candidates_truncated,
     )
 
 
@@ -756,6 +757,136 @@ def _search_structured_value_groups(
     if _can_match(0, target_minor_units):
         _collect(0, target_minor_units, [])
     return matching_groups
+
+
+def _empty_bounded_structured_candidate_state() -> _BoundedStructuredCandidateState:
+    return _BoundedStructuredCandidateState(kept_candidates=[])
+
+
+def _record_bounded_structured_candidate(
+    *,
+    state: _BoundedStructuredCandidateState,
+    candidate: UDAllocationCandidate,
+    quantity_error: str | None,
+    limit: int = MAX_UD_SELECTION_REPORT_CANDIDATES,
+) -> None:
+    candidate_key = _candidate_sort_key(candidate)
+    state.total_candidate_count += 1
+    if quantity_error is None:
+        if (
+            state.best_viable_candidate is None
+            or candidate_key < state.best_viable_candidate[0]
+        ):
+            state.best_viable_candidate = (candidate_key, candidate)
+    _append_bounded_candidate(
+        kept_candidates=state.kept_candidates,
+        candidate_key=candidate_key,
+        candidate=candidate,
+        quantity_error=quantity_error,
+        limit=limit,
+    )
+
+
+def _append_bounded_candidate(
+    *,
+    kept_candidates: list[tuple[_ReverseCandidateKey, tuple, UDAllocationCandidate, str | None]],
+    candidate_key: tuple,
+    candidate: UDAllocationCandidate,
+    quantity_error: str | None,
+    limit: int,
+) -> None:
+    entry = (_ReverseCandidateKey(candidate_key), candidate_key, candidate, quantity_error)
+    if len(kept_candidates) < limit:
+        heapq.heappush(kept_candidates, entry)
+        return
+    if candidate_key < kept_candidates[0][1]:
+        heapq.heapreplace(kept_candidates, entry)
+
+
+def _ensure_candidate_in_bounded_entries(
+    *,
+    entries: list[tuple[tuple, UDAllocationCandidate, str | None]],
+    candidate: UDAllocationCandidate | None,
+    quantity_error: str | None,
+    limit: int = MAX_UD_SELECTION_REPORT_CANDIDATES,
+) -> None:
+    if candidate is None:
+        return
+    candidate_key = _candidate_sort_key(candidate)
+    if any(existing.candidate_id == candidate.candidate_id for _key, existing, _error in entries):
+        return
+    if len(entries) < limit:
+        entries.append((candidate_key, candidate, quantity_error))
+        return
+    worst_index = max(
+        range(len(entries)),
+        key=lambda index: entries[index][0],
+    )
+    entries[worst_index] = (candidate_key, candidate, quantity_error)
+
+
+def _finalize_structured_selected_candidates(
+    *,
+    state: _BoundedStructuredCandidateState,
+) -> tuple[list[UDAllocationCandidate], UDAllocationCandidate | None, bool]:
+    best_candidate = state.best_viable_candidate[1] if state.best_viable_candidate is not None else None
+    entries = [
+        (candidate_key, candidate, quantity_error)
+        for _reverse_key, candidate_key, candidate, quantity_error in state.kept_candidates
+    ]
+    _ensure_candidate_in_bounded_entries(
+        entries=entries,
+        candidate=best_candidate,
+        quantity_error=None,
+    )
+    viable_candidate_ids = {
+        candidate.candidate_id
+        for _key, candidate, quantity_error in entries
+        if quantity_error is None
+    }
+    selected_candidates = [
+        replace(
+            candidate,
+            selected=best_candidate is not None and candidate.candidate_id == best_candidate.candidate_id,
+            rejection_reason=None
+            if best_candidate is not None and candidate.candidate_id == best_candidate.candidate_id
+            else (
+                "lower_priority_score"
+                if candidate.candidate_id in viable_candidate_ids
+                else quantity_error
+            ),
+        )
+        for _key, candidate, quantity_error in sorted(entries, key=lambda item: item[0])
+    ]
+    return selected_candidates, best_candidate, state.total_candidate_count > len(selected_candidates)
+
+
+def _finalize_structured_hard_block_candidates(
+    *,
+    state: _BoundedStructuredCandidateState,
+) -> tuple[list[tuple[UDAllocationCandidate, str | None]], UDAllocationCandidate | None, str | None, bool]:
+    if not state.kept_candidates:
+        return [], None, None, False
+    sorted_entries = sorted(
+        (
+            (candidate_key, candidate, quantity_error)
+            for _reverse_key, candidate_key, candidate, quantity_error in state.kept_candidates
+        ),
+        key=lambda item: item[0],
+    )
+    _primary_key, primary_candidate, primary_error = sorted_entries[0]
+    _ensure_candidate_in_bounded_entries(
+        entries=sorted_entries,
+        candidate=primary_candidate,
+        quantity_error=primary_error,
+    )
+    final_entries = sorted(sorted_entries, key=lambda item: item[0])
+    return (
+        [(candidate, quantity_error) for _key, candidate, quantity_error in final_entries],
+        primary_candidate,
+        primary_error,
+        state.total_candidate_count > len(final_entries),
+    )
 
 
 def _build_structured_candidate_row(workbook_row, mapping: dict[str, int]) -> UDCandidateRow | None:

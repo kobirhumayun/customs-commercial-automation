@@ -1,6 +1,7 @@
 """Pure UD/IP/EXP workflow foundations."""
 
 from project.workflows.ud_ip_exp.matching import (
+    MAX_UD_SELECTION_REPORT_CANDIDATES,
     UDAllocationCandidate,
     UDAllocationResult,
     UDCandidateRow,
@@ -52,6 +53,7 @@ __all__ = [
     "EXPDocumentPayload",
     "IPDocumentPayload",
     "JsonManifestUDDocumentPayloadProvider",
+    "MAX_UD_SELECTION_REPORT_CANDIDATES",
     "MappingUDDocumentPayloadProvider",
     "UDIPEXPLiveDocumentPreparationResult",
     "UDAllocationCandidate",

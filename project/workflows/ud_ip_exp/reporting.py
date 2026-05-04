@@ -6,10 +6,14 @@ from project.workflows.ud_ip_exp.matching import UDAllocationCandidate, UDAlloca
 
 
 def build_ud_selection_report(allocation_result: UDAllocationResult) -> dict[str, Any]:
+    reported_candidate_count = len(allocation_result.candidates)
     return {
         "required_quantity": allocation_result.required_quantity,
         "quantity_unit": allocation_result.quantity_unit,
         "candidate_count": allocation_result.candidate_count,
+        "reported_candidate_count": reported_candidate_count,
+        "candidates_truncated": allocation_result.candidates_truncated,
+        "omitted_candidate_count": allocation_result.candidate_count - reported_candidate_count,
         "candidates": [
             _candidate_report(candidate)
             for candidate in sorted(allocation_result.candidates, key=lambda item: item.candidate_id)

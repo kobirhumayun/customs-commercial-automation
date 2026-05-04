@@ -5,6 +5,7 @@ import unittest
 
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot, resolve_ud_ip_exp_header_mapping
 from project.workflows.ud_ip_exp import (
+    MAX_UD_SELECTION_REPORT_CANDIDATES,
     UDCandidateRow,
     allocate_structured_ud_rows,
     allocate_ud_rows,
@@ -382,6 +383,29 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision_reason, "target_row_conflict")
         self.assertEqual(result.discrepancy_code, "ud_target_row_conflict")
         self.assertEqual(result.selected_candidate_id, "11-12")
+
+    def test_allocate_structured_ud_rows_bounds_dense_many_match_candidate_reports(self) -> None:
+        rows = [
+            WorkbookRow(row_index=11 + index, values={1: "LC-0043", 2: "100 YDS", 3: "", 4: "", 5: "", 6: "100"})
+            for index in range(10)
+        ]
+
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(rows=rows),
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("500"),
+            quantity_by_unit={"YDS": Decimal("500")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "11-12-13-14-15")
+        self.assertEqual(result.candidate_count, 252)
+        self.assertTrue(result.candidates_truncated)
+        self.assertEqual(len(result.candidates), MAX_UD_SELECTION_REPORT_CANDIDATES)
+        self.assertIn(
+            "11-12-13-14-15",
+            [candidate.candidate_id for candidate in result.candidates],
+        )
 
     def test_allocate_structured_ud_rows_recognizes_already_recorded_ud(self) -> None:
         result = allocate_structured_ud_rows(
