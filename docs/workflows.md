@@ -727,27 +727,33 @@ For every mail that reaches UD allocation, the mail-level JSON report must inclu
 Structured UD selections reuse the same report shape but typically emit one candidate and may include extra `score_keys` fields such as `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
 If `ud_selection.candidates_truncated = true`, `ud_selection.candidate_count` is still the full exact total and `ud_selection.candidates[]` is a bounded deterministic subset that must include the selected candidate.
 
-#### Historical example (superseded)
-The quantity-combination example below is retained only as historical context. Current UD row identification must rely on LC/SC value first, then compare quantities only within the value-matched rows.
-Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
-- row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
-- row 14 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
-- row 19 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
-- row 27 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+#### Value-first UD selection example
+Eligible rows are first restricted to the ERP-verified LC/SC family. Within that family, row selection starts from LC/SC value only.
+Example workbook rows for one LC/SC family (row -> `Amount`, quantity):
+- row 11 -> `4000`, `1200 KGS`
+- row 14 -> `6000`, `1800 KGS`
+- row 19 -> `4500`, `1400 KGS`
+- row 27 -> `5500`, `1600 KGS`
 
-Valid quantity combinations:
-- Candidate A: rows `[11, 19]` = `1000 + 2000`
-- Candidate B: rows `[14, 19]` = `1000 + 2000`
-- Candidate C: rows `[11, 27]` = `1000 + 2000`
-- Candidate D: rows `[14, 27]` = `1000 + 2000`
+Extracted UD evidence:
+- `lc_sc_value = 10000`
+- `quantity_by_unit = {"KGS": 3000}`
+
+Exact value-matched groups:
+- Candidate A: rows `[11, 14]` -> `4000 + 6000 = 10000`
+- Candidate B: rows `[19, 27]` -> `4500 + 5500 = 10000`
+
+Quantity comparison inside those value-matched groups:
+- Candidate A workbook quantity = `1200 + 1800 = 3000 KGS` -> quantity matches the UD
+- Candidate B workbook quantity = `1400 + 1600 = 3000 KGS` -> quantity matches the UD
 
 Selection:
-1. Row-index key prefers candidates starting with row `11` over row `14` → keep A/C.
-2. Amendment recency ties between A and C (same amendment metadata pattern).
-3. Blank-field priority evaluated; if equal, continue.
-4. Stable `candidate_id` tie-break: `11-19` < `11-27` → select Candidate A.
+1. Ignore every row group whose workbook `Amount` total does not equal the extracted `lc_sc_value` within tolerance.
+2. Compare workbook quantities only for the remaining exact value-matched groups.
+3. If more than one value-matched group also satisfies the quantity rules, apply the deterministic candidate sort key: row-index order first, then amendment recency, then blank-target priority, then stable `candidate_id`.
+4. In this example Candidate A wins because `[11, 14]` sorts ahead of `[19, 27]`.
 
-Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
+Result: UD is written to rows 11 and 14 only; the selection report records the exact value-matched candidates and why Candidate A won.
 
 ### IP / EXP rules
 - valid non-UD mail shapes are EXP-only and EXP+IP; IP-only is invalid
