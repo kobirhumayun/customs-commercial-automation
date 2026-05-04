@@ -1042,6 +1042,302 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
         self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "selected")
 
+    def test_live_ud_documents_value_first_multi_document_mail_stages_and_plans_stably(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail(
+            "entry-live-007b",
+            "UD multi document value-first proof",
+            attachments=[
+                {"attachment_name": "UD-LC-0043-ONE.pdf"},
+                {"attachment_name": "UD-LC-0043-TWO.pdf"},
+            ],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
+                    return _saved_ud_analysis(
+                        "BGMEA/DHK/UD/2026/5483/001",
+                        document_date="2026-04-01",
+                        lc_sc_value="10000",
+                        quantity="10000",
+                    )
+                return _saved_ud_analysis(
+                    "BGMEA/DHK/UD/2026/5483/002",
+                    document_date="2026-04-02",
+                    lc_sc_value="10000",
+                    quantity="10000",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [mail]),
+                rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "4000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=14,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "6000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=19,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "4500 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=27,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "5500 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (mail.entry_id, 0): b"%PDF-1.4\nud one\n",
+                        (mail.entry_id, 1): b"%PDF-1.4\nud two\n",
+                    }
+                ),
+                document_root=Path(temp_dir),
+                document_analysis_provider=Provider(),
+            )
+            planning_result = plan_print_batches(
+                run_report=replace(
+                    validation_result.run_report,
+                    write_phase_status=WritePhaseStatus.COMMITTED,
+                ),
+                mail_outcomes=validation_result.mail_outcomes,
+                staged_write_plan=validation_result.staged_write_plan,
+            )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 2)
+        self.assertEqual(
+            [
+                (operation.row_index, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+                if operation.column_key == "ud_ip_shared"
+            ],
+            [
+                (11, "BGMEA/DHK/UD/2026/5483/001"),
+                (14, "BGMEA/DHK/UD/2026/5483/001"),
+                (19, "BGMEA/DHK/UD/2026/5483/002"),
+                (27, "BGMEA/DHK/UD/2026/5483/002"),
+            ],
+        )
+        self.assertEqual(
+            [
+                document["selection"]["selected_candidate_id"]
+                for document in validation_result.mail_outcomes[0].ud_selection["documents"]
+            ],
+            ["11-14", "19-27"],
+        )
+        saved_documents = validation_result.mail_outcomes[0].saved_documents
+        self.assertEqual(
+            planning_result.print_batches[0].document_paths,
+            [saved_documents[0]["destination_path"], saved_documents[1]["destination_path"]],
+        )
+        self.assertEqual(
+            [
+                (document["document_number"], document["row_indexes"])
+                for document in planning_result.print_batches[0].annotation_documents
+            ],
+            [
+                ("BGMEA/DHK/UD/2026/5483/001", [11, 14]),
+                ("BGMEA/DHK/UD/2026/5483/002", [19, 27]),
+            ],
+        )
+
+    def test_validate_run_snapshot_stages_three_same_family_ud_documents_without_row_reuse(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        mail = _mail(
+            "entry-live-007c",
+            "UD three document same family proof",
+            attachments=[
+                {"attachment_name": "UD-LC-0043-ONE.pdf"},
+                {"attachment_name": "UD-LC-0043-TWO.pdf"},
+                {"attachment_name": "UD-LC-0043-THREE.pdf"},
+            ],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-ONE.pdf":
+                    return _saved_ud_analysis(
+                        "BGMEA/DHK/UD/2026/5483/001",
+                        document_date="2026-04-01",
+                        lc_sc_value="10000",
+                        quantity="10000",
+                    )
+                if saved_document.normalized_filename == "UD-LC-0043-TWO.pdf":
+                    return _saved_ud_analysis(
+                        "BGMEA/DHK/UD/2026/5483/002",
+                        document_date="2026-04-02",
+                        lc_sc_value="10000",
+                        quantity="10000",
+                    )
+                return _saved_ud_analysis(
+                    "BGMEA/DHK/UD/2026/5483/003",
+                    document_date="2026-04-03",
+                    lc_sc_value="10000",
+                    quantity="10000",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [mail]),
+                rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "4000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=14,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "6000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=19,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "4500 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=27,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "5500 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=31,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "3000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=35,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "7000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (mail.entry_id, 0): b"%PDF-1.4\nud one\n",
+                        (mail.entry_id, 1): b"%PDF-1.4\nud two\n",
+                        (mail.entry_id, 2): b"%PDF-1.4\nud three\n",
+                    }
+                ),
+                document_root=Path(temp_dir),
+                document_analysis_provider=Provider(),
+            )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["document_count"], 3)
+        self.assertEqual(
+            [
+                document["selection"]["selected_candidate_id"]
+                for document in validation_result.mail_outcomes[0].ud_selection["documents"]
+            ],
+            ["11-14", "19-27", "31-35"],
+        )
+        self.assertEqual(
+            [
+                (operation.row_index, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+                if operation.column_key == "ud_ip_shared"
+            ],
+            [
+                (11, "BGMEA/DHK/UD/2026/5483/001"),
+                (14, "BGMEA/DHK/UD/2026/5483/001"),
+                (19, "BGMEA/DHK/UD/2026/5483/002"),
+                (27, "BGMEA/DHK/UD/2026/5483/002"),
+                (31, "BGMEA/DHK/UD/2026/5483/003"),
+                (35, "BGMEA/DHK/UD/2026/5483/003"),
+            ],
+        )
+
     def test_validate_run_snapshot_hard_blocks_mixed_quality_ud_documents_with_stable_evidence(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail(
