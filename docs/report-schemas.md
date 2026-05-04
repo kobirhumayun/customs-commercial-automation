@@ -161,6 +161,18 @@ The checklist JSON must be derived from the same persisted print plan that drive
 For `ud_ip_exp`, checklist rows are required only for printed UD/Amendment documents that resolve to workbook row-selection evidence; other newly saved PDFs may still be printed without checklist rows.
 For `ud_ip_exp`, any mismatch between the current print plan's checklist-required document subset and the persisted checklist JSON is a hard-block before print execution.
 
+### Related persisted print-plan evidence
+When `print_plan.json` includes `annotation_documents` for a print group, each item should preserve direct checklist-source evidence in document print order:
+- `saved_document_id`
+- `document_path`
+- `document_path_hash`
+- `document_filename`
+- `document_number`
+- `row_indexes`
+- `checklist_required`
+
+For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_documents` records and use older mail-level reconstruction fallbacks only for backward compatibility with older run artifacts.
+
 ## 6) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`
 - `schema_version`: `1.0.0`

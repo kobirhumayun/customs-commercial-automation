@@ -501,18 +501,6 @@ def _evaluate_ud_ip_exp_mail(
                 for document in documents
                 if not isinstance(document, UDDocumentPayload)
             ] + [ud_document]
-            preview_overlap = _preview_ud_target_row_overlap(
-                run_id=run_report.run_id,
-                mail=mail,
-                rule_pack=rule_pack,
-                ud_document=ud_document,
-                workbook_snapshot=working_snapshot,
-                export_payload=export_payload,
-                ud_receive_date=ud_receive_date,
-                excluded_row_indexes=excluded_row_indexes,
-                state_timezone=run_report.state_timezone,
-                operation_index_start=operation_index_start,
-            )
             assembly = assemble_ud_validation(
                 run_id=run_report.run_id,
                 mail=mail,
@@ -526,12 +514,6 @@ def _evaluate_ud_ip_exp_mail(
                 ud_receive_date=ud_receive_date,
                 operation_index_start=operation_index_start,
                 excluded_row_indexes=excluded_row_indexes,
-            )
-            assembly = _apply_ud_overlap_conflict_if_needed(
-                assembly=assembly,
-                mail_id=mail.mail_id,
-                document_number=ud_document.document_number.value,
-                preview_overlap=preview_overlap,
             )
             rule_evaluations.append(assembly.rule_evaluation)
             staging_results.append(assembly.staging_result)
@@ -952,112 +934,6 @@ def _extend_aggregated_rule_evaluation(
         discrepancies=combined_discrepancies,
         final_decision=final_decision,
         decision_reasons=list(aggregated.decision_reasons) + list(decision_reasons),
-    )
-
-
-def _preview_ud_target_row_overlap(
-    *,
-    run_id: str,
-    mail: EmailMessage,
-    rule_pack: LoadedRulePack,
-    ud_document: UDDocumentPayload,
-    workbook_snapshot: WorkbookSnapshot | None,
-    export_payload,
-    ud_receive_date: str,
-    excluded_row_indexes: set[int],
-    state_timezone: str,
-    operation_index_start: int,
-) -> set[int]:
-    if workbook_snapshot is None or not excluded_row_indexes:
-        return set()
-    from project.workflows.ud_ip_exp.validation import assemble_ud_validation
-
-    preview_snapshot = _clear_ud_targets_for_preview(
-        workbook_snapshot=workbook_snapshot,
-        row_indexes=excluded_row_indexes,
-    )
-    preview = assemble_ud_validation(
-        run_id=run_id,
-        mail=mail,
-        rule_pack=rule_pack,
-        ud_document=ud_document,
-        workbook_snapshot=preview_snapshot,
-        documents=[ud_document],
-        saved_documents=[],
-        state_timezone=state_timezone,
-        export_payload=export_payload,
-        ud_receive_date=ud_receive_date,
-        operation_index_start=operation_index_start,
-        excluded_row_indexes=None,
-    )
-    return _selected_ud_selection_rows(preview.ud_selection).intersection(excluded_row_indexes)
-
-
-def _clear_ud_targets_for_preview(
-    *,
-    workbook_snapshot: WorkbookSnapshot,
-    row_indexes: set[int],
-) -> WorkbookSnapshot:
-    header_mapping = resolve_ud_ip_exp_header_mapping(workbook_snapshot)
-    if header_mapping is None:
-        return workbook_snapshot
-    target_columns = [
-        header_mapping[column_key]
-        for column_key in ("ud_ip_shared", "ud_ip_date", "ud_recv_date")
-        if column_key in header_mapping
-    ]
-    updated_rows = []
-    for row in workbook_snapshot.rows:
-        values = dict(row.values)
-        if row.row_index in row_indexes:
-            for column_index in target_columns:
-                values[column_index] = ""
-        updated_rows.append(
-            WorkbookRow(
-                row_index=row.row_index,
-                values=values,
-                number_formats=dict(row.number_formats),
-            )
-        )
-    return WorkbookSnapshot(
-        sheet_name=workbook_snapshot.sheet_name,
-        headers=list(workbook_snapshot.headers),
-        rows=updated_rows,
-    )
-
-
-def _apply_ud_overlap_conflict_if_needed(
-    *,
-    assembly,
-    mail_id: str,
-    document_number: str,
-    preview_overlap: set[int],
-):
-    if not preview_overlap or assembly.rule_evaluation.final_decision != FinalDecision.HARD_BLOCK:
-        return assembly
-    if any(discrepancy.code == "ud_target_row_conflict" for discrepancy in assembly.rule_evaluation.discrepancies):
-        return assembly
-    return replace(
-        assembly,
-        rule_evaluation=_extend_aggregated_rule_evaluation(
-            aggregated=assembly.rule_evaluation,
-            discrepancies=[
-                RuleDiscrepancy(
-                    code="ud_target_row_conflict",
-                    severity=FinalDecision.HARD_BLOCK,
-                    message="UD/AM document targets workbook rows that were already claimed by an earlier document.",
-                    subject_scope="mail",
-                    target_ref=mail_id,
-                    details={
-                        "document_number": document_number,
-                        "conflicting_row_indexes": sorted(preview_overlap),
-                    },
-                )
-            ],
-            decision_reasons=[
-                f"UD row-group conflict detected for {document_number}; the preferred workbook rows were already claimed earlier."
-            ],
-        ),
     )
 
 

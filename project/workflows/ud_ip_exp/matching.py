@@ -144,6 +144,7 @@ def allocate_ud_rows(
             excess_threshold=excess_threshold,
         )
         if occupied_scope:
+            best_occupied_candidate = sorted(occupied_scope, key=_candidate_sort_key)[0]
             return UDAllocationResult(
                 required_quantity=_format_decimal(required),
                 quantity_unit=unit,
@@ -154,6 +155,7 @@ def allocate_ud_rows(
                 ],
                 final_decision="hard_block",
                 final_decision_reason="target_row_conflict",
+                selected_candidate_id=best_occupied_candidate.candidate_id,
                 discrepancy_code="ud_target_row_conflict",
             )
         if occupied_reason == "quantity_excess_below_threshold":
@@ -348,11 +350,14 @@ def allocate_structured_ud_rows(
     target_value = Decimal(str(lc_sc_value))
     expected_lc_sc = _normalize_match_text(lc_sc_number)
     excluded = set(excluded_row_indexes or set())
+    normalized_ud_quantities = {
+        normalize_quantity_unit(unit): Decimal(str(amount))
+        for unit, amount in quantity_by_unit.items()
+    }
     all_family_rows = [
         row
         for row in sorted(workbook_snapshot.rows, key=lambda item: item.row_index)
         if _normalize_match_text(row.values.get(mapping["lc_sc_no"], "")) == expected_lc_sc
-        and row.row_index not in excluded
     ]
     already_recorded_result = _allocate_already_recorded_structured_rows(
         rows=all_family_rows,
@@ -371,6 +376,7 @@ def allocate_structured_ud_rows(
         row
         for row in all_family_rows
         if not row.values.get(mapping["ud_ip_shared"], "").strip()
+        and row.row_index not in excluded
     ]
     exact_value_groups = _select_structured_value_groups(
         workbook_rows=eligible_rows,
@@ -379,6 +385,17 @@ def allocate_structured_ud_rows(
         value_tolerance=value_tolerance,
     )
     if not exact_value_groups:
+        conflict_result = _allocate_conflicting_structured_rows(
+            rows=all_family_rows,
+            mapping=mapping,
+            target_value=target_value,
+            quantity_by_unit=normalized_ud_quantities,
+            excluded_row_indexes=excluded,
+            value_tolerance=value_tolerance,
+            excess_threshold=excess_threshold,
+        )
+        if conflict_result is not None:
+            return conflict_result
         return UDAllocationResult(
             required_quantity="",
             quantity_unit="",
@@ -389,10 +406,6 @@ def allocate_structured_ud_rows(
             discrepancy_code="ud_lc_value_match_unresolved",
         )
 
-    normalized_ud_quantities = {
-        normalize_quantity_unit(unit): Decimal(str(amount))
-        for unit, amount in quantity_by_unit.items()
-    }
     evaluated_candidates: list[tuple[UDAllocationCandidate, str | None]] = []
     for selected_rows in exact_value_groups:
         workbook_value_sum = sum(
@@ -474,6 +487,88 @@ def allocate_structured_ud_rows(
         final_decision="hard_block",
         final_decision_reason=primary_error or "ud_quantity_below_workbook",
         discrepancy_code=code,
+    )
+
+
+def _allocate_conflicting_structured_rows(
+    *,
+    rows: list,
+    mapping: dict[str, int],
+    target_value: Decimal,
+    quantity_by_unit: dict[str, Decimal],
+    excluded_row_indexes: set[int],
+    value_tolerance: Decimal,
+    excess_threshold: Decimal,
+) -> UDAllocationResult | None:
+    exact_value_groups = _select_structured_value_groups(
+        workbook_rows=rows,
+        mapping=mapping,
+        target_value=target_value,
+        value_tolerance=value_tolerance,
+    )
+    if not exact_value_groups:
+        return None
+
+    conflicting_candidates: list[UDAllocationCandidate] = []
+    for selected_rows in exact_value_groups:
+        claimed_rows = [
+            row
+            for row in selected_rows
+            if row.row_index in excluded_row_indexes or row.ud_ip_shared_value.strip()
+        ]
+        if not claimed_rows:
+            continue
+        quantity_totals = _quantity_totals_by_unit(selected_rows)
+        if not quantity_totals:
+            continue
+        quantity_error = _structured_quantity_error(
+            workbook_quantities=quantity_totals,
+            ud_quantities=quantity_by_unit,
+            excess_threshold=excess_threshold,
+        )
+        if quantity_error is not None:
+            continue
+        workbook_value_sum = sum(
+            (row.export_amount or Decimal("0") for row in selected_rows),
+            Decimal("0"),
+        )
+        conflicting_candidates.append(
+            _structured_candidate(
+                selected_rows=selected_rows,
+                workbook_value_sum=workbook_value_sum,
+                lc_sc_value=target_value,
+                workbook_quantities=quantity_totals,
+                ud_quantities=quantity_by_unit,
+                selected=False,
+                rejection_reason="target_row_conflict",
+            )
+        )
+
+    if not conflicting_candidates:
+        return None
+
+    sorted_candidates = sorted(conflicting_candidates, key=_candidate_sort_key)
+    best_candidate = sorted_candidates[0]
+    return UDAllocationResult(
+        required_quantity=_format_quantity_map(quantity_by_unit),
+        quantity_unit="MULTI",
+        candidate_count=len(sorted_candidates),
+        candidates=[
+            replace(
+                candidate,
+                selected=False,
+                rejection_reason=(
+                    "target_row_conflict"
+                    if candidate.candidate_id == best_candidate.candidate_id
+                    else "lower_priority_score"
+                ),
+            )
+            for candidate in sorted_candidates
+        ],
+        final_decision="hard_block",
+        final_decision_reason="target_row_conflict",
+        selected_candidate_id=best_candidate.candidate_id,
+        discrepancy_code="ud_target_row_conflict",
     )
 
 

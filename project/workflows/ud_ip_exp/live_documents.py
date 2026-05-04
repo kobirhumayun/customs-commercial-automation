@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from project.documents.providers import SavedDocumentAnalysisProvider
@@ -130,9 +130,9 @@ def prepare_live_ud_ip_exp_documents(
         final_directory=final_directory,
     )
     _cleanup_directory(staging_directory)
-    final_classified = classify_saved_ud_ip_exp_documents(
-        saved_documents=final_saved_documents,
-        analysis_provider=analysis_provider,
+    final_classified = _rebase_classified_documents(
+        staged_classified=staged_classified,
+        final_saved_documents=final_saved_documents,
     )
     decision_reasons = list(staged_result.decision_reasons) + list(final_classified.decision_reasons)
     return UDIPEXPLiveDocumentPreparationResult(
@@ -542,7 +542,7 @@ def _move_staged_documents_to_final_directory(
             staging_path.unlink(missing_ok=True)
         else:
             os.replace(staging_path, final_path)
-            file_sha256 = sha256_file(final_path)
+            file_sha256 = staged_document.file_sha256
             save_decision = "saved_new"
         moved_documents.append(
             SavedDocument(
@@ -562,6 +562,56 @@ def _move_staged_documents_to_final_directory(
         )
         seen_filenames.add(staged_document.normalized_filename)
     return moved_documents
+
+
+def _rebase_classified_documents(
+    *,
+    staged_classified: ClassifiedUDIPEXPDocumentSet,
+    final_saved_documents: list[SavedDocument],
+) -> ClassifiedUDIPEXPDocumentSet:
+    final_documents_by_key = {
+        _saved_document_rebase_key(document): document for document in final_saved_documents
+    }
+    saved_document_id_map: dict[str, str] = {}
+    rebased_saved_documents: list[SavedDocument] = []
+    for staged_document in staged_classified.saved_documents:
+        final_document = final_documents_by_key[_saved_document_rebase_key(staged_document)]
+        saved_document_id_map[staged_document.saved_document_id] = final_document.saved_document_id
+        rebased_saved_documents.append(
+            replace(
+                staged_document,
+                saved_document_id=final_document.saved_document_id,
+                destination_path=final_document.destination_path,
+                file_sha256=final_document.file_sha256,
+                save_decision=final_document.save_decision,
+            )
+        )
+
+    rebased_documents = [
+        replace(
+            document,
+            source_saved_document_id=saved_document_id_map.get(
+                document.source_saved_document_id or "",
+                document.source_saved_document_id,
+            ),
+        )
+        for document in staged_classified.documents
+    ]
+
+    return ClassifiedUDIPEXPDocumentSet(
+        saved_documents=rebased_saved_documents,
+        documents=rebased_documents,
+        decision_reasons=list(staged_classified.decision_reasons),
+        discrepancies=list(staged_classified.discrepancies),
+    )
+
+
+def _saved_document_rebase_key(saved_document: SavedDocument) -> tuple[int | None, str, str]:
+    return (
+        saved_document.attachment_index,
+        saved_document.normalized_filename,
+        saved_document.attachment_name,
+    )
 
 
 def _save_attachment_atomically(

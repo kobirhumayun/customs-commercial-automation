@@ -306,6 +306,111 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         self.assertEqual(result.classified_documents.saved_documents[1].document_type, "supporting_pdf")
         self.assertTrue(result.classified_documents.saved_documents[1].print_eligible)
 
+    def test_prepare_live_ud_ip_exp_documents_analyzes_processable_pdfs_once_for_many_attachment_mail(self) -> None:
+        attachments = [{"attachment_name": f"supporting-{index:02d}.pdf"} for index in range(12)]
+        attachments.insert(7, {"attachment_name": "UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf"})
+        mail = _mail(
+            "entry-live-many-pdfs",
+            "UD many pdfs",
+            attachments=attachments,
+        )
+
+        class Provider:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def analyze(self, *, saved_document):
+                self.calls.append(saved_document.normalized_filename)
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/113",
+                    extracted_document_date="2026-04-19",
+                    extracted_lc_sc_number="LC-0113",
+                    extracted_quantity="26548",
+                    extracted_quantity_unit="MTR",
+                )
+
+        provider = Provider()
+        content_by_key = {
+            (mail.entry_id, index): f"%PDF-1.4\nattachment {index}\n".encode("utf-8")
+            for index in range(len(attachments))
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-many-pdfs",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(content_by_key=content_by_key),
+                analysis_provider=provider,
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-0113",
+                    buyer_name="ANANTA CASUAL WEAR LTD",
+                    lc_sc_date="2026-04-15",
+                    folder_buyer_name="ANANTA CASUAL WEAR LTD",
+                ),
+            )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(len(result.document_save_result.saved_documents), len(attachments))
+        self.assertEqual(provider.calls, ["UD-LC-0113-ANANTA CASUAL WEAR LTD.pdf"])
+        self.assertEqual(len(result.classified_documents.documents), 1)
+
+    def test_prepare_live_ud_ip_exp_documents_reuses_saved_new_hash_after_move(self) -> None:
+        mail = _mail(
+            "entry-live-hash-reuse",
+            "UD hash reuse",
+            attachments=[{"attachment_name": "UD-LC-0043-ANANTA.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/003",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-0043",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch(
+                "project.workflows.ud_ip_exp.live_documents.sha256_file",
+                return_value="f" * 64,
+            ) as sha256_mock:
+                result = prepare_live_ud_ip_exp_documents(
+                    run_id="run-live-hash-reuse",
+                    mail=mail,
+                    workbook_snapshot=_full_snapshot(
+                        rows=[
+                            WorkbookRow(
+                                row_index=11,
+                                values={
+                                    1: "LC-0043",
+                                    2: "ANANTA GARMENTS LTD",
+                                    3: "2026-01-10",
+                                    4: "1000 YDS",
+                                    5: "",
+                                    6: "",
+                                    7: "",
+                                },
+                            )
+                        ]
+                    ),
+                    document_root=root,
+                    provider=SimulatedAttachmentContentProvider(
+                        content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud live\n"}
+                    ),
+                    analysis_provider=Provider(),
+                )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(sha256_mock.call_count, 1)
+        self.assertEqual(result.document_save_result.saved_documents[0].file_sha256, "f" * 64)
+
     def test_validate_run_snapshot_uses_live_ud_saved_document_analysis(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail(

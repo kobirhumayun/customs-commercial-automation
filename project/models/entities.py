@@ -189,6 +189,7 @@ class PrintBatch:
     document_path_hashes: list[str]
     completion_marker_id: str
     manual_verification_summary: dict[str, Any] = field(default_factory=dict)
+    annotation_documents: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

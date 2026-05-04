@@ -366,6 +366,92 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
                 mail_outcomes=mail_outcomes,
             )
 
+    def test_build_print_annotation_checklist_prefers_persisted_annotation_documents(self) -> None:
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[
+                WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"}),
+            ],
+        )
+        mail_outcome = MailOutcomeRecord(
+            run_id="run-1",
+            mail_id="mail-1",
+            workflow_id=WorkflowId.UD_IP_EXP,
+            snapshot_index=0,
+            processing_status=MailProcessingStatus.WRITTEN,
+            final_decision=None,
+            decision_reasons=[],
+            eligible_for_write=False,
+            eligible_for_print=True,
+            eligible_for_mail_move=True,
+            source_entry_id="entry-1",
+            subject_raw="UD subject",
+            sender_address="ud@example.com",
+            saved_documents=[
+                {
+                    "saved_document_id": "doc-1",
+                    "normalized_filename": "UD-ONE.pdf",
+                    "destination_path": "C:/docs/UD-ONE.pdf",
+                },
+                {
+                    "saved_document_id": "doc-2",
+                    "normalized_filename": "supporting.pdf",
+                    "destination_path": "C:/docs/supporting.pdf",
+                },
+            ],
+            staged_write_operations=[],
+            ud_selection=None,
+        )
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=["C:/docs/UD-ONE.pdf", "C:/docs/supporting.pdf"],
+                document_path_hashes=["hash-1", "hash-2"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+                annotation_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "document_path": "C:/docs/UD-ONE.pdf",
+                        "document_path_hash": "hash-1",
+                        "document_filename": "UD-ONE.pdf",
+                        "document_number": "BGMEA/DHK/UD/2026/1001",
+                        "row_indexes": [11],
+                        "checklist_required": True,
+                    },
+                    {
+                        "saved_document_id": "doc-2",
+                        "document_path": "C:/docs/supporting.pdf",
+                        "document_path_hash": "hash-2",
+                        "document_filename": "supporting.pdf",
+                        "document_number": "",
+                        "row_indexes": [],
+                        "checklist_required": False,
+                    },
+                ],
+            )
+        ]
+
+        result = build_print_annotation_checklist(
+            run_report=_build_run_report(),
+            mail_outcomes=[mail_outcome],
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 1)
+        self.assertEqual(result.payload["rows"][0]["document_filename"], "UD-ONE.pdf")
+        self.assertEqual(result.payload["rows"][0]["ud_or_amendment_no"], "BGMEA/DHK/UD/2026/1001")
+        self.assertEqual(result.payload["rows"][0]["row_indexes"], [11])
+
     def test_build_print_annotation_checklist_falls_back_to_staged_write_rows_for_single_document_runs(self) -> None:
         workbook_snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",

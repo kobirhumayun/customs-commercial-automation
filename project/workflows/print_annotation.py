@@ -62,7 +62,10 @@ def build_print_annotation_checklist(
             details={"run_id": run_report.run_id},
         )
 
-    planned_row_indexes = _planned_row_indexes(mail_outcomes)
+    planned_row_indexes = _planned_row_indexes(
+        mail_outcomes=mail_outcomes,
+        print_batches=print_batches,
+    )
     sl_no_column_index = _resolve_sl_no_column_index(workbook_snapshot)
     lc_sc_column_index = _resolve_required_column_index(
         workbook_snapshot=workbook_snapshot,
@@ -262,43 +265,11 @@ def _build_checklist_rows(
                 message="A planned print group did not resolve to its mail outcome record.",
                 details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
             )
-        saved_documents_by_path = {
-            str(document.get("destination_path", "")).strip(): document
-            for document in outcome.saved_documents
-            if str(document.get("destination_path", "")).strip()
-        }
-        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
-        for document_path, document_path_hash in zip(batch.document_paths, batch.document_path_hashes):
-            saved_document = saved_documents_by_path.get(document_path)
-            if not isinstance(saved_document, dict):
-                raise PrintAnnotationChecklistError(
-                    code="print_annotation_generation_failed",
-                    message="A planned print document did not resolve to persisted saved-document evidence.",
-                    details={
-                        "print_group_id": batch.print_group_id,
-                        "mail_id": batch.mail_id,
-                        "document_path": document_path,
-                    },
-                )
-            saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
-            selection_item = selection_by_saved_document_id.get(saved_document_id)
-            if selection_item is None and not _saved_document_requires_checklist_row(
-                saved_document=saved_document,
-                selection_mapping=selection_by_saved_document_id,
-            ):
+        for annotation_document in _annotation_documents_for_batch(batch=batch, outcome=outcome):
+            if not bool(annotation_document.get("checklist_required", False)):
                 continue
-            if selection_item is None:
-                raise PrintAnnotationChecklistError(
-                    code="print_annotation_generation_failed",
-                    message="A planned print document did not resolve to UD row-selection evidence for checklist generation.",
-                    details={
-                        "print_group_id": batch.print_group_id,
-                        "mail_id": batch.mail_id,
-                        "saved_document_id": saved_document_id,
-                        "document_path": document_path,
-                    },
-                )
-            row_indexes = _selected_row_indexes(selection_item.get("selection"))
+            saved_document_id = str(annotation_document.get("saved_document_id", "")).strip()
+            row_indexes = _annotation_row_indexes(annotation_document)
             if not row_indexes:
                 raise PrintAnnotationChecklistError(
                     code="print_annotation_generation_failed",
@@ -348,14 +319,14 @@ def _build_checklist_rows(
                     "print_group_id": batch.print_group_id,
                     "mail_id": batch.mail_id,
                     "workflow_id": run_report.workflow_id.value,
-                    "ud_or_amendment_no": _selection_document_number(selection_item, saved_document),
+                    "ud_or_amendment_no": _annotation_document_number(annotation_document),
                     "lc_sc": lc_sc_value,
                     "bangladesh_bank_ref": bangladesh_bank_ref,
                     "sl_no_values": sl_no_values,
                     "mail_subject": outcome.subject_raw,
-                    "document_filename": str(saved_document.get("normalized_filename", "")),
+                    "document_filename": str(annotation_document.get("document_filename", "")),
                     "saved_document_id": saved_document_id,
-                    "document_path_hash": document_path_hash,
+                    "document_path_hash": str(annotation_document.get("document_path_hash", "")),
                     "row_indexes": row_indexes,
                 }
             )
@@ -369,11 +340,20 @@ def _expected_checklist_document_hashes(
     mail_outcomes: list[MailOutcomeRecord],
 ) -> list[str]:
     if not mail_outcomes:
-        return [
-            document_hash
-            for batch in print_batches
-            for document_hash in batch.document_path_hashes
-        ]
+        expected_hashes: list[str] = []
+        for batch in print_batches:
+            annotation_documents = getattr(batch, "annotation_documents", [])
+            if isinstance(annotation_documents, list) and annotation_documents:
+                expected_hashes.extend(
+                    str(document.get("document_path_hash", "")).strip()
+                    for document in annotation_documents
+                    if isinstance(document, dict)
+                    and bool(document.get("checklist_required", False))
+                    and str(document.get("document_path_hash", "")).strip()
+                )
+            else:
+                expected_hashes.extend(batch.document_path_hashes)
+        return expected_hashes
     outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
     expected_hashes: list[str] = []
     for batch in print_batches:
@@ -381,23 +361,74 @@ def _expected_checklist_document_hashes(
         if outcome is None:
             expected_hashes.extend(batch.document_path_hashes)
             continue
-        saved_documents_by_path = {
-            str(document.get("destination_path", "")).strip(): document
-            for document in outcome.saved_documents
-            if str(document.get("destination_path", "")).strip()
-        }
-        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
-        for document_path, document_hash in zip(batch.document_paths, batch.document_path_hashes):
-            saved_document = saved_documents_by_path.get(document_path)
-            if not isinstance(saved_document, dict):
-                expected_hashes.append(document_hash)
-                continue
-            if _saved_document_requires_checklist_row(
-                saved_document=saved_document,
-                selection_mapping=selection_by_saved_document_id,
-            ):
-                expected_hashes.append(document_hash)
+        for annotation_document in _annotation_documents_for_batch(batch=batch, outcome=outcome):
+            if bool(annotation_document.get("checklist_required", False)):
+                document_hash = str(annotation_document.get("document_path_hash", "")).strip()
+                if document_hash:
+                    expected_hashes.append(document_hash)
     return expected_hashes
+
+
+def build_print_annotation_source_documents(
+    *,
+    outcome: MailOutcomeRecord,
+    document_paths: list[str],
+    document_path_hashes: list[str],
+) -> list[dict[str, Any]]:
+    saved_documents_by_path = {
+        str(document.get("destination_path", "")).strip(): document
+        for document in outcome.saved_documents
+        if str(document.get("destination_path", "")).strip()
+    }
+    selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
+    annotation_documents: list[dict[str, Any]] = []
+    for document_path, document_path_hash in zip(document_paths, document_path_hashes):
+        saved_document = saved_documents_by_path.get(document_path)
+        if not isinstance(saved_document, dict):
+            annotation_documents.append(
+                {
+                    "document_path": document_path,
+                    "document_path_hash": document_path_hash,
+                    "checklist_required": True,
+                    "row_indexes": [],
+                }
+            )
+            continue
+        saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+        selection_item = selection_by_saved_document_id.get(saved_document_id)
+        annotation_documents.append(
+            {
+                "saved_document_id": saved_document_id,
+                "document_path": document_path,
+                "document_path_hash": document_path_hash,
+                "document_filename": str(saved_document.get("normalized_filename", "")),
+                "document_type": str(saved_document.get("document_type", "")),
+                "document_number": _annotation_document_number_or_blank(selection_item, saved_document),
+                "row_indexes": _selected_row_indexes(selection_item.get("selection")) if selection_item is not None else [],
+                "checklist_required": (
+                    _saved_document_requires_checklist_row(
+                        saved_document=saved_document,
+                        selection_mapping=selection_by_saved_document_id,
+                    )
+                ),
+            }
+        )
+    return annotation_documents
+
+
+def _annotation_documents_for_batch(
+    *,
+    batch,
+    outcome: MailOutcomeRecord,
+) -> list[dict[str, Any]]:
+    annotation_documents = getattr(batch, "annotation_documents", [])
+    if isinstance(annotation_documents, list) and annotation_documents:
+        return [item for item in annotation_documents if isinstance(item, dict)]
+    return build_print_annotation_source_documents(
+        outcome=outcome,
+        document_paths=list(batch.document_paths),
+        document_path_hashes=list(batch.document_path_hashes),
+    )
 
 
 def _saved_document_requires_checklist_row(
@@ -423,6 +454,28 @@ def _selection_document_number(selection_item: dict[str, Any], saved_document: d
         message="A planned checklist row did not resolve to a UD/Amendment document number.",
         details={"saved_document_id": saved_document.get("saved_document_id")},
     )
+
+
+def _annotation_document_number(annotation_document: dict[str, Any]) -> str:
+    document_number = str(annotation_document.get("document_number", "")).strip()
+    if document_number:
+        return document_number
+    raise PrintAnnotationChecklistError(
+        code="print_annotation_generation_failed",
+        message="A planned checklist row did not resolve to a UD/Amendment document number.",
+        details={"saved_document_id": annotation_document.get("saved_document_id")},
+    )
+
+
+def _annotation_document_number_or_blank(
+    selection_item: dict[str, Any] | None,
+    saved_document: dict[str, Any],
+) -> str:
+    if selection_item is not None:
+        document_number = str(selection_item.get("document_number", "")).strip()
+        if document_number:
+            return document_number
+    return str(saved_document.get("extracted_document_number", "")).strip()
 
 
 def _selection_by_saved_document_id(outcome: MailOutcomeRecord) -> dict[str, dict[str, Any]]:
@@ -576,12 +629,28 @@ def _selected_row_indexes(selection: Any) -> list[int]:
     return rows
 
 
-def _planned_row_indexes(mail_outcomes: list[MailOutcomeRecord]) -> set[int]:
+def _annotation_row_indexes(annotation_document: dict[str, Any]) -> list[int]:
+    row_indexes: list[int] = []
+    for row_index in annotation_document.get("row_indexes", []):
+        if isinstance(row_index, int):
+            row_indexes.append(row_index)
+    return row_indexes
+
+
+def _planned_row_indexes(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+) -> set[int]:
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
     row_indexes: set[int] = set()
-    for outcome in mail_outcomes:
-        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
-        for selection_item in selection_by_saved_document_id.values():
-            row_indexes.update(_selected_row_indexes(selection_item.get("selection")))
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        if outcome is None:
+            continue
+        for annotation_document in _annotation_documents_for_batch(batch=batch, outcome=outcome):
+            if bool(annotation_document.get("checklist_required", False)):
+                row_indexes.update(_annotation_row_indexes(annotation_document))
     return row_indexes
 
 

@@ -18,6 +18,7 @@ from project.models import (
 )
 from project.utils.hashing import sha256_hex_text
 from project.utils.ids import build_print_completion_marker_id, build_print_group_id
+from project.workflows.print_annotation import build_print_annotation_source_documents
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,6 +77,14 @@ def plan_print_batches(
             printable_documents=printable_documents,
             verification_index=verification_index,
         )
+        annotation_documents = build_print_annotation_source_documents(
+            outcome=outcome,
+            document_paths=[
+                str(saved_document["destination_path"])
+                for saved_document in printable_documents
+            ],
+            document_path_hashes=document_path_hashes,
+        )
         print_batches.append(
             PrintBatch(
                 print_group_id=print_group_id,
@@ -94,6 +103,7 @@ def plan_print_batches(
                     document_path_hashes,
                 ),
                 manual_verification_summary=verification_summary,
+                annotation_documents=annotation_documents,
             )
         )
         print_group_order.append(print_group_id)
@@ -155,6 +165,7 @@ def build_print_plan_payload(print_batches: list[PrintBatch]) -> dict[str, Any]:
                 "document_path_hashes": list(batch.document_path_hashes),
                 "completion_marker_id": batch.completion_marker_id,
                 "manual_verification_summary": dict(batch.manual_verification_summary),
+                "annotation_documents": list(batch.annotation_documents),
                 "blank_page_after_group": True,
             }
             for batch in print_batches
@@ -420,4 +431,9 @@ def _parse_print_batch(payload: dict[str, Any]) -> PrintBatch:
         document_path_hashes=[str(value) for value in payload.get("document_path_hashes", [])],
         completion_marker_id=str(payload["completion_marker_id"]),
         manual_verification_summary=dict(payload.get("manual_verification_summary", {})),
+        annotation_documents=[
+            dict(item)
+            for item in payload.get("annotation_documents", [])
+            if isinstance(item, dict)
+        ],
     )

@@ -304,6 +304,62 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.final_decision, "selected")
         self.assertEqual(result.selected_candidate_id, "523-560")
 
+    def test_allocate_structured_ud_rows_handles_larger_family_with_exact_inner_combination(self) -> None:
+        rows = [
+            WorkbookRow(row_index=400 + index, values={1: "LC-9000", 2: f"{quantity} YDS", 3: "", 4: "", 5: "", 6: str(value)})
+            for index, (quantity, value) in enumerate(
+                [
+                    (800, 1500),
+                    (1200, 2200),
+                    (600, 900),
+                    (950, 1800),
+                    (1100, 2050),
+                    (700, 1200),
+                    (1300, 2400),
+                    (1000, 1750),
+                    (1500, 2600),
+                    (900, 1650),
+                    (1400, 2550),
+                    (650, 1100),
+                ],
+                start=1,
+            )
+        ]
+
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(rows=rows),
+            lc_sc_number="LC-9000",
+            lc_sc_value=Decimal("3500"),
+            quantity_by_unit={"YDS": Decimal("1950")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "407-412")
+
+    def test_allocate_structured_ud_rows_reports_row_conflict_when_only_viable_value_group_is_claimed(self) -> None:
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=_structured_snapshot(
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={1: "LC-0043", 2: "1000 YDS", 3: "BGMEA/DHK/UD/2026/5483/001", 4: "", 5: "", 6: "1000"},
+                    ),
+                    WorkbookRow(
+                        row_index=12,
+                        values={1: "LC-0043", 2: "500 YDS", 3: "", 4: "", 5: "", 6: "500"},
+                    ),
+                ]
+            ),
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("1500"),
+            quantity_by_unit={"YDS": Decimal("1500")},
+        )
+
+        self.assertEqual(result.final_decision, "hard_block")
+        self.assertEqual(result.final_decision_reason, "target_row_conflict")
+        self.assertEqual(result.discrepancy_code, "ud_target_row_conflict")
+        self.assertEqual(result.selected_candidate_id, "11-12")
+
     def test_allocate_structured_ud_rows_recognizes_already_recorded_ud(self) -> None:
         result = allocate_structured_ud_rows(
             workbook_snapshot=_structured_snapshot(
