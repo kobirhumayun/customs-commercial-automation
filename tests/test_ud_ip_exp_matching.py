@@ -233,6 +233,29 @@ class UDIPEXPMatchingTests(unittest.TestCase):
         self.assertEqual(result.selected_candidate_id, "11-12")
         self.assertEqual(result.candidates[0].score_keys["workbook_value_sum"], "17375.8")
 
+    def test_allocate_structured_ud_rows_reports_all_exact_value_candidates_in_priority_order(self) -> None:
+        snapshot = _structured_snapshot(
+            rows=[
+                WorkbookRow(row_index=11, values={1: "LC-0043", 2: "1000 YDS", 3: "", 4: "", 5: "", 6: "1000"}),
+                WorkbookRow(row_index=12, values={1: "LC-0043", 2: "500 YDS", 3: "", 4: "", 5: "", 6: "500"}),
+                WorkbookRow(row_index=13, values={1: "LC-0043", 2: "700 YDS", 3: "", 4: "", 5: "", 6: "700"}),
+                WorkbookRow(row_index=14, values={1: "LC-0043", 2: "800 YDS", 3: "", 4: "", 5: "", 6: "800"}),
+            ]
+        )
+
+        result = allocate_structured_ud_rows(
+            workbook_snapshot=snapshot,
+            lc_sc_number="LC-0043",
+            lc_sc_value=Decimal("1500"),
+            quantity_by_unit={"YDS": Decimal("1500")},
+        )
+
+        self.assertEqual(result.final_decision, "selected")
+        self.assertEqual(result.selected_candidate_id, "11-12")
+        self.assertEqual(result.candidate_count, 2)
+        self.assertEqual([candidate.candidate_id for candidate in result.candidates], ["11-12", "13-14"])
+        self.assertEqual([candidate.selected for candidate in result.candidates], [True, False])
+
     def test_allocate_structured_ud_rows_uses_number_format_for_numeric_only_workbook_quantity(self) -> None:
         snapshot = _structured_snapshot(
             rows=[

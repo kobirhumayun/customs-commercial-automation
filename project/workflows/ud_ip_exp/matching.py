@@ -677,12 +677,84 @@ def _select_structured_value_groups(
             continue
         candidate_rows.append(candidate_row)
 
+    return _search_structured_value_groups(
+        candidate_rows=candidate_rows,
+        target_value=target_value,
+        value_tolerance=value_tolerance,
+    )
+
+
+def _search_structured_value_groups(
+    *,
+    candidate_rows: list[UDCandidateRow],
+    target_value: Decimal,
+    value_tolerance: Decimal,
+) -> list[list[UDCandidateRow]]:
+    if not candidate_rows:
+        return []
+
+    tolerance_minor_units = _decimal_to_minor_units(value_tolerance)
+    target_minor_units = _decimal_to_minor_units(target_value)
+    amounts = [
+        _decimal_to_minor_units(row.export_amount or Decimal("0"))
+        for row in candidate_rows
+    ]
+    suffix_amounts = [0] * (len(amounts) + 1)
+    for index in range(len(amounts) - 1, -1, -1):
+        suffix_amounts[index] = suffix_amounts[index + 1] + amounts[index]
+
+    memo: dict[tuple[int, int], bool] = {}
+
+    def _can_match(index: int, remaining_minor_units: int) -> bool:
+        if abs(remaining_minor_units) <= tolerance_minor_units:
+            return True
+        if index >= len(candidate_rows):
+            return False
+        if remaining_minor_units < -tolerance_minor_units:
+            return False
+        if remaining_minor_units > suffix_amounts[index] + tolerance_minor_units:
+            return False
+        key = (index, remaining_minor_units)
+        cached = memo.get(key)
+        if cached is not None:
+            return cached
+        include_matches = _can_match(index + 1, remaining_minor_units - amounts[index])
+        if include_matches:
+            memo[key] = True
+            return True
+        exclude_matches = _can_match(index + 1, remaining_minor_units)
+        memo[key] = exclude_matches
+        return exclude_matches
+
     matching_groups: list[list[UDCandidateRow]] = []
-    for size in range(1, len(candidate_rows) + 1):
-        for row_group in combinations(candidate_rows, size):
-            value_sum = sum((row.export_amount or Decimal("0") for row in row_group), Decimal("0"))
-            if abs(value_sum - target_value) <= value_tolerance:
-                matching_groups.append(list(row_group))
+
+    def _collect(
+        index: int,
+        remaining_minor_units: int,
+        selected_rows: list[UDCandidateRow],
+    ) -> None:
+        if abs(remaining_minor_units) <= tolerance_minor_units:
+            matching_groups.append(list(selected_rows))
+            return
+        if index >= len(candidate_rows):
+            return
+        if remaining_minor_units < -tolerance_minor_units:
+            return
+        if remaining_minor_units > suffix_amounts[index] + tolerance_minor_units:
+            return
+        if memo.get((index, remaining_minor_units)) is False:
+            return
+
+        next_remaining = remaining_minor_units - amounts[index]
+        if _can_match(index + 1, next_remaining):
+            selected_rows.append(candidate_rows[index])
+            _collect(index + 1, next_remaining, selected_rows)
+            selected_rows.pop()
+        if _can_match(index + 1, remaining_minor_units):
+            _collect(index + 1, remaining_minor_units, selected_rows)
+
+    if _can_match(0, target_minor_units):
+        _collect(0, target_minor_units, [])
     return matching_groups
 
 
@@ -967,3 +1039,7 @@ def _format_decimal(value: Decimal) -> str:
     if "." in normalized:
         normalized = normalized.rstrip("0").rstrip(".")
     return normalized or "0"
+
+
+def _decimal_to_minor_units(value: Decimal) -> int:
+    return int((value * 100).quantize(Decimal("1")))
