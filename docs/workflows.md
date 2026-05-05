@@ -631,6 +631,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - same-mail duplicate UD/AM handling must first dedupe by BGMEA UD/AM number and then by duplicate filename evidence; later duplicates are ignored only when their extracted evidence agrees exactly, otherwise the mail hard-blocks
 - for multiple UD/AM documents in the same mail, deterministic processing order is document date first, BGMEA UD/AM number second, and original attachment order third
 - when multiple same-family UD payloads are available, each UD payload is validated and allocated independently in deterministic order; later UD payloads in the same mail may use only workbook rows not already claimed earlier in that mail
+- across different mails in the same run, later `ud_ip_exp` validation must evaluate against the in-memory workbook snapshot advanced by earlier successful mails
 - this deterministic per-document processing does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
 - live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
@@ -671,6 +672,11 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - if no exact workbook value group exists for the extracted LC/SC value, hard-block with `ud_lc_value_match_unresolved`
 - structured UD writes stage the UD/AM number, UD/AM date, and current workflow receive date only if value and quantity rules are satisfied and every target cell for those fields is blank
 - `UD & IP Date` is written from the UD/AM document date as `DD/MM/YYYY`; `UD Recv. Date` is written as the current workflow date in the same format
+- cross-mail duplicate behavior is row-scoped, not global-document-scoped:
+  - if a later mail resolves to the same selected rows with the same UD/AM number and matching UD date evidence, it becomes `duplicate_only_noop` with warning code `ud_duplicate_document_same_run`
+  - the same UD/AM number may still stage independently in a different LC/SC family when it resolves to different workbook rows
+  - a different UD/AM number in the same LC/SC family may stage only if later validation finds a different remaining value-matched blank row group
+  - if a later different-number UD/AM mail reuses rows already claimed by an earlier mail, it hard-blocks with `ud_target_row_conflict`
 
 #### UD value-matched candidate scoring and tie-break order (normative)
 When more than one exact workbook value group can satisfy UD row identification, the workflow must score each candidate group, then apply this deterministic tie-break sequence:

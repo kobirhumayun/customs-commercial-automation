@@ -318,6 +318,7 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number, then original attachment order.
 - Same-mail duplicate UD/AM evidence is resolved first by BGMEA UD/AM number and then by duplicate filename evidence. Later duplicates are ignored only when their required extracted evidence matches exactly; any disagreement in date, LC/SC value, or quantity evidence is a hard block.
 - Duplicate attachment filename evidence is business-relevant for `ud_ip_exp`; same-mail repeated filenames must participate in duplicate/conflict checks even when the BGMEA number is unavailable from filename alone.
+- Across different mails in the same run, UD evaluation uses the in-memory workbook snapshot after earlier successful staged writes have been applied.
 - Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`. Candidate row groups are identified only by exact workbook `Amount` matches to the extracted LC value within the configured tolerance.
 - If no exact value-matched candidate group exists, the result is `ud_lc_value_match_unresolved`.
 - Once a value-selected row group is found, quantity validation is limited to that row group only; the workflow must not try unrelated row combinations to repair a quantity mismatch.
@@ -326,6 +327,11 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - Workbook quantities in the selected group are summed by unit and compared against structured UD supplier quantities for `PIONEER DENIM LIMITED` / `PIONEER DENIM LTD`.
 - Quantity validation passes only when UD quantity equals workbook quantity or UD excess is at least 50 yards/meters. UD quantity below workbook quantity or excess above zero but below 50 is a hard block.
 - Selected rows receive `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; all target cells must be blank before write.
+- Cross-mail UD duplicate/conflict rules are row-scoped:
+  - A later mail with the same UD/AM number is a duplicate-only/no-write success only when it resolves to the same selected rows and those rows already carry the same UD/AM number plus matching `UD & IP Date`.
+  - The same UD/AM number may still be staged independently in a different ERP LC/SC family when it resolves to different workbook rows; phase 1 does not enforce global UD-number uniqueness across families.
+  - A later mail with a different UD/AM number in the same LC/SC family may stage only if a different remaining exact value-matched blank row group still exists.
+  - Reuse of already-claimed rows by a later different-number UD/AM mail is a hard block with `ud_target_row_conflict`.
 
 ### Tie-break key order (normative)
 Apply keys in this exact order:
