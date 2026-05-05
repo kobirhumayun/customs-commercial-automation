@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from project.reporting.schemas import REPORT_SCHEMA_VERSION
 from project.storage import RunArtifactPaths
 from project.storage.artifacts import atomic_write_text
 from project.utils.json import pretty_json_dumps
-from project.utils.time import utc_timestamp
+from project.utils.time import utc_now, utc_timestamp, validate_timezone
 from project.workbook import HeaderMappingSpec, WorkbookSnapshot, resolve_header_mapping
 
 PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID = "print_annotation_checklist"
@@ -109,13 +110,23 @@ def build_print_annotation_checklist(
         lc_sc_values_by_row=lc_sc_values_by_row,
         bangladesh_bank_ref_values_by_row=bangladesh_bank_ref_values_by_row,
     )
+    generated_at = utc_now()
     payload = {
         "schema_id": PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID,
         "schema_version": REPORT_SCHEMA_VERSION,
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "run_id": run_report.run_id,
         "workflow_id": run_report.workflow_id.value,
-        "generated_at_utc": utc_timestamp(),
+        "generated_at_utc": utc_timestamp(generated_at),
+        "generated_at_local": _local_timestamp(
+            generated_at=generated_at,
+            state_timezone=run_report.state_timezone,
+        ),
+        "generated_at_local_display": _local_display_timestamp(
+            generated_at=generated_at,
+            state_timezone=run_report.state_timezone,
+        ),
+        "generated_at_timezone": run_report.state_timezone,
         "print_group_order": [batch.print_group_id for batch in print_batches],
         "checklist_row_count": len(rows),
         "rows": rows,
@@ -792,6 +803,15 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
     rows = payload.get("rows", [])
     if not isinstance(rows, list):
         rows = []
+    generated_value = str(
+        payload.get("generated_at_local_display")
+        or payload.get("generated_at_local")
+        or payload.get("generated_at_utc", "")
+    )
+    generated_timezone = str(payload.get("generated_at_timezone", "")).strip()
+    generated_label = generated_value
+    if generated_timezone and generated_timezone not in generated_value:
+        generated_label = f"{generated_value} ({generated_timezone})"
     table_body = "\n".join(
         "        <tr>"
         f"<td>{escape(str(row.get('print_sequence', '')))}</td>"
@@ -830,7 +850,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "<body>\n"
         "  <main>\n"
         "    <h1>Print Annotation Checklist</h1>\n"
-        f'    <p class="meta">Run: {escape(str(payload.get("run_id", "")))} | Workflow: {escape(str(payload.get("workflow_id", "")))} | Generated: {escape(str(payload.get("generated_at_utc", "")))}</p>\n'
+        f'    <p class="meta">Run: {escape(str(payload.get("run_id", "")))} | Workflow: {escape(str(payload.get("workflow_id", "")))} | Generated: {escape(generated_label)}</p>\n'
         "    <table>\n"
         "      <thead>\n"
         "        <tr>\n"
@@ -851,3 +871,13 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "</body>\n"
         "</html>\n"
     )
+
+
+def _local_timestamp(*, generated_at: datetime, state_timezone: str) -> str:
+    timezone = validate_timezone(state_timezone)
+    return generated_at.astimezone(timezone).replace(microsecond=0).isoformat()
+
+
+def _local_display_timestamp(*, generated_at: datetime, state_timezone: str) -> str:
+    timezone = validate_timezone(state_timezone)
+    return generated_at.astimezone(timezone).strftime("%d/%m/%Y %I:%M:%S %p")

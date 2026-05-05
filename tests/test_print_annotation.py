@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from project.models import (
     MailMovePhaseStatus,
@@ -25,6 +27,30 @@ from project.workflows.print_annotation import (
 
 
 class PrintAnnotationChecklistTests(unittest.TestCase):
+    def test_build_print_annotation_checklist_uses_run_state_timezone_for_generated_timestamp(self) -> None:
+        fixed_now = datetime(2026, 5, 5, 10, 15, 0, tzinfo=UTC)
+        with patch("project.workflows.print_annotation.utc_now", return_value=fixed_now):
+            result = build_print_annotation_checklist(
+                run_report=_build_run_report(),
+                mail_outcomes=[_build_single_document_mail_outcome()],
+                print_batches=[_build_single_document_batch()],
+                workbook_snapshot=WorkbookSnapshot(
+                    sheet_name="Sheet1",
+                    headers=[
+                        WorkbookHeader(column_index=1, text="SL.No."),
+                        WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                        WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+                    ],
+                    rows=[WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"})],
+                ),
+            )
+
+        self.assertEqual(result.payload["generated_at_utc"], "2026-05-05T10:15:00Z")
+        self.assertEqual(result.payload["generated_at_local"], "2026-05-05T16:15:00+06:00")
+        self.assertEqual(result.payload["generated_at_local_display"], "05/05/2026 04:15:00 PM")
+        self.assertEqual(result.payload["generated_at_timezone"], "Asia/Dhaka")
+        self.assertIn("Generated: 05/05/2026 04:15:00 PM (Asia/Dhaka)", result.html)
+
     def test_build_print_annotation_checklist_uses_planned_print_order_and_resolves_sl_no_values(self) -> None:
         run_report = _build_run_report()
         mail_outcomes = [
