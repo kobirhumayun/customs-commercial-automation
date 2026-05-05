@@ -38,7 +38,17 @@
 - A later two-mail live proof run, `run-20260423T094320Z-ud_ip_exp-9474d4c6`, completed with `pass = 2`, `hard_block = 0`, six committed workbook writes, two moved mails, and zero discrepancies.
 - The later live proof covered the structured UD Amendment zero-`Increased/Decreased` rule for row `402`, where the amendment row's `Value` column was used, and a Base UD MTR quantity case for row `475`, where workbook quantity number formats remained authoritative across the batch.
 - `ud_ip_exp` structured UD writes populate `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; both date columns use `DD/MM/YYYY`.
-- IP/EXP completion rules remain intentionally unresolved and continue to hard-block until durable business rules are finalized.
+- `ud_ip_exp` now ships a conservative phase-1 non-UD path for `EXP-only` and `EXP+IP` mails:
+  - at most one deterministic EXP payload and at most one deterministic IP payload per mail
+  - all IP/EXP documents in one mail must normalize to one shared date
+  - workbook targets are every existing row in the verified ERP LC/SC family
+  - exact already-recorded family-wide matches are duplicate-only/no-write successes
+  - non-blank conflicting family-wide shared/date values hard-block
+- recent regression coverage also locks the row-scoped cross-mail UD matrix:
+  - same UD number on the same selected rows becomes duplicate-only/no-write
+  - the same UD number may still stage in a different LC/SC family
+  - different UD numbers in the same family may both stage only when later mails find different remaining blank value-matched row groups
+  - later reuse of already-claimed rows hard-blocks with `ud_target_row_conflict`
 
 ### Printing behavior
 - phase 1 print completion means deterministic silent submission order completed

@@ -60,7 +60,7 @@ The architecture must optimize for:
 9. **Matching and reconciliation engine**
    - ERP-to-email matching
    - workbook candidate-row filtering
-   - value/quantity combination logic
+   - value-first exact row-group selection with quantity validation inside the selected group
    - first-match or append/skip strategies depending on workflow
 10. **Excel adapter**
     - workbook open/lock assumptions

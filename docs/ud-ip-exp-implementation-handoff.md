@@ -1,7 +1,9 @@
 # UD/IP/EXP Implementation Handoff
 
+> Historical handoff only. This file is retained for implementation history and older artifact interpretation; it is not the normative source of truth for current `ud_ip_exp` behavior.
+
 This document is retained as historical implementation handoff and status context for `ud_ip_exp`.
-Current normative behavior lives in `docs/architecture.md`, `docs/workflows.md`, `docs/domain-rules.md`, and `docs/discrepancy-codes.md`.
+Current normative behavior lives in `docs/architecture.md`, `docs/workflows.md`, `docs/domain-rules.md`, `docs/discrepancy-codes.md`, and `docs/report-schemas.md`.
 
 Before implementation, read these files in order:
 1. `AGENTS.md`
@@ -272,7 +274,7 @@ Current implementation:
 
 The initial implementation includes a read-only fixture path for deterministic UD validation via `validate-run ud_ip_exp --ud-payload-json <path>`.
 
-This manifest is only for tests, fixture-backed dry runs, and development while live UD/IP/EXP PDF identification and extraction rules remain open. It must not be treated as a replacement for the unresolved live extraction rules.
+This manifest is only for tests, fixture-backed dry runs, and development. It must not be treated as a replacement for the released live UD/IP/EXP extraction and validation rules documented in the current normative specs.
 
 Manifest shape:
 - Top-level JSON value is a list of records.

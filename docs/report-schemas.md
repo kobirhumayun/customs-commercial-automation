@@ -81,7 +81,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `severity` must match the catalog entry for that code.
 - If `rule_id` is null, `details` must include `non_rule_source` describing the emitting subsystem.
 
-### UD/IP/EXP historical unresolved IP/EXP policy details
+### UD/IP/EXP historical legacy discrepancy details
 When `code` is `ip_exp_policy_unresolved`, `details` must include:
 - `run_id`
 - `mail_id`
@@ -105,7 +105,7 @@ Each `documents[]` item should include:
 - `quantity_by_unit`
 - `source_saved_document_id`
 
-This code is retained for backward compatibility with older run artifacts. New phase-1 IP/EXP staging should emit the current mail-shape, required-field, family-row, or target-row conflict discrepancy codes instead.
+This code is retained only for backward compatibility with older run artifacts created before the conservative phase-1 IP/EXP path was documented and implemented. New phase-1 IP/EXP staging should emit the current mail-shape, required-field, family-row, duplicate-only, or target-row conflict discrepancy codes instead.
 
 ### UD/IP/EXP selection object
 When `ud_selection` is present for `ud_ip_exp`, it must include:
