@@ -1338,6 +1338,216 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
             ],
         )
 
+    def test_validate_run_snapshot_marks_later_same_family_live_ud_mail_as_same_run_duplicate_noop(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        first_mail = _mail(
+            "entry-live-007d-1",
+            "UD same family original",
+            attachments=[{"attachment_name": "UD-LC-0043-ORIGINAL.pdf"}],
+        )
+        second_mail = _mail(
+            "entry-live-007d-2",
+            "UD same family duplicate",
+            attachments=[{"attachment_name": "UD-LC-0043-DUPLICATE.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-ORIGINAL.pdf":
+                    return _saved_ud_analysis(
+                        "BGMEA/DHK/UD/2026/5483/003",
+                        document_date="2026-04-01",
+                    )
+                return _saved_ud_analysis(
+                    "BGMEA/DHK/UD/2026/5483/003",
+                    document_date="2026-04-01",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [first_mail, second_mail]),
+                rule_pack=rule_pack,
+                erp_row_provider=_erp_provider(),
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        )
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (first_mail.entry_id, 0): b"%PDF-1.4\nud original\n",
+                        (second_mail.entry_id, 0): b"%PDF-1.4\nud duplicate\n",
+                    }
+                ),
+                document_root=Path(temp_dir),
+                document_analysis_provider=Provider(),
+            )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 1, "warning": 1, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 3)
+        self.assertEqual(validation_result.mail_outcomes[0].final_decision, FinalDecision.PASS)
+        self.assertEqual(validation_result.mail_outcomes[1].final_decision, FinalDecision.WARNING)
+        self.assertEqual(validation_result.mail_outcomes[0].ud_selection["final_decision"], "selected")
+        self.assertEqual(validation_result.mail_outcomes[1].ud_selection["final_decision"], "already_recorded")
+        self.assertEqual(validation_result.mail_outcomes[0].write_disposition, "new_writes_staged")
+        self.assertEqual(validation_result.mail_outcomes[1].write_disposition, "duplicate_only_noop")
+        self.assertFalse(validation_result.mail_outcomes[1].eligible_for_write)
+        self.assertFalse(validation_result.mail_outcomes[1].eligible_for_print)
+        self.assertTrue(validation_result.mail_outcomes[1].eligible_for_mail_move)
+        self.assertEqual(
+            [discrepancy["code"] for discrepancy in validation_result.mail_outcomes[1].discrepancies],
+            ["ud_duplicate_document_same_run"],
+        )
+        self.assertIn(
+            "Skipped UD shared-column write for BGMEA/DHK/UD/2026/5483/003 because the same document was already staged earlier in this run.",
+            validation_result.mail_outcomes[1].decision_reasons,
+        )
+        self.assertIn(
+            "Ignored duplicate UD/AM document BGMEA/DHK/UD/2026/5483/003 because the same document was already staged earlier in this run.",
+            validation_result.mail_outcomes[1].decision_reasons,
+        )
+
+    def test_validate_run_snapshot_allows_same_live_ud_number_across_different_families(self) -> None:
+        rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
+        first_mail = _mail_with_body_file(
+            "entry-live-007e-1",
+            file_number="P/26/0042",
+            attachment_name="UD-LC-0043-SHARED.pdf",
+        )
+        second_mail = _mail_with_body_file(
+            "entry-live-007e-2",
+            file_number="P/26/0099",
+            attachment_name="UD-LC-0099-SHARED.pdf",
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                if saved_document.normalized_filename == "UD-LC-0043-SHARED.pdf":
+                    return _saved_ud_analysis(
+                        "BGMEA/DHK/UD/2026/5483/003",
+                        document_date="2026-04-01",
+                        lc_sc_number="LC-0043",
+                        lc_sc_date="2026-01-10",
+                    )
+                return _saved_ud_analysis(
+                    "BGMEA/DHK/UD/2026/5483/003",
+                    document_date="2026-04-02",
+                    lc_sc_number="LC-0099",
+                    lc_sc_date="2026-02-20",
+                )
+
+        class MultiFamilyERPProvider:
+            def lookup_rows(self, *, file_numbers):
+                rows = {
+                    "P/26/0042": ERPRegisterRow(
+                        file_number="P/26/0042",
+                        lc_sc_number="LC-0043",
+                        buyer_name="ANANTA GARMENTS LTD",
+                        lc_sc_date="2026-01-10",
+                        source_row_index=1,
+                        lc_qty="1000",
+                        lc_unit="YDS",
+                    ),
+                    "P/26/0099": ERPRegisterRow(
+                        file_number="P/26/0099",
+                        lc_sc_number="LC-0099",
+                        buyer_name="BETA GARMENTS LTD",
+                        lc_sc_date="2026-02-20",
+                        source_row_index=2,
+                        lc_qty="1000",
+                        lc_unit="YDS",
+                    ),
+                }
+                return {
+                    file_number: [rows[file_number]] if file_number in rows else []
+                    for file_number in file_numbers
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            validation_result = validate_run_snapshot(
+                descriptor=get_workflow_descriptor(WorkflowId.UD_IP_EXP),
+                run_report=_run_report(rule_pack, [first_mail, second_mail]),
+                rule_pack=rule_pack,
+                erp_row_provider=MultiFamilyERPProvider(),
+                workbook_snapshot=_full_snapshot(
+                    rows=[
+                        WorkbookRow(
+                            row_index=11,
+                            values={
+                                1: "LC-0043",
+                                2: "ANANTA GARMENTS LTD",
+                                3: "2026-01-10",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                        WorkbookRow(
+                            row_index=21,
+                            values={
+                                1: "LC-0099",
+                                2: "BETA GARMENTS LTD",
+                                3: "2026-02-20",
+                                4: "1000 YDS",
+                                5: "",
+                                6: "",
+                                7: "",
+                            },
+                        ),
+                    ]
+                ),
+                attachment_content_provider=SimulatedAttachmentContentProvider(
+                    content_by_key={
+                        (first_mail.entry_id, 0): b"%PDF-1.4\nud first family\n",
+                        (second_mail.entry_id, 0): b"%PDF-1.4\nud second family\n",
+                    }
+                ),
+                document_root=Path(temp_dir),
+                document_analysis_provider=Provider(),
+            )
+
+        self.assertEqual(validation_result.run_report.summary, {"pass": 2, "warning": 0, "hard_block": 0})
+        self.assertEqual(len(validation_result.staged_write_plan), 6)
+        self.assertEqual(
+            [outcome.final_decision for outcome in validation_result.mail_outcomes],
+            [FinalDecision.PASS, FinalDecision.PASS],
+        )
+        self.assertTrue(all(outcome.eligible_for_write for outcome in validation_result.mail_outcomes))
+        self.assertTrue(all(outcome.eligible_for_print for outcome in validation_result.mail_outcomes))
+        self.assertTrue(all(outcome.eligible_for_mail_move for outcome in validation_result.mail_outcomes))
+        self.assertEqual(
+            [outcome.write_disposition for outcome in validation_result.mail_outcomes],
+            ["new_writes_staged", "new_writes_staged"],
+        )
+        self.assertEqual(
+            [outcome.ud_selection["selected_candidate_id"] for outcome in validation_result.mail_outcomes],
+            ["11", "21"],
+        )
+        self.assertEqual(
+            [
+                (operation.row_index, operation.expected_post_write_value)
+                for operation in validation_result.staged_write_plan
+                if operation.column_key == "ud_ip_shared"
+            ],
+            [
+                (11, "BGMEA/DHK/UD/2026/5483/003"),
+                (21, "BGMEA/DHK/UD/2026/5483/003"),
+            ],
+        )
+
     def test_validate_run_snapshot_hard_blocks_mixed_quality_ud_documents_with_stable_evidence(self) -> None:
         rule_pack = load_rule_pack(WorkflowId.UD_IP_EXP)
         mail = _mail(
