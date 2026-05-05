@@ -143,13 +143,13 @@ For normal live use, the launcher now uses a stable document root such as `D:\cu
 If a run stops, use this read-only explanation command first. It shows the primary cause, related secondary causes, affected mail subjects, workbook row/column details, and suggested next steps:
 
 ```powershell
-uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
 ```
 
 For `ud_ip_exp`, use the same diagnostic command with the workflow id changed:
 
 ```powershell
-uv run python -m project explain-run-failure ud_ip_exp --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+uv run python -m project explain-run-failure ud_ip_exp --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
 ```
 
 ## Final E2E Test Commands
@@ -157,7 +157,7 @@ Use this sequence for the final end-to-end release check on a fresh live mail:
 
 ```powershell
 $WORKFLOW = "export_lc_sc" # or "ud_ip_exp"
-$CONFIG = "D:\customs-automation\export_lc_sc.toml"
+$CONFIG = "D:\customs-automation\workflow.toml"
 $DOCROOT = "D:\customs-automation\documents-live-click"
 ```
 
@@ -193,13 +193,13 @@ If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrob
 Use the operator acknowledgment command to record how many leading PDFs in the planned print group physically printed:
 
 ```powershell
-uv run python -m project acknowledge-partial-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --printed-count <N>
+uv run python -m project acknowledge-partial-print export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>" --printed-count <N>
 ```
 
 Then rerun:
 
 ```powershell
-uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --live-print
+uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>" --live-print
 ```
 
 If all planned PDFs physically printed during timeout/retry attempts, acknowledge the full count. The marker will be finalized as `completed`, and one final `execute-print` pass will close the print phase without sending any additional Acrobat submission commands.
@@ -233,13 +233,13 @@ The live ERP page currently behaves like a form-driven download flow rather than
 Example:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed
 ```
 
 Typical selector-driven run:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed `
   --fill "#fromDate=2026-03-01" `
   --fill "#toDate=2026-03-31" `
   --submit-selector "#btnShow" `

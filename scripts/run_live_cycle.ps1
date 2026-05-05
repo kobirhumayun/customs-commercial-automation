@@ -1,6 +1,6 @@
 param(
     [string]$Workflow = "export_lc_sc",
-    [string]$Config = "D:\customs-automation\export_lc_sc.toml",
+    [string]$Config = "D:\customs-automation\workflow.toml",
     [string]$DocumentRootBase = "D:\customs-automation\documents-live-click",
     [string]$LauncherLogRoot = "D:\customs-automation\reports\launcher_logs",
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),

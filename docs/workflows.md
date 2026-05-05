@@ -42,7 +42,7 @@ The command returns JSON records containing `display_name`, `folder_path`, `entr
 If a run stops with `hard_blocked_no_write`, `uncertain_not_committed`, `hard_blocked`, or another attention-required phase status, operators should first run the read-only explanation command:
 
 ```powershell
-uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
 ```
 
 The command summarizes primary causes separately from secondary effects by reading persisted run artifacts such as `discrepancies.jsonl`, `mail_outcomes.jsonl`, `target_probes.jsonl`, and `staged_write_plan.json`. It must not mutate Outlook, ERP, workbook, print, mail-move, or run artifacts. It is the preferred operator-facing first step before deciding whether the correct action is to fix input mails, clean a partial workbook row, use recovery, or simply rerun after correcting the environment.
@@ -51,7 +51,7 @@ The command summarizes primary causes separately from secondary effects by readi
 When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed
 ```
 
 The command accepts repeated `--fill SELECTOR=VALUE` inputs plus optional selectors for submit, post-submit wait state, download menu, and download format click.
@@ -62,7 +62,7 @@ For stable local reuse, the same fill values may be stored in config under:
 Typical example:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed `
   --fill "#fromDate=2026-03-01" `
   --fill "#toDate=2026-03-31" `
   --submit-selector "#btnShow" `
