@@ -10,7 +10,7 @@ For the shipped phase-1 operator summary, see `docs/release-notes.md`.
 - `docs/architecture.md` — system architecture and module boundaries.
 - `docs/workflows.md` — workflow-specific contracts for each CLI tool.
 - `docs/domain-rules.md` — durable business rules and invariants.
-- `docs/ud-ip-exp-implementation-handoff.md` — implementation handoff for the next `ud_ip_exp` workflow.
+- `docs/ud-ip-exp-implementation-handoff.md` — historical implementation handoff and status notes for `ud_ip_exp`.
 
 ## Phase 1 architectural direction
 - Monolithic Python codebase with clear internal modules.

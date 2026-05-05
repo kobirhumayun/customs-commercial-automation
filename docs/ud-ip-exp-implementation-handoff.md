@@ -1,6 +1,7 @@
 # UD/IP/EXP Implementation Handoff
 
-This handoff is the starting brief for implementing the `ud_ip_exp` workflow after the released `export_lc_sc` workflow. It is intended for a fresh Codex session or engineer who has no access to the prior conversation.
+This document is retained as historical implementation handoff and status context for `ud_ip_exp`.
+Current normative behavior lives in `docs/architecture.md`, `docs/workflows.md`, `docs/domain-rules.md`, and `docs/discrepancy-codes.md`.
 
 Before implementation, read these files in order:
 1. `AGENTS.md`
@@ -17,7 +18,7 @@ Before implementation, read these files in order:
 - Registry entry: present in `project/workflows/registry.py`
 - Rule pack: implemented at `project/rules/workflows/ud_ip_exp/__init__.py`
 - Rule pack id: `ud_ip_exp.default`
-- Rule pack version: `1.0.0`
+- Rule pack version: `1.2.0`
 - Implementation status:
   - payload models, parsing helpers, workbook header mapping, deterministic UD allocation, staging, reporting, and rule-pack wiring are implemented
   - CLI validation accepts deterministic fixture payloads through `validate-run ud_ip_exp --ud-payload-json <path>`
@@ -29,7 +30,7 @@ Before implementation, read these files in order:
   - explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is implemented as a sanity guard against the ERP LC/SC selected from email-body file numbers; mismatches hard-block with discrepancy code `ud_filename_lc_suffix_mismatch`, and filename suffixes are never used for lookup or row selection
   - live UD document preparation now hard-blocks with attachment-level evidence when multiple live-derived documents disagree on resolved LC/SC family, or when multiple live-derived UD documents disagree on required UD evidence such as document date or quantity
   - low-confidence OCR-derived UD/IP/EXP document numbers are not promoted into deterministic UD/IP/EXP document classification; document-number confidence thresholds remain the documented UD/IP/EXP OCR gates
-  - when multiple same-family UD payloads exist, deterministic reporting/allocation context selects the most complete UD payload based on required extraction-field completeness rather than attachment order, while the rule pack still hard-blocks if any UD payload is missing required fields
+  - when multiple same-family UD payloads exist, the workflow validates and allocates them independently in deterministic document-date/document-number/attachment-order sequence while excluding rows already claimed earlier in the same mail
   - structured UD Amendment extraction implements the confirmed zero-`Increased/Decreased` rule: when the matched amendment row's increased/decreased value is numeric zero, the workflow uses that row's `Value` column because the LC is treated as newly included in the amendment
   - structured UD quantity validation derives each selected workbook row unit from the quantity cell number format, and in-memory workbook snapshot advancement preserves row number formats between staged mails so `MTR`/`YDS` evidence does not drift during a multi-mail batch
   - transport for `ud_ip_exp` is enabled using the same staged model as `export_lc_sc`: newly saved PDFs from successful mails are print-eligible after workbook write commit, and successful mails move only after required upstream gates complete
@@ -37,12 +38,12 @@ Before implementation, read these files in order:
   - live UD-only end-to-end proof is complete for a newly saved structured UD Amendment PDF: run `run-20260423T080206Z-ud_ip_exp-610790f2` committed row 372, submitted one print group, and completed the post-print mail move with zero discrepancies
   - final clean two-mail live proof after the structured amendment and batch-number-format fixes is complete: run `run-20260423T094320Z-ud_ip_exp-9474d4c6` produced `pass = 2`, `hard_block = 0`, six committed workbook writes, two moved mails, and zero discrepancies
   - a one-click Windows launcher is available at `scripts/run_ud_ip_exp_live_cycle.cmd`; it reuses the shared `scripts/run_live_cycle.ps1` staged sequence
-  - IP/EXP processing remains intentionally hard-blocked where policy is still unresolved
+  - conservative phase-1 IP/EXP processing is implemented for valid `EXP-only` and `EXP+IP` mails, with family-wide blank-only staging and duplicate-only/no-write handling for exact already-recorded values
 - Phase: `PLANS.md` Phase 3.
 
 ## Objective
 
-Implement the UD/IP/EXP workflow for updating the yearly master workbook after export LC/SC rows already exist.
+Implement and maintain the UD/IP/EXP workflow for updating the yearly master workbook after export LC/SC rows already exist.
 
 The workflow must:
 - Snapshot all mails from the configured Outlook working folder.
@@ -192,7 +193,7 @@ Current live-extraction boundary:
 - text-layer UD/IP/EXP document-number extraction uses label-aware boundaries so buyer labels and neighboring LC/SC, date, and quantity labels are not captured into the document number
 - storage-path resolution now reports attachment-level evidence whenever live-derived documents fail one-family resolution
 - same-mail live-derived UD documents now hard-block with discrepancy code `ud_live_document_conflict` when required UD evidence disagrees across attachments
-- mixed-quality same-family UD documents still hard-block when any UD payload is missing required fields; selection/reporting uses the most complete UD payload only to keep allocation context deterministic and stable
+- mixed-quality same-family UD documents still hard-block when any UD payload is missing required fields; later valid UD payloads may still appear in deterministic selection reporting, but the mail remains blocked and stages no writes
 
 ### 2. Workbook Header Mapping
 

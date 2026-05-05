@@ -315,7 +315,7 @@ For structured Base UD and UD Amendment PDFs, target rows are selected by the va
 - The matched UD/AM LC table date must equal the ERP LC/SC date after date parsing.
 - The matched UD/AM LC table value is compared numerically to the sum of workbook `Amount` column 6.
 - Before staging a structured UD write, workbook rows in the ERP LC/SC family are checked for an exact already-recorded UD value plus matching `UD & IP Date`; if the recorded rows satisfy the same value and quantity checks, the mail is a successful duplicate no-op and stages no workbook writes or prints.
-- For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number.
+- For multiple UD/AM documents in the same mail, deterministic processing order is document date first, then BGMEA UD/AM number, then original attachment order.
 - Same-mail duplicate UD/AM evidence is resolved first by BGMEA UD/AM number and then by duplicate filename evidence. Later duplicates are ignored only when their required extracted evidence matches exactly; any disagreement in date, LC/SC value, or quantity evidence is a hard block.
 - Duplicate attachment filename evidence is business-relevant for `ud_ip_exp`; same-mail repeated filenames must participate in duplicate/conflict checks even when the BGMEA number is unavailable from filename alone.
 - Otherwise candidate workbook rows are filtered to the ERP LC/SC family and rows with blank `UD No. & IP No.`. Candidate row groups are identified only by exact workbook `Amount` matches to the extracted LC value within the configured tolerance.

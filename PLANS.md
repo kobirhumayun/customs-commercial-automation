@@ -59,7 +59,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - Use `docs/ud-ip-exp-implementation-handoff.md` as the implementation handoff before coding this workflow.
 - UD/IP/EXP PDF extraction.
 - Matching candidate workbook rows for a single LC/SC family.
-- Structured UD/AM value-first row selection by ERP-linked PDF LC value, with legacy combination-based UD allocation retained only for non-structured deterministic payloads.
+- Structured UD/AM value-first row selection by ERP-linked PDF LC value, with quantity validation applied only after an exact value-matched workbook row group is identified.
 - Structured UD/AM number/date extraction uses only the page-1 office-use-only row label (`UD No (For office use only)` for Base UD, `Amendment no. (For office use only)` for Amendment), with no alternate row-label fallback and hard-blocking invalid BGMEA UD/AM numbers.
 - Structured UD/AM LC row matching keeps `Ship. Remarks` exact-only and permits ERP `LC No.` fallback matching only by stripping leading zeros from the left side; leading/trailing spaces may be trimmed, but internal spaces and all other characters remain unchanged.
 - Structured UD Amendment value extraction uses `Increased/Decreased` unless that value is numeric zero, in which case the matched row's `Value` column is used because the LC is newly included in the amendment.
@@ -67,7 +67,7 @@ Goal: support shared-column population and quantity/value matching rules.
 - Filename-gated UD/IP/EXP document reading: process only `UD-*`, `IP-*`, and EXP PDFs whose filename stem is exactly `<digits>-EXP`.
 - EXP descriptor variants such as `<digits>-EXP-INVOICE.pdf` are skipped to prefer the machine-generated text-layer EXP file.
 - Explicit UD-LC/UD-SC attachment filename suffixes validated only as sanity evidence against the ERP-derived LC/SC family, never as lookup input.
-- UD shared-column/date writes for deterministic UD documents, with IP/EXP workbook writes still unresolved and therefore hard-blocked in the current code.
+- UD shared-column/date writes for deterministic UD documents, plus conservative phase-1 family-wide IP/EXP shared-column/date writes for valid EXP-only and EXP+IP mails.
 - Hard-block discrepancy outcomes for under-specified, ambiguous, or contradictory cases in phase 1 (no human-review routing in this phase).
 - Human-review routing is explicitly deferred to a later phase after recurring issue categories are formalized.
 

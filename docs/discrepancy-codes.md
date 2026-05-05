@@ -97,7 +97,7 @@ Every discrepancy payload should include:
 | `ud_document_number_pattern_mismatch` | `hard_block` | ud_ip_exp | A UD attachment did not yield an extracted BGMEA UD/AM number matching the required workbook-write pattern; filename fallback is not allowed. |
 | `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
 | `ud_lc_date_mismatch` | `hard_block` | ud_ip_exp | Structured UD/AM LC table date did not match the ERP LC/SC date. |
-| `ud_lc_value_match_unresolved` | `hard_block` | ud_ip_exp | Structured UD/AM LC value did not identify an ascending blank-UD workbook row accumulation that matched the target value. |
+| `ud_lc_value_match_unresolved` | `hard_block` | ud_ip_exp | Structured UD/AM LC value did not identify any exact workbook value-matched row group in the verified LC/SC family. |
 | `ud_quantity_below_workbook` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity was less than the selected workbook quantity for a unit. |
 | `ud_quantity_excess_below_threshold` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity exceeded workbook quantity by less than the required 50-unit threshold. |
 | `ud_target_row_conflict` | `hard_block` | ud_ip_exp | The candidate UD/AM row group is already assigned to a different UD/AM document, or the existing UD date conflicts with the candidate document. |

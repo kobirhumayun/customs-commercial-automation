@@ -604,7 +604,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - PDF attachments in one of these valid mail shapes only:
   - UD-only (single or multiple UD documents)
   - EXP-only
-  - EXP with one or more IP documents
+  - EXP with at most one deterministic IP document
 - Existing master workbook rows for the same LC/SC family
 
 ### Initial live-document validation boundary
@@ -629,9 +629,9 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - batch validation must preserve row number formats when advancing the in-memory workbook snapshot after staged writes, so later mails in the same run keep the workbook-authored `MTR`/`YDS` quantity-unit evidence
 - live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
 - same-mail duplicate UD/AM handling must first dedupe by BGMEA UD/AM number and then by duplicate filename evidence; later duplicates are ignored only when their extracted evidence agrees exactly, otherwise the mail hard-blocks
-- for multiple UD/AM documents in the same mail, deterministic processing order is document date first and BGMEA UD/AM number second
-- when multiple same-family UD payloads are available, deterministic allocation/reporting may use the most complete UD payload as the selected UD evidence source, using completeness of required extraction fields rather than attachment order
-- this selected-payload preference does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
+- for multiple UD/AM documents in the same mail, deterministic processing order is document date first, BGMEA UD/AM number second, and original attachment order third
+- when multiple same-family UD payloads are available, each UD payload is validated and allocated independently in deterministic order; later UD payloads in the same mail may use only workbook rows not already claimed earlier in that mail
+- this deterministic per-document processing does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
 - these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
 - live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
 - ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction

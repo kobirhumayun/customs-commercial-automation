@@ -227,7 +227,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### UD / IP / EXP CLI
 - Shares intake, storage, and parsing services with export workflow.
-- Mail composition follows a fixed contract: one mail may contain only UD documents (single or multiple), only EXP documents, or EXP documents together with IP documents. A mail containing IP must also contain EXP, and a mail mixing any UD document with any IP/EXP document is invalid.
+- Mail composition follows a fixed contract: one mail may contain only UD documents (single or multiple), only EXP documents, or EXP together with at most one deterministic IP document. A mail containing IP must also contain EXP, and a mail mixing any UD document with any IP/EXP document is invalid.
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
 - Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.
@@ -243,8 +243,8 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Workbook quantity units for structured UD validation come from the workbook quantity cell number format: `#,###.00 "Mtr"` means `MTR`; other formats default to `YDS`.
 - Successful structured UD writes stage `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; dates are written as `DD/MM/YYYY`.
 - Structured UD writes stage only when every target cell for those three columns is blank; unexpected non-blank target cells hard-block instead of being appended or overwritten.
-- IP/EXP processing remains blocked until business rules are finalized in durable docs.
-- The current code formats shared-column values as plain UD numbers plus ordered `EXP: ` / `IP: ` prefixes for discrepancy evidence, but does not stage workbook writes for IP/EXP documents yet.
+- IP/EXP processing now follows the conservative documented phase-1 path: valid non-UD shapes are `EXP-only` and `EXP+IP`, row targeting is family-wide across the verified ERP LC/SC family, and shared/date writes remain blank-only with exact already-recorded matches treated as duplicate-only no-ops.
+- The current code stages family-wide IP/EXP workbook writes for `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date` after required-field, family-row, and non-conflicting blank-target checks pass.
 - Write is blocked if matching rules are incomplete, contradictory, or leave unresolved discrepancies under the defined thresholds.
 
 ### Import / BTB LC CLI
