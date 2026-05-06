@@ -97,25 +97,30 @@ Each manually triggered CLI run should follow one explicit execution contract:
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
 ### Operator print-annotation checklist contract (normative)
-For workflows that print UD/Amendment documents, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
+For workflows that require print-annotation handling, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
 
-Required checklist fields per printed document:
+Phase-1 checklist-required workflows are:
+- `ud_ip_exp`, for printed UD/Amendment documents
+- `export_lc_sc`, for printed export workbook-row annotations derived from committed staged export rows
+
+Required checklist fields per checklist row:
 - `print_sequence` (1-based sequence in physical print order)
 - `workflow_id`
-- `ud_or_amendment_no`
-- `lc_sc`
-- `bangladesh_bank_ref`
 - `sl_no_values` (list of workbook `SL.No.` values to annotate by hand)
 - `mail_subject`
 - `document_filename`
 
+Workflow-specific checklist row fields:
+- `ud_ip_exp`: `ud_or_amendment_no`, `lc_sc`, `bangladesh_bank_ref`
+- `export_lc_sc`: workbook-driven export row values rendered in workbook header order
+
 Audit-support fields may also include `row_indexes`, but operators must not be asked to infer `SL.No.` from row coordinates.
 
 Checklist delivery requirements:
-- Checklist generation is a mandatory pre-print gate for workflows that print UD/Amendment documents; if checklist generation fails, the run must hard-block before any print or post-run mail-move execution can begin.
+- Checklist generation is a mandatory pre-print gate for checklist-required workflows; if checklist generation fails, the run must hard-block before any print or post-run mail-move execution can begin.
 - The system should emit durable machine-readable checklist artifacts as JSON under run artifacts.
 - A human-readable HTML checklist view should be generated before print execution from the same deterministic print-plan evidence.
-- The persisted print plan should also carry per-document checklist-source records for any printed UD/Amendment evidence so checklist generation can read row-selection mappings directly from planned print artifacts instead of reconstructing them from multiple mail-level fallbacks.
+- The persisted print plan should also carry checklist-source evidence sufficient for the active workflow: per-document annotation records for `ud_ip_exp`, and print-group plus staged-row evidence for `export_lc_sc`.
 - The generated HTML checklist should be opened automatically in the workstation's default browser only after the run reaches terminal mail-move success, so operators finish the full run with the final report already visible.
 
 #### `SL.No.` mapping rule (normative)
@@ -537,7 +542,7 @@ Required fields:
 - `print_group_index` (integer): deterministic rank in `print_group_order`.
 - `document_path_hashes` (array): SHA-256 hashes for print payload documents in group order.
 - `completion_marker_id` (string): `sha256(run_id + "|" + mail_id + "|" + print_group_index + "|" + joined_document_hashes)`.
-- `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `row_indexes`, and `checklist_required`.
+- `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `row_indexes`, and `checklist_required`. `export_lc_sc` may leave `annotation_documents` empty and derive checklist rows from the persisted print-group document list plus committed staged export row targets.
 
 ### `MailMoveOperation`
 Required fields:

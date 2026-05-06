@@ -266,7 +266,7 @@ try {
         "--run-id", $runId
     )
 
-    if ($Workflow -eq "ud_ip_exp") {
+    if ($Workflow -in @("ud_ip_exp", "export_lc_sc")) {
         Write-Section "Generate Print Annotation"
         $printAnnotation = Invoke-ProjectJsonCommand -Arguments @(
             "run", "python", "-m", "project",

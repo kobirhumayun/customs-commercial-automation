@@ -1379,7 +1379,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     print_annotation_parser = subparsers.add_parser(
         "generate-print-annotation-html",
-        help="Generate the mandatory UD/Amendment print-annotation checklist before print execution.",
+        help="Generate the print-annotation checklist report before print execution for supported workflows.",
     )
     print_annotation_parser.add_argument(
         "workflow_id",
@@ -2010,8 +2010,10 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
     artifact_paths = None
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
-        if descriptor.workflow_id != WorkflowId.UD_IP_EXP:
-            raise ValueError("Print-annotation checklist generation is currently supported only for ud_ip_exp")
+        if descriptor.workflow_id not in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}:
+            raise ValueError(
+                "Print-annotation checklist generation is currently supported only for ud_ip_exp and export_lc_sc"
+            )
         config = load_workflow_config(
             descriptor=descriptor,
             config_path=args.config,
@@ -2025,9 +2027,10 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
         if run_report.print_phase_status not in {
             PrintPhaseStatus.PLANNED,
             PrintPhaseStatus.HARD_BLOCKED,
+            PrintPhaseStatus.COMPLETED,
         }:
             raise ValueError(
-                "Print-annotation checklist generation requires print_phase_status=planned or hard_blocked."
+                "Print-annotation checklist generation requires print_phase_status=planned, hard_blocked, or completed."
             )
         print_batches = load_print_batches(
             run_artifact_root=config.run_artifact_root,
@@ -2060,7 +2063,14 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
             artifact_paths=artifact_paths,
             result=result,
         )
-        updated_run_report = replace(run_report, print_phase_status=PrintPhaseStatus.PLANNED)
+        updated_run_report = replace(
+            run_report,
+            print_phase_status=(
+                PrintPhaseStatus.PLANNED
+                if run_report.print_phase_status == PrintPhaseStatus.HARD_BLOCKED
+                else run_report.print_phase_status
+            ),
+        )
         write_run_metadata(artifact_paths, to_jsonable(updated_run_report))
     except PrintAnnotationChecklistError as exc:
         if artifact_paths is not None and run_report is not None:
@@ -2487,7 +2497,7 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         for discrepancy in discrepancies:
             append_discrepancy(artifact_paths, to_jsonable(discrepancy))
         if (
-            descriptor.workflow_id == WorkflowId.UD_IP_EXP
+            descriptor.workflow_id in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}
             and updated_run_report.mail_move_phase_status == MailMovePhaseStatus.COMPLETED
         ):
             try:
