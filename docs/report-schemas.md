@@ -155,24 +155,40 @@ For dense structured UD matches, the selected candidate must still be present in
 - `checklist_row_count`
 - `rows`
 
-Each `rows[]` item must include:
+Each `rows[]` item must include these shared fields:
 - `print_sequence`
 - `print_group_id`
 - `mail_id`
 - `workflow_id`
-- `ud_or_amendment_no`
-- `lc_sc`
-- `bangladesh_bank_ref`
 - `sl_no_values`
 - `mail_subject`
 - `document_filename`
+- `row_indexes`
+
+`ud_ip_exp` checklist rows must also include:
+- `ud_or_amendment_no`
+- `lc_sc`
+- `bangladesh_bank_ref`
 - `saved_document_id`
 - `document_path_hash`
-- `row_indexes`
+
+`export_lc_sc` checklist rows must also include:
+- `lc_sc`
+- `bangladesh_bank_ref`
+- `document_path_hashes`
+- `workbook_values`
+
+`export_lc_sc` may additionally include:
+- `saved_document_ids`
+- `document_filenames`
+- `mail_group_row_count`
+- `mail_group_first_row`
 
 The checklist JSON must be derived from the same persisted print plan that drives physical print order.
 For `ud_ip_exp`, checklist rows are required only for printed UD/Amendment documents that resolve to workbook row-selection evidence; other newly saved PDFs may still be printed without checklist rows.
 For `ud_ip_exp`, any mismatch between the current print plan's checklist-required document subset and the persisted checklist JSON is a hard-block before print execution.
+For `export_lc_sc`, checklist generation is also a mandatory pre-print gate. Its rows are workbook-row-oriented rather than UD-document-oriented, and workbook-driven export values may be carried in a workflow-specific `workbook_columns` definition plus per-row `workbook_values`.
+For `export_lc_sc`, when one mail spans multiple workbook rows, the persisted row payload may include mail-group metadata such as row-span count and one newline-delimited `document_filename` string representing all printed filenames for that mail.
 
 ### Related persisted print-plan evidence
 When `print_plan.json` includes `annotation_documents` for a print group, each item should preserve direct checklist-source evidence in document print order:

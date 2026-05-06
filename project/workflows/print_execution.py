@@ -40,7 +40,7 @@ def execute_print_batches(
         raise ValueError("Print execution requires print_phase_status=planned, printing, or uncertain_incomplete.")
 
     discrepancies: list[DiscrepancyReport] = []
-    if run_report.workflow_id == WorkflowId.UD_IP_EXP:
+    if run_report.workflow_id in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}:
         try:
             validate_print_annotation_checklist(
                 artifact_paths=artifact_paths,

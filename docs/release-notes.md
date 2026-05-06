@@ -11,7 +11,7 @@
 1. `report-live-readiness`
 2. `validate-run`
 3. `plan-print`
-4. `generate-print-annotation-html` for `ud_ip_exp`
+4. `generate-print-annotation-html`
 5. `execute-print`
 6. `execute-mail-moves`
 
@@ -54,11 +54,13 @@
 - phase 1 print completion means deterministic silent submission order completed
 - phase 1 does not wait for or verify physical paper completion
 - for `ud_ip_exp`, the print-annotation checklist is a mandatory pre-print artifact gate
+- for `export_lc_sc`, the print-annotation checklist is also a mandatory pre-print artifact gate, generated from committed staged export workbook rows
 - for `ud_ip_exp`, all newly saved PDF attachments from successful mails are now included in print batches, even when a PDF is only supporting evidence and not a UD/IP/EXP extraction source
 - for `ud_ip_exp`, the print-annotation checklist remains UD/Amendment-only; supporting PDFs can print without checklist rows
+- for `export_lc_sc`, the print-annotation checklist is workbook-row-oriented and may span mail-level subject/filename cells across multiple related workbook rows
 - if checklist generation fails, print and post-run mail moves stay hard-blocked
 - if a no-write live run leaves `eligible_mail_count = 0`, the launcher now skips `execute-mail-moves` instead of generating a misleading downstream mail-move gate discrepancy
-- the checklist HTML is opened automatically only after successful post-run mail moves complete
+- the checklist HTML is opened automatically only after successful post-run mail moves complete for workflows that generated the checklist artifact, including `ud_ip_exp` and `export_lc_sc`
 - when Acrobat times out after physical output, operators must use:
   `acknowledge-partial-print`
 - when printer-specific JSObject submission is unavailable, the adapter may:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -58,6 +59,12 @@ class PrintExecutionTests(unittest.TestCase):
                 )
             ]
             phase_updates: list[str] = []
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+            )
 
             executed_report, executed_outcomes, discrepancies = execute_print_batches(
                 run_report=run_report,
@@ -115,6 +122,12 @@ class PrintExecutionTests(unittest.TestCase):
                     manual_verification_summary={},
                 )
             ]
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+            )
 
             uncertain_report, uncertain_outcomes, first_discrepancies = execute_print_batches(
                 run_report=run_report,
@@ -172,6 +185,12 @@ class PrintExecutionTests(unittest.TestCase):
                     manual_verification_summary={},
                 )
             ]
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+            )
 
             executed_report, executed_outcomes, discrepancies = execute_print_batches(
                 run_report=run_report,
@@ -216,6 +235,12 @@ class PrintExecutionTests(unittest.TestCase):
                     manual_verification_summary={},
                 )
             ]
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+            )
 
             executed_report, _executed_outcomes, discrepancies = execute_print_batches(
                 run_report=run_report,
@@ -253,6 +278,12 @@ class PrintExecutionTests(unittest.TestCase):
                     manual_verification_summary={},
                 )
             ]
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+            )
 
             executed_report, executed_outcomes, discrepancies = execute_print_batches(
                 run_report=run_report,
@@ -284,6 +315,50 @@ class PrintExecutionTests(unittest.TestCase):
                 rule_pack_id="ud_ip_exp.default",
             )
             mail_outcomes = [_build_mail_outcome(document_path=str(document_path))]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=[str(document_path)],
+                    document_path_hashes=["hash-1"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            executed_report, executed_outcomes, discrepancies = execute_print_batches(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                artifact_paths=artifact_paths,
+                provider=FakePrintProvider(),
+            )
+
+        self.assertEqual(executed_report.print_phase_status, PrintPhaseStatus.HARD_BLOCKED)
+        self.assertEqual(discrepancies[0].code, "print_annotation_checklist_missing_or_invalid")
+        self.assertFalse(executed_outcomes[0].eligible_for_print)
+        self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
+
+    def test_execute_print_batches_hard_blocks_export_when_checklist_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            document_path = root / "doc.pdf"
+            document_path.write_text("fake pdf", encoding="utf-8")
+            run_report = _build_run_report(print_phase_status=PrintPhaseStatus.PLANNED)
+            mail_outcomes = [
+                replace(
+                    _build_mail_outcome(document_path=str(document_path)),
+                    staged_write_operations=[{"row_index": 11, "column_key": "file_no"}],
+                )
+            ]
             print_batches = [
                 PrintBatch(
                     print_group_id="group-1",
@@ -431,6 +506,12 @@ class PrintExecutionTests(unittest.TestCase):
             marker_path.write_text(
                 '{"print_group_id":"group-1","completion_marker_id":"completion-1","printed_document_path_hashes":["hash-a"],"print_status":"partial_incomplete","print_execution_receipt":{"command_receipts":[]}}',
                 encoding="utf-8",
+            )
+            _write_export_checklist_artifact(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
             )
 
             uncertain_report, _outcomes, discrepancies = execute_print_batches(
@@ -612,7 +693,66 @@ def _build_mail_outcome(*, document_path: str) -> MailOutcomeRecord:
         sender_address="a@example.com",
         print_group_id="group-1",
         saved_documents=[{"destination_path": document_path, "save_decision": "saved_new"}],
+        staged_write_operations=[{"row_index": 11, "column_key": "file_no"}],
     )
+
+
+def _write_export_checklist_artifact(
+    *,
+    artifact_paths,
+    run_report: RunReport,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list[PrintBatch],
+) -> None:
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    rows: list[dict] = []
+    sequence = 1
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id[batch.mail_id]
+        row_indexes = sorted(
+            row_index
+            for operation in outcome.staged_write_operations
+            if isinstance(operation, dict)
+            for row_index in [operation.get("row_index")]
+            if isinstance(row_index, int)
+        )
+        for row_position, row_index in enumerate(row_indexes):
+            rows.append(
+                {
+                    "print_sequence": sequence,
+                    "print_group_id": batch.print_group_id,
+                    "mail_id": batch.mail_id,
+                    "workflow_id": run_report.workflow_id.value,
+                    "row_indexes": [row_index],
+                    "sl_no_values": [str(row_index)],
+                    "lc_sc": "LC-0043",
+                    "bangladesh_bank_ref": "",
+                    "mail_subject": outcome.subject_raw,
+                    "document_filename": "\n".join(Path(path).name for path in batch.document_paths),
+                    "document_path_hashes": list(batch.document_path_hashes),
+                    "workbook_values": [],
+                    "mail_group_row_count": len(row_indexes),
+                    "mail_group_first_row": row_position == 0,
+                }
+            )
+            sequence += 1
+    artifact_paths.print_annotation_checklist_json_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "print_annotation_checklist",
+                "schema_version": "1.0.0",
+                "run_id": run_report.run_id,
+                "workflow_id": run_report.workflow_id.value,
+                "generated_at_utc": "2026-03-28T00:00:00Z",
+                "print_group_order": [batch.print_group_id for batch in print_batches],
+                "checklist_row_count": len(rows),
+                "rows": rows,
+                "workbook_columns": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact_paths.print_annotation_checklist_html_path.write_text("<html></html>", encoding="utf-8")
 
 
 if __name__ == "__main__":

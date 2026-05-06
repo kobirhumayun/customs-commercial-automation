@@ -31,7 +31,7 @@ For normal phase-1 operation, the primary operator commands are:
 - `report-live-readiness`
 - `validate-run`
 - `plan-print`
-- `generate-print-annotation-html` for `ud_ip_exp`
+- `generate-print-annotation-html`
 - `execute-print`
 - `acknowledge-partial-print` when Acrobat times out after physical paper output
 - `execute-mail-moves`
@@ -40,7 +40,7 @@ For normal phase-1 operation, the primary operator commands are:
 
 The expected terminal paths are:
 - `new writes`:
-  `validate-run` stages and commits workbook rows, `plan-print` prepares print order, `ud_ip_exp` runs `generate-print-annotation-html`, `execute-print` submits newly saved PDFs, then `execute-mail-moves` moves the mail
+  `validate-run` stages and commits workbook rows, `plan-print` prepares print order, `generate-print-annotation-html` emits the operator checklist/report when applicable, `execute-print` submits newly saved PDFs, then `execute-mail-moves` moves the mail
 - `duplicate-only`:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
 
@@ -85,7 +85,7 @@ The released operator sequence is:
 1. `report-live-readiness`
 2. `validate-run`
 3. `plan-print`
-4. `generate-print-annotation-html` for `ud_ip_exp`
+4. `generate-print-annotation-html`
 5. `execute-print`
 6. `execute-mail-moves`
 
@@ -102,7 +102,7 @@ Use this as the normal day-to-day workflow guide after release:
 1. Start with `validate-run`.
 2. Use `report-live-readiness` at session start, after environment/config changes, or whenever something looks off.
 3. If `validate-run` commits new writes and printable documents exist, run `plan-print` and `execute-print`.
-   For `ud_ip_exp`, insert `generate-print-annotation-html` between those two commands.
+   For `ud_ip_exp` and `export_lc_sc`, insert `generate-print-annotation-html` between those two commands before print execution.
 4. If `execute-print` completes, run `execute-mail-moves`.
 5. If the mail is duplicate-only and no print is required, move directly to `execute-mail-moves` when the run is move-eligible.
 6. If a run stops with a hard block or no-write status, run `explain-run-failure` first to identify the exact cause.
@@ -130,12 +130,13 @@ The launcher performs:
 - `report-live-readiness`
 - `validate-run --apply-live-writes`
 - `plan-print`
-- `generate-print-annotation-html --live-workbook` for `ud_ip_exp`
+- `generate-print-annotation-html --live-workbook`
 - `execute-print`
 - `execute-mail-moves`
 - `report-run-status`
 
 It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
+For `ud_ip_exp` and `export_lc_sc`, the launcher includes `generate-print-annotation-html` because the checklist artifact is a mandatory pre-print gate.
 It also writes a timestamped launcher log under `D:\customs-automation\reports\launcher_logs` so wrapper-level failures can be inspected after the window closes.
 For normal live use, the launcher now uses a stable document root such as `D:\customs-automation\documents-live-click` directly rather than creating a timestamped document-root subfolder per run. That keeps all documents for the same LC/SC under the same canonical family folder:
 `Year / Buyer Name / LC-or-SC Number / All Attachments`.
@@ -176,11 +177,19 @@ uv run python -m project execute-mail-moves $WORKFLOW --config $CONFIG --run-id 
 uv run python -m project report-run-status $WORKFLOW --config $CONFIG --run-id $RUN_ID
 ```
 
-For `ud_ip_exp`, insert this checklist-generation step between `plan-print` and `execute-print`:
+For `ud_ip_exp`, insert this mandatory checklist-generation step between `plan-print` and `execute-print`:
 
 ```powershell
 uv run python -m project generate-print-annotation-html ud_ip_exp --config $CONFIG --run-id $RUN_ID --live-workbook
 ```
+
+For `export_lc_sc`, insert this mandatory checklist-generation step between `plan-print` and `execute-print`:
+
+```powershell
+uv run python -m project generate-print-annotation-html export_lc_sc --config $CONFIG --run-id $RUN_ID --live-workbook
+```
+
+For both `ud_ip_exp` and `export_lc_sc`, the generated checklist HTML is opened automatically after successful `execute-mail-moves`.
 
 Expected final state:
 - `write_phase_status = committed`

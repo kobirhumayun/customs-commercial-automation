@@ -14,7 +14,13 @@ from project.storage import RunArtifactPaths
 from project.storage.artifacts import atomic_write_text
 from project.utils.json import pretty_json_dumps
 from project.utils.time import utc_now, utc_timestamp, validate_timezone
-from project.workbook import HeaderMappingSpec, WorkbookSnapshot, resolve_header_mapping
+from project.workbook import (
+    EXPORT_HEADER_SPECS,
+    HeaderMappingSpec,
+    WorkbookSnapshot,
+    resolve_export_header_mapping,
+    resolve_header_mapping,
+)
 
 PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID = "print_annotation_checklist"
 LC_SC_HEADER_SPEC = HeaderMappingSpec(
@@ -50,10 +56,10 @@ def build_print_annotation_checklist(
     workbook_snapshot: WorkbookSnapshot | None,
     live_workbook_path: Path | None = None,
 ) -> PrintAnnotationChecklistBuildResult:
-    if run_report.workflow_id != WorkflowId.UD_IP_EXP:
+    if run_report.workflow_id not in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}:
         raise PrintAnnotationChecklistError(
             code="print_annotation_generation_failed",
-            message="Print-annotation checklist generation is currently supported only for ud_ip_exp.",
+            message="Print-annotation checklist generation is currently supported only for ud_ip_exp and export_lc_sc.",
             details={"workflow_id": run_report.workflow_id.value},
         )
     if workbook_snapshot is None:
@@ -63,53 +69,63 @@ def build_print_annotation_checklist(
             details={"run_id": run_report.run_id},
         )
 
-    planned_row_indexes = _planned_row_indexes(
-        mail_outcomes=mail_outcomes,
-        print_batches=print_batches,
-    )
-    sl_no_column_index = _resolve_sl_no_column_index(workbook_snapshot)
-    lc_sc_column_index = _resolve_required_column_index(
-        workbook_snapshot=workbook_snapshot,
-        spec=LC_SC_HEADER_SPEC,
-        error_message="Print-annotation checklist generation requires one deterministic L/C & S/C No. workbook header.",
-    )
-    bangladesh_bank_ref_column_index = _resolve_required_column_index(
-        workbook_snapshot=workbook_snapshot,
-        spec=BANGLADESH_BANK_REF_HEADER_SPEC,
-        error_message="Print-annotation checklist generation requires one deterministic Bangladesh Bank Ref. workbook header.",
-    )
-    sl_no_values_by_row = _resolve_column_values_by_row(
-        workbook_snapshot=workbook_snapshot,
-        column_index=sl_no_column_index,
-        live_workbook_path=live_workbook_path,
-        row_indexes=planned_row_indexes,
-        error_code="print_annotation_sl_no_unresolved",
-        error_message="The live workbook SL.No. display text could not be read for a selected checklist row.",
-    )
-    lc_sc_values_by_row = _resolve_column_values_by_row(
-        workbook_snapshot=workbook_snapshot,
-        column_index=lc_sc_column_index,
-        live_workbook_path=live_workbook_path,
-        row_indexes=planned_row_indexes,
-        error_code="print_annotation_generation_failed",
-        error_message="The live workbook L/C & S/C No. display text could not be read for a selected checklist row.",
-    )
-    bangladesh_bank_ref_values_by_row = _resolve_column_values_by_row(
-        workbook_snapshot=workbook_snapshot,
-        column_index=bangladesh_bank_ref_column_index,
-        live_workbook_path=live_workbook_path,
-        row_indexes=planned_row_indexes,
-        error_code="print_annotation_generation_failed",
-        error_message="The live workbook Bangladesh Bank Ref. display text could not be read for a selected checklist row.",
-    )
-    rows = _build_checklist_rows(
-        run_report=run_report,
-        mail_outcomes=mail_outcomes,
-        print_batches=print_batches,
-        sl_no_values_by_row=sl_no_values_by_row,
-        lc_sc_values_by_row=lc_sc_values_by_row,
-        bangladesh_bank_ref_values_by_row=bangladesh_bank_ref_values_by_row,
-    )
+    if run_report.workflow_id == WorkflowId.EXPORT_LC_SC:
+        workbook_columns, rows = _build_export_checklist_rows(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+            live_workbook_path=live_workbook_path,
+        )
+    else:
+        workbook_columns = None
+        planned_row_indexes = _planned_row_indexes(
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+        )
+        sl_no_column_index = _resolve_sl_no_column_index(workbook_snapshot)
+        lc_sc_column_index = _resolve_required_column_index(
+            workbook_snapshot=workbook_snapshot,
+            spec=LC_SC_HEADER_SPEC,
+            error_message="Print-annotation checklist generation requires one deterministic L/C & S/C No. workbook header.",
+        )
+        bangladesh_bank_ref_column_index = _resolve_required_column_index(
+            workbook_snapshot=workbook_snapshot,
+            spec=BANGLADESH_BANK_REF_HEADER_SPEC,
+            error_message="Print-annotation checklist generation requires one deterministic Bangladesh Bank Ref. workbook header.",
+        )
+        sl_no_values_by_row = _resolve_column_values_by_row(
+            workbook_snapshot=workbook_snapshot,
+            column_index=sl_no_column_index,
+            live_workbook_path=live_workbook_path,
+            row_indexes=planned_row_indexes,
+            error_code="print_annotation_sl_no_unresolved",
+            error_message="The live workbook SL.No. display text could not be read for a selected checklist row.",
+        )
+        lc_sc_values_by_row = _resolve_column_values_by_row(
+            workbook_snapshot=workbook_snapshot,
+            column_index=lc_sc_column_index,
+            live_workbook_path=live_workbook_path,
+            row_indexes=planned_row_indexes,
+            error_code="print_annotation_generation_failed",
+            error_message="The live workbook L/C & S/C No. display text could not be read for a selected checklist row.",
+        )
+        bangladesh_bank_ref_values_by_row = _resolve_column_values_by_row(
+            workbook_snapshot=workbook_snapshot,
+            column_index=bangladesh_bank_ref_column_index,
+            live_workbook_path=live_workbook_path,
+            row_indexes=planned_row_indexes,
+            error_code="print_annotation_generation_failed",
+            error_message="The live workbook Bangladesh Bank Ref. display text could not be read for a selected checklist row.",
+        )
+        rows = _build_checklist_rows(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            sl_no_values_by_row=sl_no_values_by_row,
+            lc_sc_values_by_row=lc_sc_values_by_row,
+            bangladesh_bank_ref_values_by_row=bangladesh_bank_ref_values_by_row,
+        )
     generated_at = utc_now()
     payload = {
         "schema_id": PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID,
@@ -131,6 +147,8 @@ def build_print_annotation_checklist(
         "checklist_row_count": len(rows),
         "rows": rows,
     }
+    if workbook_columns is not None:
+        payload["workbook_columns"] = workbook_columns
     return PrintAnnotationChecklistBuildResult(
         payload=payload,
         html=_build_print_annotation_html(payload),
@@ -159,14 +177,19 @@ def validate_print_annotation_checklist(
     print_batches: list,
     mail_outcomes: list[MailOutcomeRecord] | None = None,
 ) -> None:
-    if run_report.workflow_id != WorkflowId.UD_IP_EXP:
+    if run_report.workflow_id not in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}:
         return
     json_path = artifact_paths.print_annotation_checklist_json_path
     html_path = artifact_paths.print_annotation_checklist_html_path
     if not json_path.exists() or not html_path.exists():
+        workflow_label = (
+            "ud_ip_exp"
+            if run_report.workflow_id == WorkflowId.UD_IP_EXP
+            else run_report.workflow_id.value
+        )
         raise PrintAnnotationChecklistError(
             code="print_annotation_checklist_missing_or_invalid",
-            message="The mandatory print-annotation checklist artifact is missing for this ud_ip_exp run.",
+            message=f"The mandatory print-annotation checklist artifact is missing for this {workflow_label} run.",
             details={
                 "json_path": str(json_path),
                 "html_path": str(html_path),
@@ -232,6 +255,23 @@ def validate_print_annotation_checklist(
             message="The persisted print-annotation checklist rows must be a JSON array.",
             details={"json_path": str(json_path)},
         )
+    if run_report.workflow_id == WorkflowId.EXPORT_LC_SC:
+        observed_signatures = _observed_export_checklist_row_signatures(rows)
+        expected_signatures = _expected_export_checklist_row_signatures(
+            print_batches=print_batches,
+            mail_outcomes=mail_outcomes or [],
+        )
+        if observed_signatures != expected_signatures:
+            raise PrintAnnotationChecklistError(
+                code="print_annotation_checklist_missing_or_invalid",
+                message="The persisted export print-annotation checklist rows do not match the current print plan.",
+                details={
+                    "expected_row_signatures": expected_signatures,
+                    "observed_row_signatures": observed_signatures,
+                },
+            )
+        return
+
     observed_hashes = [str(row.get("document_path_hash", "")).strip() for row in rows if isinstance(row, dict)]
     expected_hashes = _expected_checklist_document_hashes(
         print_batches=print_batches,
@@ -378,6 +418,252 @@ def _expected_checklist_document_hashes(
                 if document_hash:
                     expected_hashes.append(document_hash)
     return expected_hashes
+
+
+def _observed_export_checklist_row_signatures(rows: list[Any]) -> list[dict[str, Any]]:
+    signatures: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_indexes = [row_index for row_index in row.get("row_indexes", []) if isinstance(row_index, int)]
+        document_path_hashes = [
+            str(document_path_hash).strip()
+            for document_path_hash in row.get("document_path_hashes", [])
+            if str(document_path_hash).strip()
+        ]
+        signatures.append(
+            {
+                "print_group_id": str(row.get("print_group_id", "")).strip(),
+                "mail_id": str(row.get("mail_id", "")).strip(),
+                "row_indexes": row_indexes,
+                "document_path_hashes": document_path_hashes,
+            }
+        )
+    return signatures
+
+
+def _expected_export_checklist_row_signatures(
+    *,
+    print_batches: list,
+    mail_outcomes: list[MailOutcomeRecord],
+) -> list[dict[str, Any]]:
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    signatures: list[dict[str, Any]] = []
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        row_indexes = _export_row_indexes_for_outcome(outcome) if outcome is not None else []
+        if outcome is not None:
+            document_path_hashes = [
+                record["document_path_hash"]
+                for record in _saved_documents_for_batch(batch=batch, outcome=outcome)
+                if record["document_path_hash"]
+            ]
+        else:
+            document_path_hashes = [
+                str(document_path_hash).strip()
+                for document_path_hash in batch.document_path_hashes
+                if str(document_path_hash).strip()
+            ]
+        for row_index in row_indexes:
+            signatures.append(
+                {
+                    "print_group_id": batch.print_group_id,
+                    "mail_id": batch.mail_id,
+                    "row_indexes": [row_index],
+                    "document_path_hashes": document_path_hashes,
+                }
+            )
+    return signatures
+
+
+def _build_export_checklist_rows(
+    *,
+    run_report: RunReport,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+    workbook_snapshot: WorkbookSnapshot,
+    live_workbook_path: Path | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    export_header_mapping = resolve_export_header_mapping(workbook_snapshot)
+    if export_header_mapping is None:
+        raise PrintAnnotationChecklistError(
+            code="workbook_header_mapping_invalid",
+            message="Print-annotation checklist generation requires deterministic export workbook header mapping.",
+            details={"sheet_name": workbook_snapshot.sheet_name},
+        )
+    header_text_by_index = {
+        header.column_index: header.text.strip()
+        for header in workbook_snapshot.headers
+    }
+    sl_no_column_index = _resolve_sl_no_column_index(workbook_snapshot)
+    workbook_columns = [
+        {
+            "column_key": column_key,
+            "column_index": column_index,
+            "header_text": header_text_by_index.get(column_index, column_key),
+        }
+        for column_key, column_index in sorted(
+            [("sl_no", sl_no_column_index), *export_header_mapping.items()],
+            key=lambda item: item[1],
+        )
+    ]
+    planned_row_indexes = _planned_export_row_indexes(
+        mail_outcomes=mail_outcomes,
+        print_batches=print_batches,
+    )
+    column_values_by_key = {
+        column["column_key"]: _resolve_column_values_by_row(
+            workbook_snapshot=workbook_snapshot,
+            column_index=int(column["column_index"]),
+            live_workbook_path=live_workbook_path,
+            row_indexes=planned_row_indexes,
+            error_code=(
+                "print_annotation_sl_no_unresolved"
+                if column["column_key"] == "sl_no"
+                else "print_annotation_generation_failed"
+            ),
+            error_message=(
+                "The live workbook SL.No. display text could not be read for a selected checklist row."
+                if column["column_key"] == "sl_no"
+                else (
+                    "The live workbook displayed value could not be read for a selected export checklist row."
+                )
+            ),
+        )
+        for column in workbook_columns
+    }
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    rows: list[dict[str, Any]] = []
+    sequence = 1
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        if outcome is None:
+            raise PrintAnnotationChecklistError(
+                code="print_annotation_generation_failed",
+                message="A planned export print group did not resolve to its mail outcome record.",
+                details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
+            )
+        row_indexes = _export_row_indexes_for_outcome(outcome)
+        if not row_indexes:
+            raise PrintAnnotationChecklistError(
+                code="print_annotation_generation_failed",
+                message="A planned export print group had no staged workbook rows for checklist generation.",
+                details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
+            )
+        document_records = _saved_documents_for_batch(batch=batch, outcome=outcome)
+        document_filenames = [record["document_filename"] for record in document_records]
+        document_filename_value = "\n".join(document_filenames)
+        saved_document_ids = [record["saved_document_id"] for record in document_records if record["saved_document_id"]]
+        document_path_hashes = [record["document_path_hash"] for record in document_records if record["document_path_hash"]]
+        mail_group_row_count = len(row_indexes)
+        for row_position, row_index in enumerate(row_indexes):
+            workbook_values: list[dict[str, Any]] = []
+            for column in workbook_columns:
+                value = str(column_values_by_key[column["column_key"]].get(row_index, "") or "")
+                if column["column_key"] == "sl_no" and not value.strip():
+                    raise PrintAnnotationChecklistError(
+                        code="print_annotation_sl_no_unresolved",
+                        message="A selected export checklist row did not yield a readable workbook SL.No. value.",
+                        details={
+                            "mail_id": batch.mail_id,
+                            "row_index": row_index,
+                            "print_group_id": batch.print_group_id,
+                        },
+                    )
+                workbook_values.append(
+                    {
+                        "column_key": column["column_key"],
+                        "column_index": column["column_index"],
+                        "header_text": column["header_text"],
+                        "value": value,
+                    }
+                )
+            workbook_value_by_key = {
+                str(item["column_key"]): str(item["value"])
+                for item in workbook_values
+            }
+            rows.append(
+                {
+                    "print_sequence": sequence,
+                    "print_group_id": batch.print_group_id,
+                    "mail_id": batch.mail_id,
+                    "workflow_id": run_report.workflow_id.value,
+                    "row_index": row_index,
+                    "row_indexes": [row_index],
+                    "sl_no_values": [workbook_value_by_key.get("sl_no", "").strip()],
+                    "lc_sc": workbook_value_by_key.get("lc_sc_no", "").strip(),
+                    "bangladesh_bank_ref": workbook_value_by_key.get("bangladesh_bank_ref", "").strip(),
+                    "mail_subject": outcome.subject_raw,
+                    "document_filename": document_filename_value,
+                    "document_filenames": document_filenames,
+                    "saved_document_ids": saved_document_ids,
+                    "document_path_hashes": document_path_hashes,
+                    "mail_group_row_count": mail_group_row_count,
+                    "mail_group_first_row": row_position == 0,
+                    "workbook_values": workbook_values,
+                }
+            )
+            sequence += 1
+    return workbook_columns, rows
+
+
+def _planned_export_row_indexes(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+) -> set[int]:
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    row_indexes: set[int] = set()
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        if outcome is None:
+            continue
+        row_indexes.update(_export_row_indexes_for_outcome(outcome))
+    return row_indexes
+
+
+def _export_row_indexes_for_outcome(outcome: MailOutcomeRecord) -> list[int]:
+    row_indexes = {
+        row_index
+        for operation in outcome.staged_write_operations
+        if isinstance(operation, dict)
+        for row_index in [operation.get("row_index")]
+        if isinstance(row_index, int)
+    }
+    return sorted(row_indexes)
+
+
+def _saved_documents_for_batch(
+    *,
+    batch,
+    outcome: MailOutcomeRecord,
+) -> list[dict[str, str]]:
+    saved_documents_by_path = {
+        str(document.get("destination_path", "")).strip(): document
+        for document in outcome.saved_documents
+        if str(document.get("destination_path", "")).strip()
+    }
+    records: list[dict[str, str]] = []
+    for document_path, document_path_hash in zip(batch.document_paths, batch.document_path_hashes):
+        saved_document = saved_documents_by_path.get(document_path)
+        if isinstance(saved_document, dict):
+            document_filename = str(
+                saved_document.get("normalized_filename")
+                or saved_document.get("attachment_name")
+                or Path(document_path).name
+            ).strip()
+            saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+        else:
+            document_filename = Path(document_path).name
+            saved_document_id = ""
+        records.append(
+            {
+                "saved_document_id": saved_document_id,
+                "document_filename": document_filename,
+                "document_path_hash": str(document_path_hash),
+            }
+        )
+    return records
 
 
 def build_print_annotation_source_documents(
@@ -800,6 +1086,10 @@ def _join_distinct_row_values(
 
 
 def _build_print_annotation_html(payload: dict[str, Any]) -> str:
+    workflow_id = str(payload.get("workflow_id", "")).strip()
+    if workflow_id == WorkflowId.EXPORT_LC_SC.value:
+        return _build_export_print_annotation_html(payload)
+
     rows = payload.get("rows", [])
     if not isinstance(rows, list):
         rows = []
@@ -871,6 +1161,98 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "</body>\n"
         "</html>\n"
     )
+
+
+def _build_export_print_annotation_html(payload: dict[str, Any]) -> str:
+    rows = payload.get("rows", [])
+    if not isinstance(rows, list):
+        rows = []
+    workbook_columns = payload.get("workbook_columns", [])
+    if not isinstance(workbook_columns, list):
+        workbook_columns = []
+    generated_value = str(
+        payload.get("generated_at_local_display")
+        or payload.get("generated_at_local")
+        or payload.get("generated_at_utc", "")
+    )
+    generated_timezone = str(payload.get("generated_at_timezone", "")).strip()
+    generated_label = generated_value
+    if generated_timezone and generated_timezone not in generated_value:
+        generated_label = f"{generated_value} ({generated_timezone})"
+    header_cells = [
+        "<th>Print Sequence</th>",
+        *[
+            f"<th>{escape(str(column.get('header_text', '')))}</th>"
+            for column in workbook_columns
+            if isinstance(column, dict)
+        ],
+        "<th>Mail Subject</th>",
+        "<th>Document Filename</th>",
+    ]
+    table_rows: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cells = [
+            f"<td>{escape(str(row.get('print_sequence', '')))}</td>",
+        ]
+        for workbook_value in row.get("workbook_values", []):
+            if not isinstance(workbook_value, dict):
+                continue
+            cells.append(f"<td>{_html_with_line_breaks(str(workbook_value.get('value', '')))}</td>")
+        if bool(row.get("mail_group_first_row", False)):
+            row_span = max(int(row.get("mail_group_row_count", 1) or 1), 1)
+            cells.append(
+                f'<td rowspan="{row_span}">{_html_with_line_breaks(str(row.get("mail_subject", "")))}</td>'
+            )
+            cells.append(
+                f'<td rowspan="{row_span}">{_html_with_line_breaks(str(row.get("document_filename", "")))}</td>'
+            )
+        table_rows.append("        <tr>" + "".join(cells) + "</tr>")
+    if not table_rows:
+        table_rows = [
+            '        <tr><td colspan="{}" class="empty">No printed export workbook rows required annotation for this run.</td></tr>'.format(
+                len(header_cells)
+            )
+        ]
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        "  <title>Print Annotation Checklist</title>\n"
+        "  <style>\n"
+        "    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 24px; color: #1f2933; }\n"
+        "    h1 { margin-bottom: 6px; }\n"
+        "    .meta { color: #52606d; margin-bottom: 18px; }\n"
+        "    table { width: 100%; border-collapse: collapse; }\n"
+        "    th, td { border: 1px solid #d9e2ec; padding: 10px 12px; text-align: left; vertical-align: top; }\n"
+        "    th { background: #f0f4f8; }\n"
+        "    .empty { color: #7b8794; font-style: italic; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "  <main>\n"
+        "    <h1>Print Annotation Checklist</h1>\n"
+        f'    <p class="meta">Run: {escape(str(payload.get("run_id", "")))} | Workflow: {escape(str(payload.get("workflow_id", "")))} | Generated: {escape(generated_label)}</p>\n'
+        "    <table>\n"
+        "      <thead>\n"
+        "        <tr>\n"
+        f"          {''.join(header_cells)}\n"
+        "        </tr>\n"
+        "      </thead>\n"
+        "      <tbody>\n"
+        f"{chr(10).join(table_rows)}\n"
+        "      </tbody>\n"
+        "    </table>\n"
+        "  </main>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _html_with_line_breaks(value: str) -> str:
+    return escape(value).replace("\n", "<br>")
 
 
 def _local_timestamp(*, generated_at: datetime, state_timezone: str) -> str:

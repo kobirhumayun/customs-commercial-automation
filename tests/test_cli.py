@@ -3548,6 +3548,349 @@ class CLITests(unittest.TestCase):
             self.assertEqual(checklist_payload["rows"][0]["bangladesh_bank_ref"], "BB-001")
             self.assertEqual(checklist_payload["rows"][0]["sl_no_values"], ["17"])
 
+    def test_generate_print_annotation_html_command_writes_export_checklist_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            workbook_json = root / "workbook.json"
+            workbook_json.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "SL.No."},
+                            {"column_index": 2, "text": "Commercial File No."},
+                            {"column_index": 3, "text": "L/C & S/C No."},
+                            {"column_index": 4, "text": "Name of Buyers"},
+                            {"column_index": 5, "text": "L/C Issuing Bank"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "Shipment Date"},
+                            {"column_index": 8, "text": "Expiry Date"},
+                            {"column_index": 9, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                            {"column_index": 10, "text": "L/C Amnd No."},
+                            {"column_index": 11, "text": "L/C Amnd Date"},
+                            {"column_index": 12, "text": "Lien Bank"},
+                            {"column_index": 13, "text": "Master L/C No."},
+                            {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 15, "text": "Bangladesh Bank Ref."},
+                            {"column_index": 16, "text": "LC Issue Date"},
+                        ],
+                        "rows": [
+                            {
+                                "row_index": 11,
+                                "values": {
+                                    "1": "17",
+                                    "2": "P/26/0042",
+                                    "3": "LC-0043",
+                                    "4": "ANANTA GARMENTS LTD",
+                                    "5": "ABC BANK",
+                                    "6": "12000",
+                                    "7": "2026-04-15",
+                                    "8": "2026-05-15",
+                                    "9": "1000",
+                                    "10": "",
+                                    "11": "",
+                                    "12": "XYZ BANK",
+                                    "13": "MLC-001",
+                                    "14": "2026-01-15",
+                                    "15": "BB-001",
+                                    "16": "2026-01-10",
+                                },
+                            },
+                            {
+                                "row_index": 12,
+                                "values": {
+                                    "1": "18",
+                                    "2": "P/26/0043",
+                                    "3": "LC-0043",
+                                    "4": "ANANTA GARMENTS LTD",
+                                    "5": "ABC BANK",
+                                    "6": "8000",
+                                    "7": "2026-04-20",
+                                    "8": "2026-05-20",
+                                    "9": "700",
+                                    "10": "1",
+                                    "11": "2026-02-01",
+                                    "12": "XYZ BANK",
+                                    "13": "MLC-001",
+                                    "14": "2026-01-15",
+                                    "15": "BB-002",
+                                    "16": "2026-01-10",
+                                },
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=["group-1"],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.PLANNED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="a@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        },
+                        {
+                            "saved_document_id": "doc-2",
+                            "normalized_filename": "PI-0043.pdf",
+                            "destination_path": "C:/docs/PI-0043.pdf",
+                        },
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                        {"row_index": 12, "column_key": "file_no"},
+                    ],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, []),
+            ):
+                with patch("project.cli.load_print_batches", return_value=print_batches):
+                    with redirect_stdout(buffer):
+                        exit_code = main(
+                            [
+                                "generate-print-annotation-html",
+                                "export_lc_sc",
+                                "--config",
+                                str(config_path),
+                                "--run-id",
+                                "run-123",
+                                "--workbook-json",
+                                str(workbook_json),
+                            ]
+                        )
+
+            payload = json.loads(buffer.getvalue())
+            artifact_root = root / "runs" / "export_lc_sc" / "run-123"
+            json_artifact = artifact_root / "print_annotation_checklist.json"
+            html_artifact = artifact_root / "print_annotation_checklist.html"
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["checklist_row_count"], 2)
+            self.assertTrue(json_artifact.exists())
+            self.assertTrue(html_artifact.exists())
+            checklist_payload = json.loads(json_artifact.read_text(encoding="utf-8"))
+            self.assertEqual(checklist_payload["rows"][0]["sl_no_values"], ["17"])
+            self.assertEqual(checklist_payload["rows"][1]["sl_no_values"], ["18"])
+            self.assertEqual(checklist_payload["rows"][0]["document_filename"], "LC-0043.pdf\nPI-0043.pdf")
+            self.assertIn("Commercial File No.", html_artifact.read_text(encoding="utf-8"))
+            self.assertIn('rowspan="2"', html_artifact.read_text(encoding="utf-8"))
+
+    def test_generate_print_annotation_html_command_allows_completed_export_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = _write_cli_config(root, workflow_year=workflow_year)
+            workbook_json = root / "workbook.json"
+            workbook_json.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "SL.No."},
+                            {"column_index": 2, "text": "Commercial File No."},
+                            {"column_index": 3, "text": "L/C & S/C No."},
+                            {"column_index": 4, "text": "Name of Buyers"},
+                            {"column_index": 5, "text": "L/C Issuing Bank"},
+                            {"column_index": 6, "text": "Amount"},
+                            {"column_index": 7, "text": "Shipment Date"},
+                            {"column_index": 8, "text": "Expiry Date"},
+                            {"column_index": 9, "text": "Quantity of Fabrics (Yds/Mtr)"},
+                            {"column_index": 10, "text": "L/C Amnd No."},
+                            {"column_index": 11, "text": "L/C Amnd Date"},
+                            {"column_index": 12, "text": "Lien Bank"},
+                            {"column_index": 13, "text": "Master L/C No."},
+                            {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 15, "text": "Bangladesh Bank Ref."},
+                            {"column_index": 16, "text": "LC Issue Date"},
+                        ],
+                        "rows": [
+                            {
+                                "row_index": 11,
+                                "values": {
+                                    "1": "17",
+                                    "2": "P/26/0042",
+                                    "3": "LC-0043",
+                                    "4": "ANANTA GARMENTS LTD",
+                                    "5": "ABC BANK",
+                                    "6": "12000",
+                                    "7": "2026-04-15",
+                                    "8": "2026-05-15",
+                                    "9": "1000",
+                                    "10": "",
+                                    "11": "",
+                                    "12": "XYZ BANK",
+                                    "13": "MLC-001",
+                                    "14": "2026-01-15",
+                                    "15": "BB-001",
+                                    "16": "2026-01-10",
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=["group-1"],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.COMPLETED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="a@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        }
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                    ],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf"],
+                    document_path_hashes=["hash-1"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, []),
+            ):
+                with patch("project.cli.load_print_batches", return_value=print_batches):
+                    with redirect_stdout(buffer):
+                        exit_code = main(
+                            [
+                                "generate-print-annotation-html",
+                                "export_lc_sc",
+                                "--config",
+                                str(config_path),
+                                "--run-id",
+                                "run-123",
+                                "--workbook-json",
+                                str(workbook_json),
+                            ]
+                        )
+
+            payload = json.loads(buffer.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["print_phase_status"], "completed")
+
     def test_execute_mail_moves_command_prints_completion_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3756,6 +4099,118 @@ class CLITests(unittest.TestCase):
                                 [
                                     "execute-mail-moves",
                                     "ud_ip_exp",
+                                    "--config",
+                                    str(config_path),
+                                    "--run-id",
+                                    "run-123",
+                                    "--simulate",
+                                ]
+                            )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["print_annotation_html_opened"])
+        open_mock.assert_called_once()
+
+    def test_execute_mail_moves_command_opens_export_print_annotation_html_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=["group-1"],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.COMPLETED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+                resolved_source_folder_entry_id="src-folder",
+                resolved_destination_folder_entry_id="dst-folder",
+                folder_resolution_mode="entry_id",
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.PRINTED,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=False,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="a@example.com",
+                    write_disposition="new_writes_staged",
+                    manual_document_verification_summary={
+                        "document_count": 2,
+                        "verified_count": 0,
+                        "pending_count": 0,
+                        "untracked_count": 2,
+                    },
+                )
+            ]
+            completed_report = replace(run_report, mail_move_phase_status=MailMovePhaseStatus.COMPLETED)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-123",
+            )
+            artifact_paths.print_annotation_checklist_html_path.write_text("<html></html>", encoding="utf-8")
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, []),
+            ):
+                with patch(
+                    "project.cli.execute_mail_moves",
+                    return_value=(completed_report, mail_outcomes, [], []),
+                ):
+                    with patch("project.cli.open_print_annotation_checklist_in_browser") as open_mock:
+                        with redirect_stdout(buffer):
+                            exit_code = main(
+                                [
+                                    "execute-mail-moves",
+                                    "export_lc_sc",
                                     "--config",
                                     str(config_path),
                                     "--run-id",
