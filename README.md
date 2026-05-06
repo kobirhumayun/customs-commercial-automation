@@ -10,7 +10,7 @@ For the shipped phase-1 operator summary, see `docs/release-notes.md`.
 - `docs/architecture.md` — system architecture and module boundaries.
 - `docs/workflows.md` — workflow-specific contracts for each CLI tool.
 - `docs/domain-rules.md` — durable business rules and invariants.
-- `docs/ud-ip-exp-implementation-handoff.md` — implementation handoff for the next `ud_ip_exp` workflow.
+- `docs/ud-ip-exp-implementation-handoff.md` — historical implementation handoff and status notes for `ud_ip_exp`.
 
 ## Phase 1 architectural direction
 - Monolithic Python codebase with clear internal modules.
@@ -31,6 +31,7 @@ For normal phase-1 operation, the primary operator commands are:
 - `report-live-readiness`
 - `validate-run`
 - `plan-print`
+- `generate-print-annotation-html` for `ud_ip_exp`
 - `execute-print`
 - `acknowledge-partial-print` when Acrobat times out after physical paper output
 - `execute-mail-moves`
@@ -39,7 +40,7 @@ For normal phase-1 operation, the primary operator commands are:
 
 The expected terminal paths are:
 - `new writes`:
-  `validate-run` stages and commits workbook rows, `plan-print`/`execute-print` handle newly saved PDFs, then `execute-mail-moves` moves the mail
+  `validate-run` stages and commits workbook rows, `plan-print` prepares print order, `ud_ip_exp` runs `generate-print-annotation-html`, `execute-print` submits newly saved PDFs, then `execute-mail-moves` moves the mail
 - `duplicate-only`:
   the mail is validated against ERP and workbook state, no new workbook row is written, no print is required, and `execute-mail-moves` may still move the mail as intentional duplicate-only handling
 
@@ -84,8 +85,9 @@ The released operator sequence is:
 1. `report-live-readiness`
 2. `validate-run`
 3. `plan-print`
-4. `execute-print`
-5. `execute-mail-moves`
+4. `generate-print-annotation-html` for `ud_ip_exp`
+5. `execute-print`
+6. `execute-mail-moves`
 
 Operational notes:
 - `acknowledge-partial-print` is the only supported recovery step when Acrobat times out after physical paper output.
@@ -100,6 +102,7 @@ Use this as the normal day-to-day workflow guide after release:
 1. Start with `validate-run`.
 2. Use `report-live-readiness` at session start, after environment/config changes, or whenever something looks off.
 3. If `validate-run` commits new writes and printable documents exist, run `plan-print` and `execute-print`.
+   For `ud_ip_exp`, insert `generate-print-annotation-html` between those two commands.
 4. If `execute-print` completes, run `execute-mail-moves`.
 5. If the mail is duplicate-only and no print is required, move directly to `execute-mail-moves` when the run is move-eligible.
 6. If a run stops with a hard block or no-write status, run `explain-run-failure` first to identify the exact cause.
@@ -120,11 +123,14 @@ For daily use on Windows, operators can launch the full happy-path cycle with th
   `scripts/run_live_cycle.ps1`
 - one-click `export_lc_sc` launcher:
   `scripts/run_export_lc_sc_live_cycle.cmd`
+- one-click `ud_ip_exp` launcher:
+  `scripts/run_ud_ip_exp_live_cycle.cmd`
 
 The launcher performs:
 - `report-live-readiness`
 - `validate-run --apply-live-writes`
 - `plan-print`
+- `generate-print-annotation-html --live-workbook` for `ud_ip_exp`
 - `execute-print`
 - `execute-mail-moves`
 - `report-run-status`
@@ -137,15 +143,21 @@ For normal live use, the launcher now uses a stable document root such as `D:\cu
 If a run stops, use this read-only explanation command first. It shows the primary cause, related secondary causes, affected mail subjects, workbook row/column details, and suggested next steps:
 
 ```powershell
-uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
+```
+
+For `ud_ip_exp`, use the same diagnostic command with the workflow id changed:
+
+```powershell
+uv run python -m project explain-run-failure ud_ip_exp --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
 ```
 
 ## Final E2E Test Commands
 Use this sequence for the final end-to-end release check on a fresh live mail:
 
 ```powershell
-$WORKFLOW = "export_lc_sc"
-$CONFIG = "D:\customs-automation\export_lc_sc.toml"
+$WORKFLOW = "export_lc_sc" # or "ud_ip_exp"
+$CONFIG = "D:\customs-automation\workflow.toml"
 $DOCROOT = "D:\customs-automation\documents-live-click"
 ```
 
@@ -164,6 +176,12 @@ uv run python -m project execute-mail-moves $WORKFLOW --config $CONFIG --run-id 
 uv run python -m project report-run-status $WORKFLOW --config $CONFIG --run-id $RUN_ID
 ```
 
+For `ud_ip_exp`, insert this checklist-generation step between `plan-print` and `execute-print`:
+
+```powershell
+uv run python -m project generate-print-annotation-html ud_ip_exp --config $CONFIG --run-id $RUN_ID --live-workbook
+```
+
 Expected final state:
 - `write_phase_status = committed`
 - `print_phase_status = completed`
@@ -175,13 +193,13 @@ If `execute-print` returns `print_phase_status = uncertain_incomplete` but Acrob
 Use the operator acknowledgment command to record how many leading PDFs in the planned print group physically printed:
 
 ```powershell
-uv run python -m project acknowledge-partial-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --printed-count <N>
+uv run python -m project acknowledge-partial-print export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>" --printed-count <N>
 ```
 
 Then rerun:
 
 ```powershell
-uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>" --live-print
+uv run python -m project execute-print export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>" --live-print
 ```
 
 If all planned PDFs physically printed during timeout/retry attempts, acknowledge the full count. The marker will be finalized as `completed`, and one final `execute-print` pass will close the print phase without sending any additional Acrobat submission commands.
@@ -215,13 +233,13 @@ The live ERP page currently behaves like a form-driven download flow rather than
 Example:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed
 ```
 
 Typical selector-driven run:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed `
   --fill "#fromDate=2026-03-01" `
   --fill "#toDate=2026-03-31" `
   --submit-selector "#btnShow" `

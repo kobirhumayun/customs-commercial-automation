@@ -60,7 +60,7 @@ The architecture must optimize for:
 9. **Matching and reconciliation engine**
    - ERP-to-email matching
    - workbook candidate-row filtering
-   - value/quantity combination logic
+   - value-first exact row-group selection with quantity validation inside the selected group
    - first-match or append/skip strategies depending on workflow
 10. **Excel adapter**
     - workbook open/lock assumptions
@@ -95,6 +95,34 @@ Each manually triggered CLI run should follow one explicit execution contract:
 7. **Rerun recovery gate** â€” if the prior run is marked uncertain/incomplete, perform recovery checks against the backup artifact and recorded staged write plan before any new write attempt is allowed, using the shared **Recovery Decision Matrix** contract defined in `docs/workflows.md` (required artifacts, exact outcomes, idempotency checks, and pseudocode flow).
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
+
+### Operator print-annotation checklist contract (normative)
+For workflows that print UD/Amendment documents, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
+
+Required checklist fields per printed document:
+- `print_sequence` (1-based sequence in physical print order)
+- `workflow_id`
+- `ud_or_amendment_no`
+- `lc_sc`
+- `bangladesh_bank_ref`
+- `sl_no_values` (list of workbook `SL.No.` values to annotate by hand)
+- `mail_subject`
+- `document_filename`
+
+Audit-support fields may also include `row_indexes`, but operators must not be asked to infer `SL.No.` from row coordinates.
+
+Checklist delivery requirements:
+- Checklist generation is a mandatory pre-print gate for workflows that print UD/Amendment documents; if checklist generation fails, the run must hard-block before any print or post-run mail-move execution can begin.
+- The system should emit durable machine-readable checklist artifacts as JSON under run artifacts.
+- A human-readable HTML checklist view should be generated before print execution from the same deterministic print-plan evidence.
+- The persisted print plan should also carry per-document checklist-source records for any printed UD/Amendment evidence so checklist generation can read row-selection mappings directly from planned print artifacts instead of reconstructing them from multiple mail-level fallbacks.
+- The generated HTML checklist should be opened automatically in the workstation's default browser only after the run reaches terminal mail-move success, so operators finish the full run with the final report already visible.
+
+#### `SL.No.` mapping rule (normative)
+- `SL.No.` is a business field and must be resolved from the workbook `SL.No.` header column value for each selected target row.
+- Workbook `row_index` and `SL.No.` must be treated as distinct identifiers.
+- Operator-facing reports/checklists must include resolved `sl_no_values`; they may include `row_indexes` only as supplemental trace fields.
+- If any selected row has missing/unreadable `SL.No.` during checklist generation, the checklist phase must hard-block and emit a discrepancy artifact.
 
 ### Workbook contention protocol (normative)
 Before any write-capable phase transitions to target pre-validation, the orchestrator must run workbook contention preflight checks:
@@ -199,11 +227,24 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### UD / IP / EXP CLI
 - Shares intake, storage, and parsing services with export workflow.
+- Mail composition follows a fixed contract: one mail may contain only UD documents (single or multiple), only EXP documents, or EXP together with at most one deterministic IP document. A mail containing IP must also contain EXP, and a mail mixing any UD document with any IP/EXP document is invalid.
 - Processes only the LC/SC family confirmed by validating all extracted email-body file numbers against ERP data.
 - Saves only new PDFs and records all saved paths.
-- Extraction pipeline captures document numbers, dates, LC/SC references, quantities, and units.
-- Matching engine locates candidate workbook rows and applies UD combination logic or IP/EXP total matching rules.
-- Shared workbook column `UD No. & IP No.` stores UD values directly and EXP/IP values with ordered prefixes.
+- Email subject text is not authoritative for family resolution; the body file number selects the canonical ERP row, and the ERP row supplies LC/SC, buyer, LC/SC date, and `Ship. Remarks`.
+- The UD/IP/EXP document reader is filename-gated: only PDFs beginning `UD-`, beginning `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP` are processed as UD/IP/EXP documents. For EXP, `123-EXP.pdf` is accepted while `123-EXP-INVOICE.pdf` is skipped so the workflow prioritizes the machine-generated text-layer file over scanned descriptor variants.
+- Explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is a guardrail only: it must agree with the ERP-derived LC/SC suffix, and it must never replace email-body file-number plus ERP family resolution.
+- Structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`.
+- Structured UD extraction must locate the page-1 UD/AM identifier row strictly by the office-use-only label: Base UD uses `UD No (For office use only)` and UD Amendment uses `Amendment no. (For office use only)`. The `For office use only` text is mandatory, no alternate row-label fallback is allowed, and the UD/AM number plus document date must both come from that same matched row. If the extracted row value does not align with the BGMEA UD/AM pattern, the mail hard-blocks.
+- Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. `Ship. Remarks` matching remains exact. ERP `LC No.` matching is exact first; if exact matching fails, only leading zeros on the left side may be stripped from the ERP/table LC strings for comparison. Leading and trailing spaces around compared values may be trimmed, but internal spaces must remain unchanged. No punctuation, separators, internal zeros, or other characters may be modified. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
+- For structured UD Amendments only, the LC table value normally comes from the `Increased/Decreased` column. If that extracted amendment value is numeric zero, the LC is treated as newly included in the amendment and the workflow uses the row's `Value` column instead. Base UD value extraction continues to use the documented base-UD value column.
+- Before staging a structured UD write, the workflow first checks for an already-recorded workbook group carrying the same UD/AM value in `UD No. & IP No.` plus the same `UD & IP Date`; if those rows also satisfy the same value and quantity checks, the mail becomes a duplicate-only no-op with no workbook write or print obligation.
+- Structured UD validation requires the extracted LC/SC date to match ERP `LC DT.`, then filters workbook rows to the ERP family and identifies exact workbook `Amount` column 6 groups that match the extracted UD/AM value within tolerance. Quantity never drives initial row identification.
+- Structured UD quantity validation aggregates Pioneer Denim supplier rows by unit and compares only against the value-selected workbook row group.
+- Workbook quantity units for structured UD validation come from the workbook quantity cell number format: `#,###.00 "Mtr"` means `MTR`; other formats default to `YDS`.
+- Successful structured UD writes stage `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date`; dates are written as `DD/MM/YYYY`.
+- Structured UD writes stage only when every target cell for those three columns is blank; unexpected non-blank target cells hard-block instead of being appended or overwritten.
+- IP/EXP processing now follows the conservative documented phase-1 path: valid non-UD shapes are `EXP-only` and `EXP+IP`, row targeting is family-wide across the verified ERP LC/SC family, and shared/date writes remain blank-only with exact already-recorded matches treated as duplicate-only no-ops.
+- The current code stages family-wide IP/EXP workbook writes for `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date` after required-field, family-row, and non-conflicting blank-target checks pass.
 - Write is blocked if matching rules are incomplete, contradictory, or leave unresolved discrepancies under the defined thresholds.
 
 ### Import / BTB LC CLI
@@ -496,6 +537,7 @@ Required fields:
 - `print_group_index` (integer): deterministic rank in `print_group_order`.
 - `document_path_hashes` (array): SHA-256 hashes for print payload documents in group order.
 - `completion_marker_id` (string): `sha256(run_id + "|" + mail_id + "|" + print_group_index + "|" + joined_document_hashes)`.
+- `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `row_indexes`, and `checklist_required`.
 
 ### `MailMoveOperation`
 Required fields:
@@ -624,4 +666,3 @@ excel_lock_timeout_seconds = 120
 
 ## 9. Artifact storage layout reference
 Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.
-

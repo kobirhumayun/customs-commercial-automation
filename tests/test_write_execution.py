@@ -3,6 +3,7 @@
 import json
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 from project.config import load_workflow_config
@@ -22,10 +23,24 @@ from project.workflows.bootstrap import initialize_workflow_run
 from project.workflows.registry import get_workflow_descriptor
 from project.workflows.snapshot import build_email_snapshot, load_snapshot_manifest
 from project.workflows.validation import validate_run_snapshot
-from project.workflows.write_execution import execute_live_write_batch
+from project.workflows.write_execution import _coerce_write_value, execute_live_write_batch
 
 
 class WriteExecutionTests(unittest.TestCase):
+    def test_coerce_write_value_sends_date_formatted_strings_as_dates(self) -> None:
+        self.assertEqual(
+            _coerce_write_value("07/04/2026", number_format="dd/mm/yyyy"),
+            date(2026, 4, 7),
+        )
+        self.assertEqual(
+            _coerce_write_value("2026-04-16", number_format="dd/mm/yyyy"),
+            date(2026, 4, 16),
+        )
+        self.assertEqual(
+            _coerce_write_value("07/04/2026", number_format=None),
+            "07/04/2026",
+        )
+
     def test_execute_live_write_batch_commits_and_emits_commit_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

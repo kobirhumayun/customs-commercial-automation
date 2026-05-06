@@ -1,6 +1,6 @@
 param(
     [string]$Workflow = "export_lc_sc",
-    [string]$Config = "D:\customs-automation\export_lc_sc.toml",
+    [string]$Config = "D:\customs-automation\workflow.toml",
     [string]$DocumentRootBase = "D:\customs-automation\documents-live-click",
     [string]$LauncherLogRoot = "D:\customs-automation\reports\launcher_logs",
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
@@ -182,9 +182,20 @@ try {
     $runId = [string]$validate.Json.run_id
     $writePhaseStatus = [string]$validate.Json.write_phase_status
     $hardBlockCount = [int]$validate.Json.summary.hard_block
+    $stagedWriteOperationCount = [int]$validate.Json.staged_write_operation_count
 
     Write-Host ""
     Write-Host "Run ID: $runId" -ForegroundColor Green
+
+    if ($hardBlockCount -gt 0) {
+        Write-Section "Failure Explanation"
+        $explanation = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "explain-run-failure", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId
+        )
+    }
 
     if ($writePhaseStatus -notin @("committed", "not_started")) {
         Write-Host "Write phase stopped at '$writePhaseStatus'. Stopping before print." -ForegroundColor Yellow
@@ -200,6 +211,53 @@ try {
         Write-Host "Blocked mails will stay out of downstream print/mail-move handling for this run." -ForegroundColor Yellow
     }
 
+    if ($stagedWriteOperationCount -eq 0) {
+        Write-Host "No workbook writes were staged; skipping print planning and print execution." -ForegroundColor Yellow
+        $status = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "report-run-status", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId
+        )
+        $eligibleMailMoveCount = [int]$status.Json.mail_move_policy_summary.eligible_mail_count
+
+        if ($eligibleMailMoveCount -gt 0) {
+            Write-Section "Execute Mail Moves"
+            $mailMove = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "execute-mail-moves", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId,
+                "--live-outlook"
+            )
+
+            Write-Section "Final Status"
+            $status = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "report-run-status", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId
+            )
+        } else {
+            Write-Host "No mails remain eligible for downstream movement; skipping mail moves." -ForegroundColor Yellow
+            Write-Section "Final Status"
+            $status = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "report-run-status", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId
+            )
+        }
+
+        Write-Host ""
+        Write-Host "Live cycle completed without workbook writes." -ForegroundColor Green
+        Write-Host "Run ID: $runId" -ForegroundColor Green
+        Write-Host "Write: $($status.Json.manual_verification.write_phase_status)" -ForegroundColor Green
+        Write-Host "Print: $($status.Json.manual_verification.print_phase_status)" -ForegroundColor Green
+        Write-Host "Mail move: $($status.Json.manual_verification.mail_move_phase_status)" -ForegroundColor Green
+        Finish-Script 0
+    }
+
     Write-Section "Plan Print"
     $plan = Invoke-ProjectJsonCommand -Arguments @(
         "run", "python", "-m", "project",
@@ -207,6 +265,17 @@ try {
         "--config", $Config,
         "--run-id", $runId
     )
+
+    if ($Workflow -eq "ud_ip_exp") {
+        Write-Section "Generate Print Annotation"
+        $printAnnotation = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "generate-print-annotation-html", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId,
+            "--live-workbook"
+        )
+    }
 
     Write-Section "Execute Print"
     $print = Invoke-ProjectJsonCommand -Arguments @(

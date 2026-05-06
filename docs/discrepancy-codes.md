@@ -46,6 +46,10 @@ Every discrepancy payload should include:
 | `print_marker_mismatch` | `hard_block` | shared | A persisted print completion marker conflicted with the planned print group identity. |
 | `print_source_document_missing` | `hard_block` | shared | A planned print document path was missing at print execution time. |
 | `print_group_runtime_error` | `hard_block` | shared | A runtime error interrupted print execution for a planned print group. |
+| `print_annotation_generation_failed` | `hard_block` | shared | The mandatory pre-print annotation checklist could not be generated from the persisted run evidence. |
+| `print_annotation_sl_no_unresolved` | `hard_block` | shared | One or more selected checklist target rows did not yield a readable workbook `SL.No.` value. |
+| `print_annotation_checklist_missing_or_invalid` | `hard_block` | shared | The mandatory pre-print annotation checklist artifact was missing or did not match the active print plan. |
+| `print_annotation_browser_open_failed` | `warning` | shared | The print-annotation checklist HTML was generated successfully, but the system could not open it automatically in the default browser. |
 | `mail_move_gate_unsatisfied` | `hard_block` | shared | Mail moves were attempted before required upstream phases reached terminal success. |
 | `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
 | `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |
@@ -79,6 +83,30 @@ Every discrepancy payload should include:
 | Code | Severity | Scope | Description |
 |---|---|---|---|
 | `ud_candidate_tie_after_full_tiebreak` | `hard_block` | ud_ip_exp | UD row-combination selection tied after all deterministic keys. |
+| `ud_duplicate_document_same_mail` | `warning` | ud_ip_exp | Duplicate UD/AM evidence within one mail was deterministically ignored after matching by BGMEA number or duplicate filename evidence. |
+| `ud_duplicate_document_same_run` | `warning` | ud_ip_exp | A later mail in the same run carried a UD/AM already staged by an earlier mail, so it was treated as duplicate-only with no new write. |
+| `ud_live_document_conflict` | `hard_block` | ud_ip_exp | Multiple live-derived UD attachments in one mail disagree on required UD evidence such as date or quantity, so deterministic processing is blocked. |
+| `ud_file_number_missing` | `hard_block` | ud_ip_exp | UD/IP/EXP mail body did not yield any canonical file numbers for ERP family resolution. |
+| `ud_erp_row_missing` | `hard_block` | ud_ip_exp | One or more extracted UD/IP/EXP file numbers did not resolve to a canonical ERP row. |
+| `ud_family_inconsistent` | `hard_block` | ud_ip_exp | Resolved ERP rows for extracted UD/IP/EXP file numbers did not belong to one LC/SC family. |
+| `ud_ip_exp_mail_shape_invalid` | `hard_block` | ud_ip_exp | The mail's deterministic document composition is invalid for phase 1, such as UD mixed with IP/EXP, IP without EXP, or more than one EXP/IP payload of the same kind. |
+| `ud_filename_lc_suffix_mismatch` | `hard_block` | ud_ip_exp | A UD/IP/EXP attachment filename explicitly carrying a `UD-LC-...` or `UD-SC-...` suffix does not agree with the ERP-derived LC/SC family suffix. |
+| `ud_required_document_missing` | `hard_block` | ud_ip_exp | No deterministic UD/IP/EXP document payload was available for processing. |
+| `ud_required_field_missing` | `hard_block` | ud_ip_exp | A UD document payload is missing one or more mandatory extracted fields. |
+| `ud_required_field_invalid` | `hard_block` | ud_ip_exp | A UD document payload contains a mandatory field that is present but invalid, such as an unparseable date or non-BGMEA UD/AM number. |
+| `ud_document_number_pattern_mismatch` | `hard_block` | ud_ip_exp | A UD attachment did not yield an extracted BGMEA UD/AM number matching the required workbook-write pattern; filename fallback is not allowed. |
+| `ud_allocation_unresolved` | `hard_block` | ud_ip_exp | UD quantity allocation did not produce a selected candidate row combination. |
+| `ud_lc_date_mismatch` | `hard_block` | ud_ip_exp | Structured UD/AM LC table date did not match the ERP LC/SC date. |
+| `ud_lc_value_match_unresolved` | `hard_block` | ud_ip_exp | Structured UD/AM LC value did not identify any exact workbook value-matched row group in the verified LC/SC family. |
+| `ud_quantity_below_workbook` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity was less than the selected workbook quantity for a unit. |
+| `ud_quantity_excess_below_threshold` | `hard_block` | ud_ip_exp | Structured UD/AM supplier quantity exceeded workbook quantity by less than the required 50-unit threshold. |
+| `ud_target_row_conflict` | `hard_block` | ud_ip_exp | The candidate UD/AM row group is already assigned to a different UD/AM document, or the existing UD date conflicts with the candidate document. |
+| `ud_shared_column_nonblank_policy_unresolved` | `hard_block` | ud_ip_exp | Selected UD target row has one or more non-blank UD target cells; phase 1 does not write to any workbook target cell that already contains a value. |
+| `ip_exp_required_field_missing` | `hard_block` | ud_ip_exp | An EXP or IP document payload is missing one or more mandatory extracted fields required for deterministic phase-1 staging. |
+| `ip_exp_required_field_invalid` | `hard_block` | ud_ip_exp | An EXP or IP document payload contains an invalid or contradictory required field, such as an unparseable date, conflicting family LC/SC number, or inconsistent same-mail document date. |
+| `ip_exp_family_row_missing` | `hard_block` | ud_ip_exp | The verified ERP LC/SC family did not resolve to any existing workbook row for family-wide IP/EXP staging. |
+| `ip_exp_target_row_conflict` | `hard_block` | ud_ip_exp | One or more family-wide IP/EXP target rows already contain a different non-blank shared/date value, so phase 1 staging cannot append, merge, or replace them. |
+| `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | Historical pre-policy code retained for backward compatibility with older run artifacts created before the deterministic phase-1 IP/EXP path was documented and implemented. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

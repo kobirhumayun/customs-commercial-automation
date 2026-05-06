@@ -42,7 +42,7 @@ The command returns JSON records containing `display_name`, `folder_path`, `entr
 If a run stops with `hard_blocked_no_write`, `uncertain_not_committed`, `hard_blocked`, or another attention-required phase status, operators should first run the read-only explanation command:
 
 ```powershell
-uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --run-id "<RUN_ID>"
+uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
 ```
 
 The command summarizes primary causes separately from secondary effects by reading persisted run artifacts such as `discrepancies.jsonl`, `mail_outcomes.jsonl`, `target_probes.jsonl`, and `staged_write_plan.json`. It must not mutate Outlook, ERP, workbook, print, mail-move, or run artifacts. It is the preferred operator-facing first step before deciding whether the correct action is to fix input mails, clean a partial workbook row, use recovery, or simply rerun after correcting the environment.
@@ -51,7 +51,7 @@ The command summarizes primary causes separately from secondary effects by readi
 When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed
 ```
 
 The command accepts repeated `--fill SELECTOR=VALUE` inputs plus optional selectors for submit, post-submit wait state, download menu, and download format click.
@@ -62,7 +62,7 @@ For stable local reuse, the same fill values may be stored in config under:
 Typical example:
 
 ```powershell
-uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\export_lc_sc.toml" --headed `
+uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed `
   --fill "#fromDate=2026-03-01" `
   --fill "#toDate=2026-03-31" `
   --submit-selector "#btnShow" `
@@ -600,27 +600,86 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 
 ### Inputs
 - Outlook folder: `working`; snapshot all messages in the folder when the CLI is triggered
-- PDF attachments for UD, EXP, and/or IP
+- Email body file numbers resolved through the ERP register report, using the same canonical file-number extraction and one-family consistency checks as `export_lc_sc`
+- PDF attachments in one of these valid mail shapes only:
+  - UD-only (single or multiple UD documents)
+  - EXP-only
+  - EXP with at most one deterministic IP document
 - Existing master workbook rows for the same LC/SC family
 
+### Initial live-document validation boundary
+- a mail must not mix any UD document with any IP/EXP document
+- if any IP document is present in a mail, at least one EXP document must also be present
+- the email subject is not a required or authoritative input for `ud_ip_exp`; subject parsing must not drive family resolution, storage, validation, printing, or mail movement
+- LC/SC family resolution for live `ud_ip_exp` processing must come from email body file numbers plus ERP lookup, matching the `export_lc_sc` family rules for LC/SC number, normalized buyer, and LC/SC date
+- the live `ud_ip_exp` reader saves all new PDF attachments for successful-mail downstream handling, but only PDFs whose filenames begin `UD-`, begin `IP-`, or whose filename stem is exactly one or more digits followed by `-EXP` are used for UD/IP/EXP document analysis
+- EXP filenames with trailing descriptors, such as `123-EXP-INVOICE.pdf`, are skipped because the strict `123-EXP.pdf` form identifies the machine-generated text-layer file preferred for extraction accuracy
+- live saved-document analysis may derive UD/IP/EXP document number, date, LC/SC number, quantity, and unit from saved PDFs before rule evaluation, but PDF-derived LC/SC evidence is validation evidence only and must not replace the ERP-derived family
+- live UD attachment saving/classification must hard-block if PDF-derived LC/SC evidence contradicts the ERP-derived LC/SC family for the mail
+- if a live UD/IP/EXP attachment filename explicitly follows `UD-LC-<suffix>` or `UD-SC-<suffix>`, that suffix is a sanity check only and must match the end of the ERP-derived LC/SC number; mismatch hard-blocks with attachment-level evidence, while filenames without that explicit pattern are not used for lookup
+- structured Base UD PDFs are identified by `UD Authenticating Authority` on page 1; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority` on page 1
+- structured UD/AM number/date extraction must locate the page-1 office-use-only row strictly by label: Base UD uses `UD No (For office use only)` and UD Amendment uses `Amendment no. (For office use only)`; `For office use only` is mandatory, no alternate row-label fallback is allowed, and both the UD/AM number and document date must come from that same matched row
+- if the extracted office-use-only UD/AM number does not align with the BGMEA `BGMEA/<office>/<UD-or-AM>/...` pattern, the mail must hard-block; attachment filenames are not fallback workbook values
+- structured UD LC/SC table extraction must match rows by exact ERP `Ship. Remarks` when present/found, otherwise ERP `LC No.`; ERP `LC No.` matching is exact first and may fall back only to stripping leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, but internal spaces and all other characters must remain unchanged; ERP values are sourced from the email-body file number lookup
+- for structured UD Amendments only, the extracted LC value comes from the `Increased/Decreased` column unless that value is numeric zero; when it is zero, use the row's `Value` column because the LC is being included in the amendment for the first time
+- the extracted UD LC/SC table date must match the ERP LC/SC date before workbook writes are allowed
+- the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
+- structured UD quantity extraction must aggregate rows for supplier `PIONEER DENIM LIMITED` or `PIONEER DENIM LTD`, applying supplier `DO` fill-down in the supplier column before filtering
+- structured UD quantity validation derives the workbook quantity unit from the `Quantity of Fabrics (Yds/Mtr)` cell number format: `#,###.00 "Mtr"` means `MTR`, and all other formats default to `YDS`
+- batch validation must preserve row number formats when advancing the in-memory workbook snapshot after staged writes, so later mails in the same run keep the workbook-authored `MTR`/`YDS` quantity-unit evidence
+- live UD attachment saving/classification must also hard-block if multiple live-derived UD attachments in the same mail disagree on required UD evidence such as `document_date` or `quantity`
+- same-mail duplicate UD/AM handling must first dedupe by BGMEA UD/AM number and then by duplicate filename evidence; later duplicates are ignored only when their extracted evidence agrees exactly, otherwise the mail hard-blocks
+- for multiple UD/AM documents in the same mail, deterministic processing order is document date first, BGMEA UD/AM number second, and original attachment order third
+- when multiple same-family UD payloads are available, each UD payload is validated and allocated independently in deterministic order; later UD payloads in the same mail may use only workbook rows not already claimed earlier in that mail
+- across different mails in the same run, later `ud_ip_exp` validation must evaluate against the in-memory workbook snapshot advanced by earlier successful mails
+- this deterministic per-document processing does not relax validation: any UD payload missing required fields must still hard-block with attachment/document-level evidence before workbook writes
+- these hard blocks must include attachment-level evidence in the discrepancy/details payload so the operator can see which documents disagreed
+- live `ud_ip_exp` attachment storage must use the same canonical export attachment hierarchy as `export_lc_sc`, rooted at the ERP-derived LC/SC family: `Year / Buyer Name / LC-or-SC Number / All Attachments`
+- ERP `LC No.`/`L/C & S/C No.` family context and ERP `Ship. Remarks` are the primary linkage inputs for structured Base UD and UD Amendment PDF property extraction
+- EXP-only and EXP+IP mails now follow a conservative family-wide phase-1 path:
+  - at most one deterministic EXP payload and at most one deterministic IP payload are allowed in one mail
+  - all IP/EXP documents in the mail must resolve to one normalized document date because the workbook exposes one shared `UD & IP Date` field per target row
+  - PDF-derived LC/SC evidence remains validation-only and must agree with the ERP-derived family when present
+  - the target row set is every existing workbook row in the verified ERP LC/SC family
+  - quantity and value evidence on IP/EXP documents is retained for reporting/provenance only and does not drive row selection in phase 1
+
+### Batch execution behavior
+- blocked emails remain in `working`
+- successfully processed `ud_ip_exp` emails with new writes move using the same staged post-write/post-print movement model as `export_lc_sc`
+- print batches are built from successful `ud_ip_exp` mails in the active run snapshot, using all newly saved PDFs after the workbook write commit
+- the `ud_ip_exp` operator print-annotation checklist remains UD/Amendment-only; supporting PDFs may still print but do not require workbook row-selection evidence
+- duplicate-only/no-write movement behavior for `ud_ip_exp` follows the shared staged mail-move gates once validation succeeds and no print obligation exists
+
 ### Shared-column behavior
-- Column `UD No. & IP No.` stores UD/EXP/IP values together.
-- UD entries have no prefix.
-- EXP entries use `EXP: ` prefix.
-- IP entries use `IP: ` prefix.
-- When both EXP and IP exist, EXP must be listed before IP.
+- Column `UD No. & IP No.` uses plain UD values, `EXP: ` prefixes for EXP, and `IP: ` prefixes for IP.
+- When both EXP and IP are formatted together, EXP must be listed before IP.
 - Multiple entries are line-break separated.
+- For EXP-only and EXP+IP mails, the formatted shared-column value is written identically to every workbook row in the verified ERP family.
+- `UD & IP Date` is written from the normalized IP/EXP document date as `DD/MM/YYYY`.
+- `UD Recv. Date` is written from the current workflow date as `DD/MM/YYYY`.
+- Exact already-recorded family-wide matches are treated as duplicate-only/no-write.
+- If any target row already contains a different non-blank shared/date value, the mail hard-blocks; phase 1 does not append, merge, or replace existing values.
 
 ### UD allocation logic
-- extract UD number, date, LC/SC number, quantity, quantity unit, and relevant values
-- find candidate rows for the LC/SC family
-- select the first occurrence of each required row value, even when combinations are non-sequential
-- maintain a multiset/bag of remaining values so duplicates are handled correctly
-- write UD number to matched rows only if quantity rules are satisfied
-- ignore excess quantity only when excess is at least 50 yards/meters; otherwise hard-block
+- extract UD/AM number, UD/AM date, LC/SC date, LC/SC value, and supplier quantities by unit
+- UD allocation requires value-first evidence for every write-capable UD payload: `lc_sc_date`, `lc_sc_value`, and `quantity_by_unit`
+- first check workbook rows in the ERP LC/SC family for an already-recorded UD value with matching `UD & IP Date`; if those rows satisfy the same value and quantity checks, treat the mail as a successful duplicate no-op with no write or print obligation
+- otherwise, filter workbook rows to the ERP LC/SC family, exclude rows where `UD No. & IP No.` is already populated, and identify candidate row groups only by exact workbook `Amount` column 6 matches against the extracted UD LC/SC value within tolerance
+- after a value-matched row group is identified, sum workbook quantities for only that row group by unit
+- derive workbook quantity units for the selected target row group from each quantity cell's number format (`#,###.00 "Mtr"` means `MTR`; otherwise `YDS`)
+- compare each workbook unit total against the corresponding UD supplier quantity total
+- pass quantity validation only when UD quantity equals workbook quantity or the UD excess is at least 50 yards/meters; hard-block when UD quantity is less than workbook quantity or excess is greater than zero but below 50
+- if no exact workbook value group exists for the extracted LC/SC value, hard-block with `ud_lc_value_match_unresolved`
+- structured UD writes stage the UD/AM number, UD/AM date, and current workflow receive date only if value and quantity rules are satisfied and every target cell for those fields is blank
+- `UD & IP Date` is written from the UD/AM document date as `DD/MM/YYYY`; `UD Recv. Date` is written as the current workflow date in the same format
+- cross-mail duplicate behavior is row-scoped, not global-document-scoped:
+  - if a later mail resolves to the same selected rows with the same UD/AM number and matching UD date evidence, it becomes `duplicate_only_noop` with warning code `ud_duplicate_document_same_run`
+  - the same UD/AM number may still stage independently in a different LC/SC family when it resolves to different workbook rows
+  - a different UD/AM number in the same LC/SC family may stage only if later validation finds a different remaining value-matched blank row group
+  - if a later different-number UD/AM mail reuses rows already claimed by an earlier mail, it hard-blocks with `ud_target_row_conflict`
 
-#### UD row-combination candidate scoring and tie-break order (normative)
-When more than one valid row combination can satisfy UD quantity allocation, the workflow must score each combination, then apply this deterministic tie-break sequence:
+#### UD value-matched candidate scoring and tie-break order (normative)
+When more than one exact workbook value group can satisfy UD row identification, the workflow must score each candidate group, then apply this deterministic tie-break sequence:
 
 1. **Primary key — workbook row index sequence (ascending)**
    - Compare combinations lexicographically by sorted workbook row indexes.
@@ -641,13 +700,18 @@ When more than one valid row combination can satisfy UD quantity allocation, the
 - If two or more candidate combinations remain exactly tied after all keys above, do **not** select arbitrarily.
 - Mark the mail outcome as `hard_block`.
 - Emit discrepancy reason `ud_candidate_tie_after_full_tiebreak`.
-- Include full candidate comparison details in the mail report so the operator can resolve data ambiguity offline.
+- Include deterministic candidate comparison evidence in the mail report so the operator can resolve data ambiguity offline.
+- When exact candidate volume is small, persist the full candidate set.
+- When exact candidate volume is large, persist a bounded deterministic subset while keeping the selected candidate, true total `candidate_count`, and explicit truncation metadata.
 
 #### Required UD selection-report fields (normative)
 For every mail that reaches UD allocation, the mail-level JSON report must include:
 - `ud_selection.required_quantity`
 - `ud_selection.quantity_unit`
 - `ud_selection.candidate_count`
+- `ud_selection.reported_candidate_count`
+- `ud_selection.candidates_truncated`
+- `ud_selection.omitted_candidate_count`
 - `ud_selection.candidates[]` with:
   - `candidate_id`
   - `row_indexes` (ascending)
@@ -661,36 +725,53 @@ For every mail that reaches UD allocation, the mail-level JSON report must inclu
   - `prewrite_nonblank_optional_count`
   - `selected` (boolean)
   - `rejection_reason` (if not selected)
-- `ud_selection.final_decision` (`selected` or `hard_block_tie`)
+- `ud_selection.final_decision` (`selected`, `already_recorded`, `hard_block`, or `hard_block_tie`)
 - `ud_selection.final_decision_reason`
+- `ud_selection.selected_candidate_id`
+- `ud_selection.discrepancy_code`
 
-#### Worked example (duplicated quantities + non-sequential matches)
-UD extracted quantity = `3000 YDS`.
-Eligible rows for same LC/SC family (row → available quantity, amendment metadata):
-- row 11 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
-- row 14 → `1000`, `Amd No=1`, `Amd Date=2026-01-02`
-- row 19 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
-- row 27 → `2000`, `Amd No=2`, `Amd Date=2026-02-10`
+Structured UD selections reuse the same report shape but typically emit one candidate and may include extra `score_keys` fields such as `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
+If `ud_selection.candidates_truncated = true`, `ud_selection.candidate_count` is still the full exact total and `ud_selection.candidates[]` is a bounded deterministic subset that must include the selected candidate.
 
-Valid quantity combinations:
-- Candidate A: rows `[11, 19]` = `1000 + 2000`
-- Candidate B: rows `[14, 19]` = `1000 + 2000`
-- Candidate C: rows `[11, 27]` = `1000 + 2000`
-- Candidate D: rows `[14, 27]` = `1000 + 2000`
+#### Value-first UD selection example
+Eligible rows are first restricted to the ERP-verified LC/SC family. Within that family, row selection starts from LC/SC value only.
+Example workbook rows for one LC/SC family (row -> `Amount`, quantity):
+- row 11 -> `4000`, `1200 KGS`
+- row 14 -> `6000`, `1800 KGS`
+- row 19 -> `4500`, `1400 KGS`
+- row 27 -> `5500`, `1600 KGS`
+
+Extracted UD evidence:
+- `lc_sc_value = 10000`
+- `quantity_by_unit = {"KGS": 3000}`
+
+Exact value-matched groups:
+- Candidate A: rows `[11, 14]` -> `4000 + 6000 = 10000`
+- Candidate B: rows `[19, 27]` -> `4500 + 5500 = 10000`
+
+Quantity comparison inside those value-matched groups:
+- Candidate A workbook quantity = `1200 + 1800 = 3000 KGS` -> quantity matches the UD
+- Candidate B workbook quantity = `1400 + 1600 = 3000 KGS` -> quantity matches the UD
 
 Selection:
-1. Row-index key prefers candidates starting with row `11` over row `14` → keep A/C.
-2. Amendment recency ties between A and C (same amendment metadata pattern).
-3. Blank-field priority evaluated; if equal, continue.
-4. Stable `candidate_id` tie-break: `11-19` < `11-27` → select Candidate A.
+1. Ignore every row group whose workbook `Amount` total does not equal the extracted `lc_sc_value` within tolerance.
+2. Compare workbook quantities only for the remaining exact value-matched groups.
+3. If more than one value-matched group also satisfies the quantity rules, apply the deterministic candidate sort key: row-index order first, then amendment recency, then blank-target priority, then stable `candidate_id`.
+4. In this example Candidate A wins because `[11, 14]` sorts ahead of `[19, 27]`.
 
-Result: UD is written to rows 11 and 19 only; report records all four candidates and why Candidate A won.
+Result: UD is written to rows 11 and 14 only; the selection report records the exact value-matched candidates and why Candidate A won.
 
 ### IP / EXP rules
-- no amendment model
-- each document is newly issued against a specific LC/SC or amendment
-- when multiple IP/EXP docs appear in one mail, their total value and quantity should match LC total unless a future documented exception applies
-- dates must be written line-by-line aligned with their corresponding numbers
+- valid non-UD mail shapes are EXP-only and EXP+IP; IP-only is invalid
+- a mail mixing UD with any IP/EXP document is invalid
+- phase 1 allows at most one deterministic EXP payload and at most one deterministic IP payload in one mail; additional EXP or IP payloads hard-block as ambiguous duplicate/update evidence
+- each IP/EXP payload must include a document number, a parseable document date, and LC/SC evidence that does not contradict the ERP-derived family
+- all IP/EXP payloads in the same mail must normalize to one shared document date because the workbook exposes one `UD & IP Date` value per target row
+- target workbook rows are every existing row in the ERP-verified LC/SC family; IP/EXP does not use quantity/value subset selection in phase 1
+- quantity and value fields from IP/EXP documents remain audit/report evidence only in phase 1 and do not gate row selection
+- when the formatted shared-column value and normalized IP/EXP date are already recorded across the full target family, the mail is a duplicate-only/no-write success
+- otherwise, `UD No. & IP No.`, `UD & IP Date`, and `UD Recv. Date` must all be blank across the full target family before staging is allowed
+- if any target row already contains a different non-blank shared/date value, the mail hard-blocks; phase 1 does not append, merge, or replace existing family-wide IP/EXP values
 
 ## Import / BTB LC processing
 
@@ -736,6 +817,15 @@ Rows where:
 - within each mail group, print every newly saved PDF exactly in saved/staged order, with no additional intra-group sorting
 - insert exactly one blank page between consecutive mail groups
 - persist final print group order in run JSON metadata
+- for UD/Amendment operator handling, emit a per-run print-annotation checklist ordered by the same final print sequence used for physical submission
+- each checklist row must include: `print_sequence`, `workflow_id`, `ud_or_amendment_no`, `sl_no_values`, `mail_subject`, `document_filename`
+- each checklist row must also include `lc_sc` and `bangladesh_bank_ref`
+- checklist generation must resolve `sl_no_values` from workbook `SL.No.` column values for the selected target rows; do not infer `SL.No.` from workbook `row_index`
+- checklist output may include `row_indexes` for audit traceability, but `sl_no_values` is mandatory for operator use
+- if any selected target row cannot resolve a valid `SL.No.` value, checklist generation must hard-block and emit discrepancy evidence
+- checklist generation is a mandatory pre-print gate for UD/Amendment runs; if the JSON or HTML checklist artifact cannot be generated successfully, print and post-run mail moves must hard-block
+- generate the JSON and HTML checklist artifacts before print execution using the persisted planned print order
+- after the full run reaches terminal mail-move success, automatically open the generated HTML checklist in the system default browser
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
 - when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission
 - if `print_printer_name` is configured, that fallback must temporarily switch the Windows default printer to the configured printer, submit the silent job, and then restore the original default printer in `finally`
@@ -767,9 +857,10 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 
 ### Phase 1 released operator note
 - The standard released sequence is:
-  `report-live-readiness` -> `validate-run` -> `plan-print` -> `execute-print` -> `execute-mail-moves`
+  `report-live-readiness` -> `validate-run` -> `plan-print` -> `generate-print-annotation-html` -> `execute-print` -> `execute-mail-moves`
 - `acknowledge-partial-print` is an exception-path recovery command, not part of the normal happy-path operator flow.
 - Print completion in phase 1 means deterministic silent submission order has completed and the workflow state reached `completed`; it does not mean the system waited for physical paper completion.
+- For `ud_ip_exp`, the final HTML print-annotation checklist is generated before print, but it is opened only after successful mail-move completion so the operator ends the run with the finished report visible.
 - A run may end in terminal `completed` state while still retaining discrepancy records from earlier failed attempts in the same audit trail. Operators should treat terminal phase statuses as the authoritative state and use discrepancies as historical evidence.
 - In the released export workflow path, daily `validate-run` with `--document-root` saves attachments for printing/storage but does not perform OCR-based saved-document analysis by default.
 

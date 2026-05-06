@@ -22,6 +22,8 @@ class RunArtifactPaths:
     staged_write_plan_path: Path
     target_probes_path: Path
     print_plan_path: Path
+    print_annotation_checklist_json_path: Path
+    print_annotation_checklist_html_path: Path
     discrepancies_path: Path
     commit_marker_path: Path
     document_audits_dir: Path
@@ -50,6 +52,8 @@ def create_run_artifact_layout(
         staged_write_plan_path=run_root / "staged_write_plan.json",
         target_probes_path=run_root / "target_probes.jsonl",
         print_plan_path=run_root / "print_plan.json",
+        print_annotation_checklist_json_path=run_root / "print_annotation_checklist.json",
+        print_annotation_checklist_html_path=run_root / "print_annotation_checklist.html",
         discrepancies_path=run_root / "discrepancies.jsonl",
         commit_marker_path=run_root / "write_commit_marker.json",
         document_audits_dir=run_root / "document_audits",

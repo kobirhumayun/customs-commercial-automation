@@ -149,7 +149,10 @@ def execute_live_write_batch(
                 sheet_name=operation.sheet_name,
                 row_index=operation.row_index,
                 column_index=probe.column_index,
-                value=operation.expected_post_write_value,
+                value=_coerce_write_value(
+                    operation.expected_post_write_value,
+                    number_format=operation.number_format,
+                ),
                 number_format=operation.number_format,
             )
 
@@ -470,6 +473,34 @@ def _normalize_probe_value(value: str | int | float | None) -> str | None:
         return numeric_value
 
     return normalized
+
+
+def _coerce_write_value(
+    value: str | int | float | None,
+    *,
+    number_format: str | None,
+) -> str | int | float | date | None:
+    if value is None or number_format is None:
+        return value
+    if "d" not in number_format.lower() or "y" not in number_format.lower():
+        return value
+    date_value = _try_parse_date_value(str(value).strip())
+    return date_value if date_value is not None else value
+
+
+def _try_parse_date_value(value: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%b-%y", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _try_normalize_date(value: str) -> str | None:

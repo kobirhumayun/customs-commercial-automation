@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 
 WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -42,16 +42,26 @@ def normalize_lc_sc_number(raw_value: str) -> str | None:
     return normalized or None
 
 
-def normalize_lc_sc_date(raw_value: str) -> str | None:
-    normalized = WHITESPACE_PATTERN.sub(" ", raw_value.strip())
+def normalize_lc_sc_date(raw_value: object) -> str | None:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value.date().isoformat()
+    if isinstance(raw_value, date):
+        return raw_value.isoformat()
+    normalized = WHITESPACE_PATTERN.sub(" ", str(raw_value).strip())
     if not normalized:
         return None
+    try:
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d", "%d-%b-%y", "%d-%b-%Y", "%d/%m/%y", "%d/%m/%Y", "%d-%m-%Y"):
         try:
             return datetime.strptime(normalized, fmt).date().isoformat()
         except ValueError:
             continue
-    return normalized
+    return None
 
 
 def _shared_string_normalize(raw_value: str) -> str:

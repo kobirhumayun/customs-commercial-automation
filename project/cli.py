@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -28,7 +29,14 @@ from project.outlook import (
     Win32ComOutlookFolderCatalogProvider,
 )
 from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter, SimulatedPrintProvider
-from project.models import SavedDocument
+from project.models import (
+    DiscrepancyReport,
+    FinalDecision,
+    MailMovePhaseStatus,
+    PrintPhaseStatus,
+    SavedDocument,
+    WorkflowId,
+)
 from project.reporting.persistence import (
     append_discrepancy,
     write_commit_marker,
@@ -44,7 +52,7 @@ from project.rules import load_rule_pack
 from project.storage import Win32ComAttachmentContentProvider, write_json
 from project.utils.ids import build_saved_document_id
 from project.utils.json import pretty_json_dumps, to_jsonable
-from project.utils.time import validate_timezone
+from project.utils.time import utc_timestamp, validate_timezone
 from project.workbook import (
     EmptyWorkbookSnapshotProvider,
     JsonManifestWorkbookSnapshotProvider,
@@ -83,6 +91,12 @@ from project.workflows.print_execution import (
     execute_print_batches,
     summarize_print_batch_manual_verification,
 )
+from project.workflows.print_annotation import (
+    PrintAnnotationChecklistError,
+    build_print_annotation_checklist,
+    open_print_annotation_checklist_in_browser,
+    persist_print_annotation_checklist,
+)
 from project.workflows.print_marker_reporting import summarize_print_markers
 from project.workflows.print_planning import (
     build_print_plan_payload,
@@ -103,6 +117,7 @@ from project.workflows.run_reporting import summarize_run_status
 from project.workflows.run_handoff_export import build_run_handoff_export
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
+from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadProvider
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
@@ -195,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_recover_run(args)
     if args.command == "plan-print":
         return _handle_plan_print(args)
+    if args.command == "generate-print-annotation-html":
+        return _handle_generate_print_annotation_html(args)
     if args.command == "execute-print":
         return _handle_execute_print(args)
     if args.command == "acknowledge-partial-print":
@@ -1360,6 +1377,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
+    print_annotation_parser = subparsers.add_parser(
+        "generate-print-annotation-html",
+        help="Generate the mandatory UD/Amendment print-annotation checklist before print execution.",
+    )
+    print_annotation_parser.add_argument(
+        "workflow_id",
+        choices=[workflow_id.value for workflow_id in WORKFLOW_REGISTRY],
+    )
+    print_annotation_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
+    print_annotation_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run id whose planned print artifacts should be converted into a print-annotation checklist.",
+    )
+    print_annotation_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional JSON workbook snapshot manifest for deterministic checklist generation.",
+    )
+    print_annotation_parser.add_argument(
+        "--live-workbook",
+        action="store_true",
+        help="Use the configured live workbook so checklist SL.No. values preserve displayed business text.",
+    )
+    print_annotation_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
+    )
+
     execute_print_parser = subparsers.add_parser(
         "execute-print",
         help="Execute a previously planned print batch and persist completion markers.",
@@ -1597,6 +1646,11 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON manifest of saved-document analysis outputs for deterministic attachment classification.",
     )
     parser.add_argument(
+        "--ud-payload-json",
+        type=Path,
+        help="Optional UD/IP/EXP payload manifest for deterministic UD validation fixtures.",
+    )
+    parser.add_argument(
         "--workbook-json",
         type=Path,
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
@@ -1737,7 +1791,16 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             document_analysis_provider=(
                 JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
                 if args.document_analysis_json is not None
-                else NullSavedDocumentAnalysisProvider()
+                else (
+                    LayeredSavedDocumentAnalysisProvider()
+                    if descriptor.workflow_id == WorkflowId.UD_IP_EXP and args.document_root is not None
+                    else NullSavedDocumentAnalysisProvider()
+                )
+            ),
+            ud_document_provider=(
+                JsonManifestUDDocumentPayloadProvider(args.ud_payload_json)
+                if args.ud_payload_json is not None
+                else None
             ),
         )
         if args.apply_live_writes and not args.live_workbook:
@@ -1937,6 +2000,114 @@ def _handle_plan_print(args: argparse.Namespace) -> int:
         "print_phase_status": planning_result.run_report.print_phase_status.value,
         "print_group_order": planning_result.run_report.print_group_order,
         "print_group_count": len(planning_result.print_batches),
+    }
+    print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
+    run_report = None
+    artifact_paths = None
+    try:
+        descriptor = _descriptor_from_args(args.workflow_id)
+        if descriptor.workflow_id != WorkflowId.UD_IP_EXP:
+            raise ValueError("Print-annotation checklist generation is currently supported only for ud_ip_exp")
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        if run_report.print_phase_status not in {
+            PrintPhaseStatus.PLANNED,
+            PrintPhaseStatus.HARD_BLOCKED,
+        }:
+            raise ValueError(
+                "Print-annotation checklist generation requires print_phase_status=planned or hard_blocked."
+            )
+        print_batches = load_print_batches(
+            run_artifact_root=config.run_artifact_root,
+            workflow_id=descriptor.workflow_id,
+            run_id=args.run_id,
+        )
+        workbook_snapshot = _load_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            live_workbook=args.live_workbook,
+            config=config,
+        )
+        if workbook_snapshot is None:
+            raise ValueError(
+                "Print-annotation checklist generation requires --workbook-json or --live-workbook."
+            )
+        artifact_paths = _resolve_run_artifact_paths(
+            run_artifact_root=config.run_artifact_root,
+            backup_root=config.backup_root,
+            workflow_id=descriptor.workflow_id.value,
+            run_id=args.run_id,
+        )
+        result = build_print_annotation_checklist(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+            live_workbook_path=_resolve_live_workbook_path(config) if args.live_workbook else None,
+        )
+        persist_print_annotation_checklist(
+            artifact_paths=artifact_paths,
+            result=result,
+        )
+        updated_run_report = replace(run_report, print_phase_status=PrintPhaseStatus.PLANNED)
+        write_run_metadata(artifact_paths, to_jsonable(updated_run_report))
+    except PrintAnnotationChecklistError as exc:
+        if artifact_paths is not None and run_report is not None:
+            write_run_metadata(
+                artifact_paths,
+                to_jsonable(replace(run_report, print_phase_status=PrintPhaseStatus.HARD_BLOCKED)),
+            )
+            append_discrepancy(
+                artifact_paths,
+                to_jsonable(
+                    _build_cli_print_annotation_discrepancy(
+                        run_report=run_report,
+                        code=exc.code,
+                        message=str(exc),
+                        details=exc.details,
+                    )
+                ),
+            )
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
+        if artifact_paths is not None and run_report is not None:
+            write_run_metadata(
+                artifact_paths,
+                to_jsonable(replace(run_report, print_phase_status=PrintPhaseStatus.HARD_BLOCKED)),
+            )
+            append_discrepancy(
+                artifact_paths,
+                to_jsonable(
+                    _build_cli_print_annotation_discrepancy(
+                        run_report=run_report,
+                        code="print_annotation_generation_failed",
+                        message=str(exc),
+                        details={},
+                    )
+                ),
+            )
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": updated_run_report.run_id,
+        "workflow_id": updated_run_report.workflow_id.value,
+        "print_phase_status": updated_run_report.print_phase_status.value,
+        "checklist_row_count": int(result.payload.get("checklist_row_count", 0)),
+        "json_path": str(artifact_paths.print_annotation_checklist_json_path),
+        "html_path": str(artifact_paths.print_annotation_checklist_html_path),
     }
     print(pretty_json_dumps(payload), end="")
     return 0
@@ -2270,6 +2441,7 @@ def _handle_run_live_smoke_test(args: argparse.Namespace) -> int:
 
 
 def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
+    print_annotation_html_opened = None
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
         if not descriptor.requires_mail_folders:
@@ -2314,6 +2486,29 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         write_mail_outcomes(artifact_paths, to_jsonable(updated_mail_outcomes))
         for discrepancy in discrepancies:
             append_discrepancy(artifact_paths, to_jsonable(discrepancy))
+        if (
+            descriptor.workflow_id == WorkflowId.UD_IP_EXP
+            and updated_run_report.mail_move_phase_status == MailMovePhaseStatus.COMPLETED
+        ):
+            try:
+                open_print_annotation_checklist_in_browser(artifact_paths=artifact_paths)
+                print_annotation_html_opened = True
+            except Exception as exc:
+                print_annotation_html_opened = False
+                discrepancy = _build_cli_print_annotation_discrepancy(
+                    run_report=updated_run_report,
+                    code="print_annotation_browser_open_failed",
+                    message=(
+                        "The print-annotation checklist HTML was generated successfully, "
+                        "but the default browser could not be opened automatically."
+                    ),
+                    details={
+                        "html_path": str(artifact_paths.print_annotation_checklist_html_path),
+                        "error": str(exc),
+                    },
+                )
+                discrepancies.append(discrepancy)
+                append_discrepancy(artifact_paths, to_jsonable(discrepancy))
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -2325,6 +2520,7 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
         "mail_move_operation_count": len(move_operations),
         "manual_verification_summary": summarize_mail_move_manual_verification(updated_mail_outcomes),
         "discrepancy_count": len(discrepancies),
+        "print_annotation_html_opened": print_annotation_html_opened,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
@@ -3648,6 +3844,31 @@ def _load_workbook_snapshot(
 def _resolve_live_workbook_path(config):
     workflow_year = datetime.now(tz=validate_timezone(config.state_timezone)).year
     return config.resolve_existing_master_workbook_path(workflow_year)
+
+
+def _build_cli_print_annotation_discrepancy(
+    *,
+    run_report,
+    code: str,
+    message: str,
+    details: dict[str, object],
+) -> DiscrepancyReport:
+    severity = (
+        FinalDecision.WARNING
+        if code == "print_annotation_browser_open_failed"
+        else FinalDecision.HARD_BLOCK
+    )
+    return DiscrepancyReport(
+        run_id=run_report.run_id,
+        mail_id=None,
+        workflow_id=run_report.workflow_id,
+        severity=severity,
+        code=code,
+        message=message,
+        rule_id=None,
+        details={"non_rule_source": "print_annotation", **details},
+        created_at_utc=utc_timestamp(),
+    )
 
 
 def _resolve_run_artifact_paths(*, run_artifact_root: Path, backup_root: Path, workflow_id: str, run_id: str):

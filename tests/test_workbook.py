@@ -31,8 +31,9 @@ class WorkbookTests(unittest.TestCase):
             last_cell = FakeCell(4, 3)
 
         class FakeRange:
-            def __init__(self, value):
+            def __init__(self, value, number_format=None):
                 self.value = value
+                self.number_format = number_format
 
         class FakeSheet:
             name = "Sheet1"
@@ -46,7 +47,11 @@ class WorkbookTests(unittest.TestCase):
                         [
                             ["P/26/0042", "LC-0038", "ANANTA GARMENTS LTD"],
                             ["P/26/0007", "SC-010-PDL-8", "ZYTA APPARELS LTD"],
-                        ]
+                        ],
+                        [
+                            ["General", "General", "General"],
+                            ["General", '#,###.00 "Mtr"', "General"],
+                        ],
                     )
                 raise AssertionError(f"Unexpected range request: {start} -> {end}")
 
@@ -78,6 +83,61 @@ class WorkbookTests(unittest.TestCase):
         self.assertEqual([header.text for header in snapshot.headers], ["File No.", "L/C No.", "Buyer Name"])
         self.assertEqual(snapshot.rows[0].values[1], "P/26/0042")
         self.assertEqual(snapshot.rows[1].row_index, 4)
+        self.assertEqual(snapshot.rows[1].number_formats[2], '#,###.00 "Mtr"')
+
+    def test_xlwings_provider_extracts_quantity_number_format_when_range_format_is_mixed(self) -> None:
+        class FakeCell:
+            def __init__(self, row: int, column: int) -> None:
+                self.row = row
+                self.column = column
+
+        class FakeUsedRange:
+            last_cell = FakeCell(3, 2)
+
+        class FakeRange:
+            def __init__(self, value, number_format=None):
+                self.value = value
+                self.number_format = number_format
+
+        class FakeSheet:
+            name = "Sheet1"
+            used_range = FakeUsedRange()
+
+            def range(self, start, end=None):
+                if start == (2, 1) and end == (2, 2):
+                    return FakeRange(["L/C & S/C No.", "Quantity of Fabrics (Yds/Mtr)"])
+                if start == (3, 1) and end == (3, 2):
+                    return FakeRange(["1550260400113", 26548.0], None)
+                if start == (3, 2) and end is None:
+                    return FakeRange(26548.0, '#,###.00 "Mtr"')
+                raise AssertionError(f"Unexpected range request: {start} -> {end}")
+
+        class FakeBook:
+            def __init__(self) -> None:
+                self.sheets = [FakeSheet()]
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeBooks:
+            def open(self, *_args, **_kwargs):
+                return FakeBook()
+
+        class FakeApp:
+            def __init__(self, **_kwargs) -> None:
+                self.books = FakeBooks()
+
+            def quit(self) -> None:
+                self.quit_called = True
+
+        class FakeXLWings:
+            App = FakeApp
+
+        with patch("project.workbook.providers._load_xlwings_module", return_value=FakeXLWings()):
+            snapshot = XLWingsWorkbookSnapshotProvider(Path("C:/fake.xlsx")).load_snapshot()
+
+        self.assertEqual(snapshot.rows[0].values[2], "26548.0")
+        self.assertEqual(snapshot.rows[0].number_formats[2], '#,###.00 "Mtr"')
 
     def test_json_manifest_workbook_provider_loads_snapshot_and_resolves_export_headers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -105,7 +165,11 @@ class WorkbookTests(unittest.TestCase):
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
                         "rows": [
-                            {"row_index": 3, "values": {"1": "P/26/0042"}},
+                            {
+                                "row_index": 3,
+                                "values": {"1": "P/26/0042"},
+                                "number_formats": {"9": '#,###.00 "Mtr"'},
+                            },
                         ],
                     }
                 ),
@@ -119,6 +183,7 @@ class WorkbookTests(unittest.TestCase):
         self.assertEqual(snapshot.sheet_name, "Sheet1")
         self.assertEqual(mapping["export_amount"], 6)
         self.assertEqual(mapping["file_no"], 1)
+        self.assertEqual(snapshot.rows[0].number_formats[9], '#,###.00 "Mtr"')
 
     def test_xlwings_write_session_provider_reports_read_only_conflict(self) -> None:
         class FakeCell:

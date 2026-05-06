@@ -84,12 +84,28 @@ class SavedDocument:
     extracted_lc_sc_confidence: float | None = None
     extracted_pi_number: str | None = None
     extracted_pi_confidence: float | None = None
+    extracted_document_number: str | None = None
+    extracted_document_number_confidence: float | None = None
+    extracted_document_date: str | None = None
+    extracted_document_date_confidence: float | None = None
+    extracted_document_subtype: str | None = None
+    extracted_lc_sc_date: str | None = None
+    extracted_lc_sc_value: str | None = None
+    extracted_lc_sc_value_currency: str | None = None
+    extracted_quantity: str | None = None
+    extracted_quantity_unit: str | None = None
+    extracted_quantity_by_unit: dict[str, str] | None = None
     extracted_amendment_number: str | None = None
     clause_related_lc_sc_number: str | None = None
     clause_excerpt: str | None = None
     clause_confidence: float | None = None
     extracted_lc_sc_provenance: dict[str, Any] | None = None
     extracted_pi_provenance: dict[str, Any] | None = None
+    extracted_document_number_provenance: dict[str, Any] | None = None
+    extracted_document_date_provenance: dict[str, Any] | None = None
+    extracted_lc_sc_date_provenance: dict[str, Any] | None = None
+    extracted_lc_sc_value_provenance: dict[str, Any] | None = None
+    extracted_quantity_provenance: dict[str, Any] | None = None
     extracted_amendment_provenance: dict[str, Any] | None = None
     clause_provenance: dict[str, Any] | None = None
 
@@ -173,6 +189,7 @@ class PrintBatch:
     document_path_hashes: list[str]
     completion_marker_id: str
     manual_verification_summary: dict[str, Any] = field(default_factory=dict)
+    annotation_documents: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -218,6 +235,7 @@ class MailReport:
     staged_write_operations: list[dict[str, Any]]
     discrepancies: list[dict[str, Any]]
     import_keyword_revision: str | None = None
+    ud_selection: dict[str, Any] | None = None
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None
     schema_id: str = MAIL_REPORT_SCHEMA_ID
@@ -250,6 +268,7 @@ class MailOutcomeRecord:
     write_disposition: str | None = None
     manual_document_verification_summary: dict[str, Any] | None = None
     import_keyword_revision: str | None = None
+    ud_selection: dict[str, Any] | None = None
     print_group_id: str | None = None
     mail_move_operation_id: str | None = None
     schema_id: str = MAIL_OUTCOME_RECORD_SCHEMA_ID

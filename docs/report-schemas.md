@@ -59,6 +59,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `staged_write_operations` (array)
 - `discrepancies` (array)
 - `import_keyword_revision` (string; required for import workflow, optional/null otherwise)
+- `ud_selection` (object; required for `ud_ip_exp` mails that reach UD allocation, optional/null otherwise)
 
 ## 4) Discrepancy report schema
 - `schema_id`: `discrepancy_report`
@@ -80,7 +81,112 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `severity` must match the catalog entry for that code.
 - If `rule_id` is null, `details` must include `non_rule_source` describing the emitting subsystem.
 
-## 5) Recovery/idempotency artifact schema
+### UD/IP/EXP historical legacy discrepancy details
+When `code` is `ip_exp_policy_unresolved`, `details` must include:
+- `run_id`
+- `mail_id`
+- `sheet_name`
+- `target_column_key`
+- `target_column_index`
+- `target_row_indexes`
+- `proposed_shared_column_value`
+- `documents`
+- `unresolved_policies`
+
+Each `documents[]` item should include:
+- `document_kind`
+- `document_number`
+- `document_date`
+- `lc_sc_number`
+- `lc_sc_date`
+- `lc_sc_value`
+- `quantity`
+- `quantity_unit`
+- `quantity_by_unit`
+- `source_saved_document_id`
+
+This code is retained only for backward compatibility with older run artifacts created before the conservative phase-1 IP/EXP path was documented and implemented. New phase-1 IP/EXP staging should emit the current mail-shape, required-field, family-row, duplicate-only, or target-row conflict discrepancy codes instead.
+
+### UD/IP/EXP selection object
+When `ud_selection` is present for `ud_ip_exp`, it must include:
+- `required_quantity`
+- `quantity_unit`
+- `candidate_count`
+- `reported_candidate_count`
+- `candidates_truncated`
+- `omitted_candidate_count`
+- `candidates`
+- `final_decision` (`selected` | `already_recorded` | `hard_block` | `hard_block_tie`)
+- `final_decision_reason`
+- `selected_candidate_id` (nullable)
+- `discrepancy_code` (nullable)
+
+Each `candidates[]` item should include:
+- `candidate_id`
+- `row_indexes`
+- `matched_quantities`
+- `quantity_sum`
+- `ignored_excess_quantity`
+- `score_keys`
+- `prewrite_blank_targets_count`
+- `prewrite_nonblank_optional_count`
+- `selected`
+- `rejection_reason`
+
+Structured UD candidates may also emit `score_keys` entries for `lc_sc_value`, `workbook_value_sum`, `ud_quantity_by_unit`, and `workbook_quantity_by_unit`.
+When `candidate_count` is large, the persisted `candidates[]` array may be a bounded deterministic subset instead of the full exact candidate universe.
+In that case:
+- `candidate_count` remains the full exact total
+- `reported_candidate_count` equals `len(candidates[])`
+- `candidates_truncated = true`
+- `omitted_candidate_count = candidate_count - reported_candidate_count`
+
+For dense structured UD matches, the selected candidate must still be present in `candidates[]` even when truncation is active.
+
+## 5) Print-annotation checklist schema
+- `schema_id`: `print_annotation_checklist`
+- `schema_version`: `1.0.0`
+
+### Required fields
+- `run_id`
+- `workflow_id`
+- `generated_at_utc`
+- `print_group_order`
+- `checklist_row_count`
+- `rows`
+
+Each `rows[]` item must include:
+- `print_sequence`
+- `print_group_id`
+- `mail_id`
+- `workflow_id`
+- `ud_or_amendment_no`
+- `lc_sc`
+- `bangladesh_bank_ref`
+- `sl_no_values`
+- `mail_subject`
+- `document_filename`
+- `saved_document_id`
+- `document_path_hash`
+- `row_indexes`
+
+The checklist JSON must be derived from the same persisted print plan that drives physical print order.
+For `ud_ip_exp`, checklist rows are required only for printed UD/Amendment documents that resolve to workbook row-selection evidence; other newly saved PDFs may still be printed without checklist rows.
+For `ud_ip_exp`, any mismatch between the current print plan's checklist-required document subset and the persisted checklist JSON is a hard-block before print execution.
+
+### Related persisted print-plan evidence
+When `print_plan.json` includes `annotation_documents` for a print group, each item should preserve direct checklist-source evidence in document print order:
+- `saved_document_id`
+- `document_path`
+- `document_path_hash`
+- `document_filename`
+- `document_number`
+- `row_indexes`
+- `checklist_required`
+
+For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_documents` records and use older mail-level reconstruction fallbacks only for backward compatibility with older run artifacts.
+
+## 6) Recovery/idempotency artifact schema
 - `schema_id`: `recovery_artifact`
 - `schema_version`: `1.0.0`
 
@@ -98,7 +204,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `print_completion_markers` (array of marker ids)
 - `mail_move_completion_markers` (array of marker ids)
 
-## 6) Minimal examples
+## 7) Minimal examples
 
 ### Run report (minimal)
 ```json

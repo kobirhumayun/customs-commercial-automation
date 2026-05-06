@@ -16,6 +16,8 @@ Under `run_artifact_root/<workflow_id>/<run_id>/`:
 - `staged_write_plan.json`
 - `target_probes.jsonl`
 - `print_plan.json`
+- `print_annotation_checklist.json`
+- `print_annotation_checklist.html`
 - `print_markers/` (one marker per print group)
 - `mail_move_markers/` (one marker per mail move)
 - `discrepancies.jsonl`
