@@ -5,6 +5,7 @@ This document defines the canonical filesystem contract for run artifacts, recov
 ## 1) Root directories
 Implementations must use configured roots (see `docs/architecture.md`) and create these subtrees:
 
+- If `report_root`, `run_artifact_root`, or `backup_root` does not exist yet on a fresh workstation, the implementation may create that managed root before creating per-run subtrees.
 - `run_artifact_root/<workflow_id>/<run_id>/`
 - `backup_root/<workflow_id>/<run_id>/`
 

@@ -107,6 +107,50 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertIn(str(workbook_root / f"{workflow_year}-master.xlsx"), str(exc_info.exception))
             self.assertIn("Place the real yearly workbook", str(exc_info.exception))
 
+    def test_load_workflow_config_creates_missing_managed_roots_for_fresh_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workflow_year = __import__("datetime").datetime.now(tz=validate_timezone("Asia/Dhaka")).year
+            report_root = root / "reports"
+            run_root = root / "state" / "runs"
+            backup_root = root / "state" / "backups"
+            workbook_root = root / "workbooks"
+            workbook_root.mkdir(parents=True, exist_ok=True)
+
+            (workbook_root / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{report_root.as_posix()}"',
+                        f'run_artifact_root = "{run_root.as_posix()}"',
+                        f'backup_root = "{backup_root.as_posix()}"',
+                        'outlook_profile = "FileProfile"',
+                        f'master_workbook_root = "{workbook_root.as_posix()}"',
+                        'erp_base_url = "https://erp.local"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{(workbook_root / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            descriptor = get_workflow_descriptor(WorkflowId.EXPORT_LC_SC)
+            config = load_workflow_config(
+                descriptor=descriptor,
+                config_path=config_path,
+            )
+
+            self.assertEqual(config.report_root, report_root)
+            self.assertTrue(report_root.is_dir())
+            self.assertTrue(run_root.is_dir())
+            self.assertTrue(backup_root.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()

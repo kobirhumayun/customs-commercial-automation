@@ -4,6 +4,8 @@ import datetime
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -36,6 +38,31 @@ from project.workbook import WorkbookHeader
 
 
 class CLITests(unittest.TestCase):
+    def test_python_m_project_returns_nonzero_exit_code_for_cli_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "missing-required-keys.toml"
+            config_path.write_text('state_timezone = "Asia/Dhaka"\n', encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "project",
+                    "validate-config",
+                    "export_lc_sc",
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Missing required configuration key(s)", result.stderr)
+
     def test_load_erp_provider_uses_configured_download_flow_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
