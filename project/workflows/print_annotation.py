@@ -459,7 +459,15 @@ def _expected_export_checklist_row_signatures(
         if outcome is not None:
             document_path_hashes = [
                 record["document_path_hash"]
-                for record in _saved_documents_for_batch(batch=batch, outcome=outcome)
+                for record in _saved_documents_for_batch(
+                    batch=batch,
+                    outcome=outcome,
+                    error_code="print_annotation_checklist_missing_or_invalid",
+                    error_message=(
+                        "The persisted export print-annotation checklist could not be reconciled "
+                        "to saved-document lineage for the current print plan."
+                    ),
+                )
                 if record["document_path_hash"]
             ]
         else:
@@ -586,7 +594,15 @@ def _build_export_checklist_rows(
                 message="A planned export print group had no staged workbook rows for checklist generation.",
                 details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
             )
-        document_records = _saved_documents_for_batch(batch=batch, outcome=outcome)
+        document_records = _saved_documents_for_batch(
+            batch=batch,
+            outcome=outcome,
+            error_code="print_annotation_generation_failed",
+            error_message=(
+                "A planned export print document did not resolve to a persisted saved-document "
+                "record for checklist generation."
+            ),
+        )
         document_filenames = [record["document_filename"] for record in document_records]
         document_filename_value = "\n".join(document_filenames)
         saved_document_ids = [record["saved_document_id"] for record in document_records if record["saved_document_id"]]
@@ -673,6 +689,8 @@ def _saved_documents_for_batch(
     *,
     batch,
     outcome: MailOutcomeRecord,
+    error_code: str,
+    error_message: str,
 ) -> list[dict[str, str]]:
     saved_documents_by_path = {
         str(document.get("destination_path", "")).strip(): document
@@ -682,16 +700,23 @@ def _saved_documents_for_batch(
     records: list[dict[str, str]] = []
     for document_path, document_path_hash in zip(batch.document_paths, batch.document_path_hashes):
         saved_document = saved_documents_by_path.get(document_path)
-        if isinstance(saved_document, dict):
-            document_filename = str(
-                saved_document.get("normalized_filename")
-                or saved_document.get("attachment_name")
-                or Path(document_path).name
-            ).strip()
-            saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
-        else:
-            document_filename = Path(document_path).name
-            saved_document_id = ""
+        if not isinstance(saved_document, dict):
+            raise PrintAnnotationChecklistError(
+                code=error_code,
+                message=error_message,
+                details={
+                    "print_group_id": getattr(batch, "print_group_id", ""),
+                    "mail_id": getattr(batch, "mail_id", outcome.mail_id),
+                    "document_path": str(document_path),
+                    "document_path_hash": str(document_path_hash),
+                },
+            )
+        document_filename = str(
+            saved_document.get("normalized_filename")
+            or saved_document.get("attachment_name")
+            or Path(document_path).name
+        ).strip()
+        saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
         records.append(
             {
                 "saved_document_id": saved_document_id,

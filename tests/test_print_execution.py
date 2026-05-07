@@ -109,7 +109,15 @@ class PrintExecutionTests(unittest.TestCase):
             first_document.write_text("fake pdf a", encoding="utf-8")
             second_document.write_text("fake pdf b", encoding="utf-8")
             run_report = _build_run_report(print_phase_status=PrintPhaseStatus.PLANNED)
-            mail_outcomes = [_build_mail_outcome(document_path=str(first_document))]
+            mail_outcomes = [
+                replace(
+                    _build_mail_outcome(document_path=str(first_document)),
+                    saved_documents=[
+                        {"destination_path": str(first_document), "save_decision": "saved_new"},
+                        {"destination_path": str(second_document), "save_decision": "saved_new"},
+                    ],
+                )
+            ]
             print_batches = [
                 PrintBatch(
                     print_group_id="group-1",
@@ -489,7 +497,16 @@ class PrintExecutionTests(unittest.TestCase):
             for document in (first_document, second_document, third_document):
                 document.write_text("fake pdf", encoding="utf-8")
             run_report = _build_run_report(print_phase_status=PrintPhaseStatus.UNCERTAIN_INCOMPLETE)
-            mail_outcomes = [_build_mail_outcome(document_path=str(first_document))]
+            mail_outcomes = [
+                replace(
+                    _build_mail_outcome(document_path=str(first_document)),
+                    saved_documents=[
+                        {"destination_path": str(first_document), "save_decision": "saved_new"},
+                        {"destination_path": str(second_document), "save_decision": "saved_new"},
+                        {"destination_path": str(third_document), "save_decision": "saved_new"},
+                    ],
+                )
+            ]
             print_batches = [
                 PrintBatch(
                     print_group_id="group-1",
