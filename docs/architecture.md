@@ -649,7 +649,8 @@ Workflow modules must declare their own required key list (for example import ke
 ### Startup validation contract
 Before processing a run snapshot, startup must validate:
 - presence/type/shape of all required configuration values
-- path existence/permissions for configured roots
+- configured root path availability and permissions
+- implementations may create the managed operator-owned roots `report_root`, `run_artifact_root`, and `backup_root` on first use before writability validation; missing workbook roots/files still hard-fail
 - timezone parseability and canonicalization
 - destination Outlook folder mapping completeness for the active workflow
 

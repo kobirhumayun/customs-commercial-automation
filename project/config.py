@@ -164,9 +164,21 @@ def _validate_required_keys(descriptor: WorkflowDescriptor, values: dict[str, An
 
 def _validate_startup_contract(descriptor: WorkflowDescriptor, values: dict[str, Any]) -> None:
     validate_timezone(str(values["state_timezone"]))
-    _validate_existing_directory("report_root", Path(values["report_root"]))
-    _validate_existing_directory("run_artifact_root", Path(values["run_artifact_root"]))
-    _validate_existing_directory("backup_root", Path(values["backup_root"]))
+    _validate_existing_directory(
+        "report_root",
+        Path(values["report_root"]),
+        create_if_missing=True,
+    )
+    _validate_existing_directory(
+        "run_artifact_root",
+        Path(values["run_artifact_root"]),
+        create_if_missing=True,
+    )
+    _validate_existing_directory(
+        "backup_root",
+        Path(values["backup_root"]),
+        create_if_missing=True,
+    )
     _validate_existing_directory("master_workbook_root", Path(values["master_workbook_root"]))
 
     timeout = int(values["excel_lock_timeout_seconds"])
@@ -179,7 +191,17 @@ def _validate_startup_contract(descriptor: WorkflowDescriptor, values: dict[str,
                 raise ConfigError(f"Configuration key '{key}' must be a non-empty string")
 
 
-def _validate_existing_directory(key: str, path: Path) -> None:
+def _validate_existing_directory(
+    key: str,
+    path: Path,
+    *,
+    create_if_missing: bool = False,
+) -> None:
+    if create_if_missing and not path.exists():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConfigError(f"Configured path for '{key}' could not be created: {path}") from exc
     if not path.exists():
         raise ConfigError(f"Configured path for '{key}' does not exist: {path}")
     if not path.is_dir():
