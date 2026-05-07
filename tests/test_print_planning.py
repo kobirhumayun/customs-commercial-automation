@@ -397,6 +397,120 @@ class PrintPlanningTests(unittest.TestCase):
         payload = build_print_plan_payload(result.print_batches)
         self.assertEqual(payload["print_groups"][0]["annotation_documents"][0]["document_number"], "BGMEA/DHK/UD/2026/1001")
 
+    def test_plan_print_batches_persists_annotation_documents_for_export_lc_sc(self) -> None:
+        run_report = RunReport(
+            run_id="run-1",
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            tool_version="0.1.0",
+            rule_pack_id="export_lc_sc.default",
+            rule_pack_version="1.0.0",
+            started_at_utc="2026-03-28T00:00:00Z",
+            completed_at_utc=None,
+            state_timezone="Asia/Dhaka",
+            mail_iteration_order=["mail-a"],
+            print_group_order=[],
+            write_phase_status=WritePhaseStatus.COMMITTED,
+            print_phase_status=PrintPhaseStatus.NOT_STARTED,
+            mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+            hash_algorithm="sha256",
+            run_start_backup_hash="a" * 64,
+            current_workbook_hash="b" * 64,
+            staged_write_plan_hash="c" * 64,
+            summary={"pass": 1, "warning": 0, "hard_block": 0},
+        )
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-a",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=FinalDecision.PASS,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=True,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-a",
+                subject_raw="mail a",
+                sender_address="a@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "normalized_filename": "LC-0043.pdf",
+                        "destination_path": "C:/docs/LC-0043.pdf",
+                        "save_decision": "saved_new",
+                        "print_eligible": True,
+                    },
+                    {
+                        "saved_document_id": "doc-2",
+                        "normalized_filename": "PI-0043.pdf",
+                        "destination_path": "C:/docs/PI-0043.pdf",
+                        "save_decision": "saved_new",
+                        "print_eligible": True,
+                    },
+                ],
+                staged_write_operations=[
+                    {"row_index": 11, "column_key": "file_no"},
+                    {"row_index": 12, "column_key": "file_no"},
+                ],
+            )
+        ]
+        staged_write_plan = [
+            WriteOperation(
+                write_operation_id="op-a",
+                run_id="run-1",
+                mail_id="mail-a",
+                operation_index_within_mail=0,
+                sheet_name="Sheet1",
+                row_index=11,
+                column_key="file_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="P/26/0042",
+                row_eligibility_checks=[],
+            ),
+            WriteOperation(
+                write_operation_id="op-b",
+                run_id="run-1",
+                mail_id="mail-a",
+                operation_index_within_mail=1,
+                sheet_name="Sheet1",
+                row_index=12,
+                column_key="lc_sc_no",
+                expected_pre_write_value=None,
+                expected_post_write_value="LC-0043",
+                row_eligibility_checks=[],
+            ),
+        ]
+
+        result = plan_print_batches(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
+        )
+
+        self.assertEqual(len(result.print_batches), 1)
+        annotation_documents = result.print_batches[0].annotation_documents
+        self.assertEqual(len(annotation_documents), 2)
+        self.assertEqual(annotation_documents[0]["annotation_scope"], "export_row_bundle")
+        self.assertEqual(annotation_documents[0]["workflow_id"], "export_lc_sc")
+        self.assertEqual(annotation_documents[0]["row_indexes"], [11])
+        self.assertEqual(annotation_documents[1]["row_indexes"], [12])
+        self.assertEqual(annotation_documents[0]["saved_document_ids"], ["doc-1", "doc-2"])
+        self.assertEqual(annotation_documents[0]["document_filenames"], ["LC-0043.pdf", "PI-0043.pdf"])
+        self.assertEqual(
+            annotation_documents[0]["document_path_hashes"],
+            result.print_batches[0].document_path_hashes,
+        )
+        payload = build_print_plan_payload(result.print_batches)
+        self.assertEqual(
+            payload["print_groups"][0]["annotation_documents"][0]["annotation_scope"],
+            "export_row_bundle",
+        )
+        self.assertEqual(
+            payload["print_groups"][0]["annotation_documents"][1]["row_indexes"],
+            [12],
+        )
+
     def test_plan_print_batches_requires_committed_or_safe_resume_gate(self) -> None:
         run_report = RunReport(
             run_id="run-1",

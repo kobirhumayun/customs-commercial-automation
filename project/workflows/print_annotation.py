@@ -455,34 +455,22 @@ def _expected_export_checklist_row_signatures(
     signatures: list[dict[str, Any]] = []
     for batch in print_batches:
         outcome = outcomes_by_mail_id.get(batch.mail_id)
-        row_indexes = _export_row_indexes_for_outcome(outcome) if outcome is not None else []
-        if outcome is not None:
-            document_path_hashes = [
-                record["document_path_hash"]
-                for record in _saved_documents_for_batch(
-                    batch=batch,
-                    outcome=outcome,
-                    error_code="print_annotation_checklist_missing_or_invalid",
-                    error_message=(
-                        "The persisted export print-annotation checklist could not be reconciled "
-                        "to saved-document lineage for the current print plan."
-                    ),
-                )
-                if record["document_path_hash"]
-            ]
-        else:
-            document_path_hashes = [
-                str(document_path_hash).strip()
-                for document_path_hash in batch.document_path_hashes
-                if str(document_path_hash).strip()
-            ]
-        for row_index in row_indexes:
+        annotation_documents = _export_annotation_documents_for_batch(
+            batch=batch,
+            outcome=outcome,
+            error_code="print_annotation_checklist_missing_or_invalid",
+            error_message=(
+                "The persisted export print-annotation checklist could not be reconciled "
+                "to saved-document lineage for the current print plan."
+            ),
+        )
+        for annotation_document in annotation_documents:
             signatures.append(
                 {
                     "print_group_id": batch.print_group_id,
                     "mail_id": batch.mail_id,
-                    "row_indexes": [row_index],
-                    "document_path_hashes": document_path_hashes,
+                    "row_indexes": _export_annotation_row_indexes(annotation_document),
+                    "document_path_hashes": _export_annotation_document_path_hashes(annotation_document),
                 }
             )
     return signatures
@@ -587,14 +575,7 @@ def _build_export_checklist_rows(
                 message="A planned export print group did not resolve to its mail outcome record.",
                 details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
             )
-        row_indexes = _export_row_indexes_for_outcome(outcome)
-        if not row_indexes:
-            raise PrintAnnotationChecklistError(
-                code="print_annotation_generation_failed",
-                message="A planned export print group had no staged workbook rows for checklist generation.",
-                details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
-            )
-        document_records = _saved_documents_for_batch(
+        annotation_documents = _export_annotation_documents_for_batch(
             batch=batch,
             outcome=outcome,
             error_code="print_annotation_generation_failed",
@@ -603,12 +584,30 @@ def _build_export_checklist_rows(
                 "record for checklist generation."
             ),
         )
-        document_filenames = [record["document_filename"] for record in document_records]
-        document_filename_value = "\n".join(document_filenames)
-        saved_document_ids = [record["saved_document_id"] for record in document_records if record["saved_document_id"]]
-        document_path_hashes = [record["document_path_hash"] for record in document_records if record["document_path_hash"]]
-        mail_group_row_count = len(row_indexes)
-        for row_position, row_index in enumerate(row_indexes):
+        if not annotation_documents:
+            raise PrintAnnotationChecklistError(
+                code="print_annotation_generation_failed",
+                message="A planned export print group had no persisted checklist-source rows for checklist generation.",
+                details={"print_group_id": batch.print_group_id, "mail_id": batch.mail_id},
+            )
+        mail_group_row_count = len(annotation_documents)
+        for row_position, annotation_document in enumerate(annotation_documents):
+            row_indexes = _export_annotation_row_indexes(annotation_document)
+            if len(row_indexes) != 1:
+                raise PrintAnnotationChecklistError(
+                    code="print_annotation_generation_failed",
+                    message="A planned export checklist-source record did not resolve to exactly one workbook row.",
+                    details={
+                        "print_group_id": batch.print_group_id,
+                        "mail_id": batch.mail_id,
+                        "row_indexes": row_indexes,
+                    },
+                )
+            row_index = row_indexes[0]
+            document_filenames = _export_annotation_document_filenames(annotation_document)
+            document_filename_value = "\n".join(document_filenames)
+            saved_document_ids = _export_annotation_saved_document_ids(annotation_document)
+            document_path_hashes = _export_annotation_document_path_hashes(annotation_document)
             workbook_values: list[dict[str, Any]] = []
             for column in workbook_columns:
                 value = str(column_values_by_key[column["column_key"]].get(row_index, "") or "")
@@ -668,9 +667,17 @@ def _planned_export_row_indexes(
     row_indexes: set[int] = set()
     for batch in print_batches:
         outcome = outcomes_by_mail_id.get(batch.mail_id)
-        if outcome is None:
-            continue
-        row_indexes.update(_export_row_indexes_for_outcome(outcome))
+        annotation_documents = _export_annotation_documents_for_batch(
+            batch=batch,
+            outcome=outcome,
+            error_code="print_annotation_generation_failed",
+            error_message=(
+                "A planned export print document did not resolve to a persisted saved-document "
+                "record for checklist generation."
+            ),
+        )
+        for annotation_document in annotation_documents:
+            row_indexes.update(_export_annotation_row_indexes(annotation_document))
     return row_indexes
 
 
@@ -683,6 +690,147 @@ def _export_row_indexes_for_outcome(outcome: MailOutcomeRecord) -> list[int]:
         if isinstance(row_index, int)
     }
     return sorted(row_indexes)
+
+
+def build_export_print_annotation_source_documents(
+    *,
+    outcome: MailOutcomeRecord,
+    printable_documents: list[dict[str, Any]],
+    document_path_hashes: list[str],
+) -> list[dict[str, Any]]:
+    row_indexes = _export_row_indexes_for_outcome(outcome)
+    document_filenames = [
+        str(
+            saved_document.get("normalized_filename")
+            or saved_document.get("attachment_name")
+            or Path(str(saved_document.get("destination_path", ""))).name
+        ).strip()
+        for saved_document in printable_documents
+    ]
+    saved_document_ids = [
+        str(saved_document.get("saved_document_id", "")).strip()
+        for saved_document in printable_documents
+        if str(saved_document.get("saved_document_id", "")).strip()
+    ]
+    normalized_hashes = [
+        str(document_path_hash).strip()
+        for document_path_hash in document_path_hashes
+        if str(document_path_hash).strip()
+    ]
+    records: list[dict[str, Any]] = []
+    for row_index in row_indexes:
+        records.append(
+            {
+                "annotation_scope": "export_row_bundle",
+                "workflow_id": outcome.workflow_id.value,
+                "row_index": row_index,
+                "row_indexes": [row_index],
+                "saved_document_ids": list(saved_document_ids),
+                "document_filenames": list(document_filenames),
+                "document_path_hashes": list(normalized_hashes),
+                "checklist_required": True,
+            }
+        )
+    return records
+
+
+def _export_annotation_documents_for_batch(
+    *,
+    batch,
+    outcome: MailOutcomeRecord | None,
+    error_code: str,
+    error_message: str,
+) -> list[dict[str, Any]]:
+    persisted_records = [
+        item
+        for item in getattr(batch, "annotation_documents", [])
+        if isinstance(item, dict)
+        and str(item.get("annotation_scope", "")).strip() == "export_row_bundle"
+    ]
+    if persisted_records:
+        return persisted_records
+    if outcome is None:
+        return []
+    document_records = _saved_documents_for_batch(
+        batch=batch,
+        outcome=outcome,
+        error_code=error_code,
+        error_message=error_message,
+    )
+    return _build_export_annotation_documents_from_records(
+        outcome=outcome,
+        document_records=document_records,
+    )
+
+
+def _build_export_annotation_documents_from_records(
+    *,
+    outcome: MailOutcomeRecord,
+    document_records: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    row_indexes = _export_row_indexes_for_outcome(outcome)
+    document_filenames = [record["document_filename"] for record in document_records if record["document_filename"]]
+    saved_document_ids = [record["saved_document_id"] for record in document_records if record["saved_document_id"]]
+    document_path_hashes = [record["document_path_hash"] for record in document_records if record["document_path_hash"]]
+    records: list[dict[str, Any]] = []
+    for row_index in row_indexes:
+        records.append(
+            {
+                "annotation_scope": "export_row_bundle",
+                "workflow_id": outcome.workflow_id.value,
+                "row_index": row_index,
+                "row_indexes": [row_index],
+                "saved_document_ids": list(saved_document_ids),
+                "document_filenames": list(document_filenames),
+                "document_path_hashes": list(document_path_hashes),
+                "checklist_required": True,
+            }
+        )
+    return records
+
+
+def _export_annotation_row_indexes(annotation_document: dict[str, Any]) -> list[int]:
+    row_indexes = [row_index for row_index in annotation_document.get("row_indexes", []) if isinstance(row_index, int)]
+    if row_indexes:
+        return row_indexes
+    row_index = annotation_document.get("row_index")
+    return [row_index] if isinstance(row_index, int) else []
+
+
+def _export_annotation_document_filenames(annotation_document: dict[str, Any]) -> list[str]:
+    filenames = [
+        str(document_filename).strip()
+        for document_filename in annotation_document.get("document_filenames", [])
+        if str(document_filename).strip()
+    ]
+    if filenames:
+        return filenames
+    document_filename = str(annotation_document.get("document_filename", "")).strip()
+    return [document_filename] if document_filename else []
+
+
+def _export_annotation_saved_document_ids(annotation_document: dict[str, Any]) -> list[str]:
+    saved_document_ids = [
+        str(saved_document_id).strip()
+        for saved_document_id in annotation_document.get("saved_document_ids", [])
+        if str(saved_document_id).strip()
+    ]
+    if saved_document_ids:
+        return saved_document_ids
+    saved_document_id = str(annotation_document.get("saved_document_id", "")).strip()
+    return [saved_document_id] if saved_document_id else []
+
+
+def _export_annotation_document_path_hashes(annotation_document: dict[str, Any]) -> list[str]:
+    document_path_hashes = [
+        str(document_path_hash).strip()
+        for document_path_hash in annotation_document.get("document_path_hashes", [])
+        if str(document_path_hash).strip()
+    ]
+    if document_path_hashes:
+        return document_path_hashes
+    document_path_hash = str(annotation_document.get("document_path_hash", "")).strip()
+    return [document_path_hash] if document_path_hash else []
 
 
 def _saved_documents_for_batch(
