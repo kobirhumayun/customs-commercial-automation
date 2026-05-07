@@ -256,10 +256,14 @@ def validate_print_annotation_checklist(
             details={"json_path": str(json_path)},
         )
     if run_report.workflow_id == WorkflowId.EXPORT_LC_SC:
-        observed_signatures = _observed_export_checklist_row_signatures(rows)
-        expected_signatures = _expected_export_checklist_row_signatures(
+        observed_signatures = _canonicalize_export_checklist_row_signatures(
+            _observed_export_checklist_row_signatures(rows)
+        )
+        expected_signatures = _canonicalize_export_checklist_row_signatures(
+            _expected_export_checklist_row_signatures(
             print_batches=print_batches,
             mail_outcomes=mail_outcomes or [],
+            )
         )
         if observed_signatures != expected_signatures:
             raise PrintAnnotationChecklistError(
@@ -474,6 +478,38 @@ def _expected_export_checklist_row_signatures(
                 }
             )
     return signatures
+
+
+def _canonicalize_export_checklist_row_signatures(
+    signatures: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for signature in signatures:
+        normalized.append(
+            {
+                "print_group_id": str(signature.get("print_group_id", "")).strip(),
+                "mail_id": str(signature.get("mail_id", "")).strip(),
+                "row_indexes": sorted(
+                    row_index
+                    for row_index in signature.get("row_indexes", [])
+                    if isinstance(row_index, int)
+                ),
+                "document_path_hashes": sorted(
+                    str(document_path_hash).strip()
+                    for document_path_hash in signature.get("document_path_hashes", [])
+                    if str(document_path_hash).strip()
+                ),
+            }
+        )
+    return sorted(
+        normalized,
+        key=lambda item: (
+            str(item["print_group_id"]),
+            str(item["mail_id"]),
+            tuple(item["row_indexes"]),
+            tuple(item["document_path_hashes"]),
+        ),
+    )
 
 
 def _build_export_checklist_rows(

@@ -2026,11 +2026,13 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
         )
         if run_report.print_phase_status not in {
             PrintPhaseStatus.PLANNED,
+            PrintPhaseStatus.PRINTING,
+            PrintPhaseStatus.UNCERTAIN_INCOMPLETE,
             PrintPhaseStatus.HARD_BLOCKED,
             PrintPhaseStatus.COMPLETED,
         }:
             raise ValueError(
-                "Print-annotation checklist generation requires print_phase_status=planned, hard_blocked, or completed."
+                "Print-annotation checklist generation requires print_phase_status=planned, printing, uncertain_incomplete, hard_blocked, or completed."
             )
         print_batches = load_print_batches(
             run_artifact_root=config.run_artifact_root,
@@ -2498,7 +2500,9 @@ def _handle_execute_mail_moves(args: argparse.Namespace) -> int:
             append_discrepancy(artifact_paths, to_jsonable(discrepancy))
         if (
             descriptor.workflow_id in {WorkflowId.UD_IP_EXP, WorkflowId.EXPORT_LC_SC}
+            and updated_run_report.print_phase_status == PrintPhaseStatus.COMPLETED
             and updated_run_report.mail_move_phase_status == MailMovePhaseStatus.COMPLETED
+            and artifact_paths.print_annotation_checklist_html_path.exists()
         ):
             try:
                 open_print_annotation_checklist_in_browser(artifact_paths=artifact_paths)
