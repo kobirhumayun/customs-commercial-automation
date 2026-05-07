@@ -47,6 +47,14 @@ uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-a
 
 The command summarizes primary causes separately from secondary effects by reading persisted run artifacts such as `discrepancies.jsonl`, `mail_outcomes.jsonl`, `target_probes.jsonl`, and `staged_write_plan.json`. It must not mutate Outlook, ERP, workbook, print, mail-move, or run artifacts. It is the preferred operator-facing first step before deciding whether the correct action is to fix input mails, clean a partial workbook row, use recovery, or simply rerun after correcting the environment.
 
+For a broader read-only completion summary, operators may also use:
+
+```powershell
+uv run python -m project report-run-status export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
+```
+
+This status summary should include consistency signals for historical metadata gaps, such as a terminal-success run whose phase statuses reached completion before `completed_at_utc` was persisted in older builds.
+
 ### Operator setup helper: ERP download debugging
 When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
 

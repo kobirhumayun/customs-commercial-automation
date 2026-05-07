@@ -177,6 +177,8 @@ uv run python -m project execute-mail-moves $WORKFLOW --config $CONFIG --run-id 
 uv run python -m project report-run-status $WORKFLOW --config $CONFIG --run-id $RUN_ID
 ```
 
+`report-run-status` is also useful for older historical runs because it now surfaces read-only consistency warnings, such as a terminal-success run whose `completed_at_utc` was never persisted by older builds.
+
 For `ud_ip_exp`, insert this mandatory checklist-generation step between `plan-print` and `execute-print`:
 
 ```powershell
