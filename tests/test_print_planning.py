@@ -491,24 +491,26 @@ class PrintPlanningTests(unittest.TestCase):
         self.assertEqual(len(result.print_batches), 1)
         annotation_documents = result.print_batches[0].annotation_documents
         self.assertEqual(len(annotation_documents), 2)
-        self.assertEqual(annotation_documents[0]["annotation_scope"], "export_row_bundle")
+        self.assertEqual(annotation_documents[0]["annotation_scope"], "export_document")
         self.assertEqual(annotation_documents[0]["workflow_id"], "export_lc_sc")
-        self.assertEqual(annotation_documents[0]["row_indexes"], [11])
-        self.assertEqual(annotation_documents[1]["row_indexes"], [12])
-        self.assertEqual(annotation_documents[0]["saved_document_ids"], ["doc-1", "doc-2"])
-        self.assertEqual(annotation_documents[0]["document_filenames"], ["LC-0043.pdf", "PI-0043.pdf"])
-        self.assertEqual(
-            annotation_documents[0]["document_path_hashes"],
-            result.print_batches[0].document_path_hashes,
-        )
+        self.assertEqual(annotation_documents[0]["row_indexes"], [11, 12])
+        self.assertEqual(annotation_documents[1]["row_indexes"], [11, 12])
+        self.assertEqual(annotation_documents[0]["saved_document_id"], "doc-1")
+        self.assertEqual(annotation_documents[1]["saved_document_id"], "doc-2")
+        self.assertEqual(annotation_documents[0]["document_filename"], "LC-0043.pdf")
+        self.assertEqual(annotation_documents[1]["document_filename"], "PI-0043.pdf")
+        self.assertEqual(annotation_documents[0]["document_path"], "C:/docs/LC-0043.pdf")
+        self.assertEqual(annotation_documents[1]["document_path"], "C:/docs/PI-0043.pdf")
+        self.assertEqual(annotation_documents[0]["document_path_hash"], result.print_batches[0].document_path_hashes[0])
+        self.assertEqual(annotation_documents[1]["document_path_hash"], result.print_batches[0].document_path_hashes[1])
         payload = build_print_plan_payload(result.print_batches)
         self.assertEqual(
             payload["print_groups"][0]["annotation_documents"][0]["annotation_scope"],
-            "export_row_bundle",
+            "export_document",
         )
         self.assertEqual(
-            payload["print_groups"][0]["annotation_documents"][1]["row_indexes"],
-            [12],
+            payload["print_groups"][0]["annotation_documents"][1]["document_filename"],
+            "PI-0043.pdf",
         )
 
     def test_plan_print_batches_requires_committed_or_safe_resume_gate(self) -> None:
