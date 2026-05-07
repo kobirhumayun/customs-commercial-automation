@@ -60,6 +60,7 @@ class MailMoveExecutionTests(unittest.TestCase):
 
         self.assertEqual(phase_updates, ["moving", "completed"])
         self.assertEqual(executed_report.mail_move_phase_status, MailMovePhaseStatus.COMPLETED)
+        self.assertIsNotNone(executed_report.completed_at_utc)
         self.assertEqual(executed_outcomes[0].processing_status, MailProcessingStatus.MOVED)
         self.assertFalse(executed_outcomes[0].eligible_for_mail_move)
         self.assertIn("Manual PDF verification status at mail-move time", executed_outcomes[0].decision_reasons[-2])

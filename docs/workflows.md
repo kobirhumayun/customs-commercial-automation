@@ -47,6 +47,14 @@ uv run python -m project explain-run-failure export_lc_sc --config "D:\customs-a
 
 The command summarizes primary causes separately from secondary effects by reading persisted run artifacts such as `discrepancies.jsonl`, `mail_outcomes.jsonl`, `target_probes.jsonl`, and `staged_write_plan.json`. It must not mutate Outlook, ERP, workbook, print, mail-move, or run artifacts. It is the preferred operator-facing first step before deciding whether the correct action is to fix input mails, clean a partial workbook row, use recovery, or simply rerun after correcting the environment.
 
+For a broader read-only completion summary, operators may also use:
+
+```powershell
+uv run python -m project report-run-status export_lc_sc --config "D:\customs-automation\workflow.toml" --run-id "<RUN_ID>"
+```
+
+This status summary should include consistency signals for historical metadata gaps, such as a terminal-success run whose phase statuses reached completion before `completed_at_utc` was persisted in older builds.
+
 ### Operator setup helper: ERP download debugging
 When the live ERP report page requires form input and export/download interaction rather than exposing a stable HTML table, operators may use the read-only debug command below to capture selectors and output artifacts:
 
@@ -823,7 +831,11 @@ Rows where:
 - checklist generation must resolve `sl_no_values` from workbook `SL.No.` column values for the selected target rows; do not infer `SL.No.` from workbook `row_index`
 - checklist output may include `row_indexes` for audit traceability, but `sl_no_values` is mandatory for operator use
 - if any selected target row cannot resolve a valid `SL.No.` value, checklist generation must hard-block and emit discrepancy evidence
-- checklist generation is a mandatory pre-print gate for UD/Amendment runs; if the JSON or HTML checklist artifact cannot be generated successfully, print and post-run mail moves must hard-block
+- checklist generation is a mandatory pre-print gate for `ud_ip_exp` and `export_lc_sc`; if the JSON or HTML checklist artifact cannot be generated successfully, print and post-run mail moves must hard-block
+- for `export_lc_sc`, print planning must persist one checklist-source record per printed document; each persisted record must bind that printed PDF to the exact workbook `row_indexes` it supports, and checklist generation/validation should prefer those persisted records over runtime reconstruction from mail outcomes. The current implementation may still accept legacy `export_row_bundle` records or reconstruct export-document records from saved-document lineage when persisted per-document records are absent. The HTML view should preserve workbook header text/order for the exported row fields and append mail-level `Mail Subject` plus `Document Filename`
+- when one export mail produces multiple workbook rows, the HTML checklist should render one table row per workbook row while spanning the `Mail Subject` and `Document Filename` cells across that mail's related rows; multiple document filenames should appear in one cell separated by line breaks
+- checklist output for `export_lc_sc` remains workbook-row-oriented even though the persisted annotation evidence is document-oriented; the system must aggregate the planned document records by workbook row when rendering JSON/HTML checklist rows
+- because `export_lc_sc` now persists exact per-document row bindings, checklist validation should hard-block whenever saved-document lineage cannot be reconciled, workbook-row membership becomes uncertain, or the persisted/fallback checklist-source evidence does not deterministically match the current print plan
 - generate the JSON and HTML checklist artifacts before print execution using the persisted planned print order
 - after the full run reaches terminal mail-move success, automatically open the generated HTML checklist in the system default browser
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
@@ -860,7 +872,7 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
   `report-live-readiness` -> `validate-run` -> `plan-print` -> `generate-print-annotation-html` -> `execute-print` -> `execute-mail-moves`
 - `acknowledge-partial-print` is an exception-path recovery command, not part of the normal happy-path operator flow.
 - Print completion in phase 1 means deterministic silent submission order has completed and the workflow state reached `completed`; it does not mean the system waited for physical paper completion.
-- For `ud_ip_exp`, the final HTML print-annotation checklist is generated before print, but it is opened only after successful mail-move completion so the operator ends the run with the finished report visible.
+- For `ud_ip_exp` and `export_lc_sc`, the final HTML print-annotation checklist is generated before print, but it is opened only after successful mail-move completion so the operator ends the run with the finished report visible.
 - A run may end in terminal `completed` state while still retaining discrepancy records from earlier failed attempts in the same audit trail. Operators should treat terminal phase statuses as the authoritative state and use discrepancies as historical evidence.
 - In the released export workflow path, daily `validate-run` with `--document-root` saves attachments for printing/storage but does not perform OCR-based saved-document analysis by default.
 

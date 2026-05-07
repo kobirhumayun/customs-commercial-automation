@@ -154,6 +154,368 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         self.assertEqual(result.payload["rows"][1]["sl_no_values"], ["21A"])
         self.assertIn("Print Annotation Checklist", result.html)
 
+    def test_build_print_annotation_checklist_renders_export_rows_with_mail_level_rowspans(self) -> None:
+        run_report = _build_export_run_report()
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-1",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=None,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=True,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-1",
+                subject_raw="Export subject",
+                sender_address="export@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "normalized_filename": "LC-0043.pdf",
+                        "destination_path": "C:/docs/LC-0043.pdf",
+                    },
+                    {
+                        "saved_document_id": "doc-2",
+                        "normalized_filename": "PI-0043.pdf",
+                        "destination_path": "C:/docs/PI-0043.pdf",
+                    },
+                ],
+                staged_write_operations=[
+                    {"row_index": 11, "column_key": "file_no"},
+                    {"row_index": 12, "column_key": "file_no"},
+                ],
+            )
+        ]
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                document_path_hashes=["hash-1", "hash-2"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="Commercial File No."),
+                WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                WorkbookHeader(column_index=4, text="Name of Buyers"),
+                WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                WorkbookHeader(column_index=16, text="LC Issue Date"),
+            ],
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={
+                        1: "17",
+                        2: "P/26/0042",
+                        3: "LC-0043",
+                        4: "ANANTA GARMENTS LTD",
+                        5: "ABC BANK",
+                        6: "12000",
+                        7: "2026-04-15",
+                        8: "2026-05-15",
+                        9: "1000",
+                        10: "",
+                        11: "",
+                        12: "XYZ BANK",
+                        13: "MLC-001",
+                        14: "2026-01-15",
+                        15: "BB-001",
+                        16: "2026-01-10",
+                    },
+                ),
+                WorkbookRow(
+                    row_index=12,
+                    values={
+                        1: "18",
+                        2: "P/26/0043",
+                        3: "LC-0043",
+                        4: "ANANTA GARMENTS LTD",
+                        5: "ABC BANK",
+                        6: "8000",
+                        7: "2026-04-20",
+                        8: "2026-05-20",
+                        9: "700",
+                        10: "1",
+                        11: "2026-02-01",
+                        12: "XYZ BANK",
+                        13: "MLC-001",
+                        14: "2026-01-15",
+                        15: "BB-002",
+                        16: "2026-01-10",
+                    },
+                ),
+            ],
+        )
+
+        result = build_print_annotation_checklist(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 2)
+        self.assertEqual(result.payload["rows"][0]["sl_no_values"], ["17"])
+        self.assertEqual(result.payload["rows"][1]["sl_no_values"], ["18"])
+        self.assertEqual(result.payload["rows"][0]["mail_group_row_count"], 2)
+        self.assertTrue(result.payload["rows"][0]["mail_group_first_row"])
+        self.assertFalse(result.payload["rows"][1]["mail_group_first_row"])
+        self.assertEqual(result.payload["rows"][0]["document_filename"], "LC-0043.pdf\nPI-0043.pdf")
+        self.assertEqual(
+            [column["header_text"] for column in result.payload["workbook_columns"][:4]],
+            ["SL.No.", "Commercial File No.", "L/C & S/C No.", "Name of Buyers"],
+        )
+        self.assertIn('rowspan="2"', result.html)
+        self.assertIn("Commercial File No.", result.html)
+        self.assertEqual(result.html.count("Export subject"), 1)
+        self.assertIn("LC-0043.pdf<br>PI-0043.pdf", result.html)
+
+    def test_build_print_annotation_checklist_raises_when_export_document_lineage_is_missing(self) -> None:
+        run_report = _build_export_run_report()
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-1",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=None,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=True,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-1",
+                subject_raw="Export subject",
+                sender_address="export@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "normalized_filename": "LC-0043.pdf",
+                        "destination_path": "C:/docs/LC-0043.pdf",
+                    }
+                ],
+                staged_write_operations=[
+                    {"row_index": 11, "column_key": "file_no"},
+                ],
+            )
+        ]
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                document_path_hashes=["hash-1", "hash-2"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="Commercial File No."),
+                WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                WorkbookHeader(column_index=4, text="Name of Buyers"),
+                WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                WorkbookHeader(column_index=16, text="LC Issue Date"),
+            ],
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={
+                        1: "17",
+                        2: "P/26/0042",
+                        3: "LC-0043",
+                        4: "ANANTA GARMENTS LTD",
+                        5: "ABC BANK",
+                        6: "12000",
+                        7: "2026-04-15",
+                        8: "2026-05-15",
+                        9: "1000",
+                        10: "",
+                        11: "",
+                        12: "XYZ BANK",
+                        13: "MLC-001",
+                        14: "2026-01-15",
+                        15: "BB-001",
+                        16: "2026-01-10",
+                    },
+                ),
+            ],
+        )
+
+        with self.assertRaises(PrintAnnotationChecklistError) as ctx:
+            build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+
+        self.assertEqual(ctx.exception.code, "print_annotation_generation_failed")
+        self.assertIn("saved-document", str(ctx.exception))
+
+    def test_build_print_annotation_checklist_prefers_persisted_export_annotation_documents(self) -> None:
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="Commercial File No."),
+                WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                WorkbookHeader(column_index=4, text="Name of Buyers"),
+                WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                WorkbookHeader(column_index=6, text="Amount"),
+                WorkbookHeader(column_index=7, text="Shipment Date"),
+                WorkbookHeader(column_index=8, text="Expiry Date"),
+                WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                WorkbookHeader(column_index=12, text="Lien Bank"),
+                WorkbookHeader(column_index=13, text="Master L/C No."),
+                WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                WorkbookHeader(column_index=16, text="LC Issue Date"),
+            ],
+            rows=[
+                WorkbookRow(
+                    row_index=11,
+                    values={
+                        1: "17",
+                        2: "P/26/0042",
+                        3: "LC-0043",
+                        4: "ANANTA GARMENTS LTD",
+                        5: "ABC BANK",
+                        6: "12000",
+                        7: "2026-04-15",
+                        8: "2026-05-15",
+                        9: "1000",
+                        10: "",
+                        11: "",
+                        12: "XYZ BANK",
+                        13: "MLC-001",
+                        14: "2026-01-15",
+                        15: "BB-001",
+                        16: "2026-01-10",
+                    },
+                ),
+                WorkbookRow(
+                    row_index=12,
+                    values={
+                        1: "18",
+                        2: "P/26/0043",
+                        3: "LC-0043",
+                        4: "ANANTA GARMENTS LTD",
+                        5: "ABC BANK",
+                        6: "8000",
+                        7: "2026-04-20",
+                        8: "2026-05-20",
+                        9: "700",
+                        10: "1",
+                        11: "2026-02-01",
+                        12: "XYZ BANK",
+                        13: "MLC-001",
+                        14: "2026-01-15",
+                        15: "BB-002",
+                        16: "2026-01-10",
+                    },
+                ),
+            ],
+        )
+        mail_outcome = MailOutcomeRecord(
+            run_id="run-1",
+            mail_id="mail-1",
+            workflow_id=WorkflowId.EXPORT_LC_SC,
+            snapshot_index=0,
+            processing_status=MailProcessingStatus.WRITTEN,
+            final_decision=None,
+            decision_reasons=[],
+            eligible_for_write=False,
+            eligible_for_print=True,
+            eligible_for_mail_move=True,
+            source_entry_id="entry-1",
+            subject_raw="Export subject",
+            sender_address="export@example.com",
+            saved_documents=[],
+            staged_write_operations=[],
+        )
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                document_path_hashes=["hash-1", "hash-2"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+                annotation_documents=[
+                    {
+                        "annotation_scope": "export_document",
+                        "workflow_id": "export_lc_sc",
+                        "saved_document_id": "doc-1",
+                        "document_filename": "LC-0043.pdf",
+                        "document_path_hash": "hash-1",
+                        "row_indexes": [11, 12],
+                        "checklist_required": True,
+                    },
+                    {
+                        "annotation_scope": "export_document",
+                        "workflow_id": "export_lc_sc",
+                        "saved_document_id": "doc-2",
+                        "document_filename": "PI-0043.pdf",
+                        "document_path_hash": "hash-2",
+                        "row_indexes": [11, 12],
+                        "checklist_required": True,
+                    },
+                ],
+            )
+        ]
+
+        result = build_print_annotation_checklist(
+            run_report=_build_export_run_report(),
+            mail_outcomes=[mail_outcome],
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 2)
+        self.assertEqual(result.payload["rows"][0]["row_indexes"], [11])
+        self.assertEqual(result.payload["rows"][1]["row_indexes"], [12])
+        self.assertEqual(result.payload["rows"][0]["document_filenames"], ["LC-0043.pdf", "PI-0043.pdf"])
+        self.assertEqual(result.payload["rows"][0]["saved_document_ids"], ["doc-1", "doc-2"])
+
     def test_build_print_annotation_checklist_raises_when_sl_no_value_is_missing(self) -> None:
         workbook_snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",
@@ -206,6 +568,629 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
             persist_print_annotation_checklist(
                 artifact_paths=artifact_paths,
                 result=result,
+            )
+
+            validate_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                print_batches=print_batches,
+                mail_outcomes=mail_outcomes,
+            )
+
+    def test_validate_print_annotation_checklist_accepts_generated_export_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = _build_export_run_report()
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        },
+                        {
+                            "saved_document_id": "doc-2",
+                            "normalized_filename": "PI-0043.pdf",
+                            "destination_path": "C:/docs/PI-0043.pdf",
+                        },
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                        {"row_index": 12, "column_key": "file_no"},
+                    ],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="Commercial File No."),
+                    WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=4, text="Name of Buyers"),
+                    WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                    WorkbookHeader(column_index=6, text="Amount"),
+                    WorkbookHeader(column_index=7, text="Shipment Date"),
+                    WorkbookHeader(column_index=8, text="Expiry Date"),
+                    WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                    WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                    WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                    WorkbookHeader(column_index=12, text="Lien Bank"),
+                    WorkbookHeader(column_index=13, text="Master L/C No."),
+                    WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                    WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                    WorkbookHeader(column_index=16, text="LC Issue Date"),
+                ],
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "17",
+                            2: "P/26/0042",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "12000",
+                            7: "2026-04-15",
+                            8: "2026-05-15",
+                            9: "1000",
+                            10: "",
+                            11: "",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-001",
+                            16: "2026-01-10",
+                        },
+                    ),
+                    WorkbookRow(
+                        row_index=12,
+                        values={
+                            1: "18",
+                            2: "P/26/0043",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "8000",
+                            7: "2026-04-20",
+                            8: "2026-05-20",
+                            9: "700",
+                            10: "1",
+                            11: "2026-02-01",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-002",
+                            16: "2026-01-10",
+                        },
+                    ),
+                ],
+            )
+
+            result = build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+            persist_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                result=result,
+            )
+
+            validate_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                print_batches=print_batches,
+                mail_outcomes=mail_outcomes,
+            )
+
+    def test_validate_print_annotation_checklist_prefers_persisted_export_annotation_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = _build_export_run_report()
+            persisted_mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[],
+                    staged_write_operations=[],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                    annotation_documents=[
+                        {
+                            "annotation_scope": "export_document",
+                            "workflow_id": "export_lc_sc",
+                            "saved_document_id": "doc-1",
+                            "document_filename": "LC-0043.pdf",
+                            "document_path_hash": "hash-1",
+                            "row_indexes": [11, 12],
+                            "checklist_required": True,
+                        },
+                        {
+                            "annotation_scope": "export_document",
+                            "workflow_id": "export_lc_sc",
+                            "saved_document_id": "doc-2",
+                            "document_filename": "PI-0043.pdf",
+                            "document_path_hash": "hash-2",
+                            "row_indexes": [11, 12],
+                            "checklist_required": True,
+                        },
+                    ],
+                )
+            ]
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="Commercial File No."),
+                    WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=4, text="Name of Buyers"),
+                    WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                    WorkbookHeader(column_index=6, text="Amount"),
+                    WorkbookHeader(column_index=7, text="Shipment Date"),
+                    WorkbookHeader(column_index=8, text="Expiry Date"),
+                    WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                    WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                    WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                    WorkbookHeader(column_index=12, text="Lien Bank"),
+                    WorkbookHeader(column_index=13, text="Master L/C No."),
+                    WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                    WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                    WorkbookHeader(column_index=16, text="LC Issue Date"),
+                ],
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "17",
+                            2: "P/26/0042",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "12000",
+                            7: "2026-04-15",
+                            8: "2026-05-15",
+                            9: "1000",
+                            10: "",
+                            11: "",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-001",
+                            16: "2026-01-10",
+                        },
+                    ),
+                    WorkbookRow(
+                        row_index=12,
+                        values={
+                            1: "18",
+                            2: "P/26/0043",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "8000",
+                            7: "2026-04-20",
+                            8: "2026-05-20",
+                            9: "700",
+                            10: "1",
+                            11: "2026-02-01",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-002",
+                            16: "2026-01-10",
+                        },
+                    ),
+                ],
+            )
+
+            result = build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=persisted_mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+            persist_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                result=result,
+            )
+            drifted_mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-z",
+                            "normalized_filename": "DRIFTED.pdf",
+                            "destination_path": "C:/docs/DRIFTED.pdf",
+                        }
+                    ],
+                    staged_write_operations=[{"row_index": 99, "column_key": "file_no"}],
+                )
+            ]
+
+            validate_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                run_report=run_report,
+                print_batches=print_batches,
+                mail_outcomes=drifted_mail_outcomes,
+            )
+
+    def test_validate_print_annotation_checklist_raises_when_export_document_lineage_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = _build_export_run_report()
+            persisted_mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        },
+                        {
+                            "saved_document_id": "doc-2",
+                            "normalized_filename": "PI-0043.pdf",
+                            "destination_path": "C:/docs/PI-0043.pdf",
+                        },
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                        {"row_index": 12, "column_key": "file_no"},
+                    ],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="Commercial File No."),
+                    WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=4, text="Name of Buyers"),
+                    WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                    WorkbookHeader(column_index=6, text="Amount"),
+                    WorkbookHeader(column_index=7, text="Shipment Date"),
+                    WorkbookHeader(column_index=8, text="Expiry Date"),
+                    WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                    WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                    WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                    WorkbookHeader(column_index=12, text="Lien Bank"),
+                    WorkbookHeader(column_index=13, text="Master L/C No."),
+                    WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                    WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                    WorkbookHeader(column_index=16, text="LC Issue Date"),
+                ],
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "17",
+                            2: "P/26/0042",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "12000",
+                            7: "2026-04-15",
+                            8: "2026-05-15",
+                            9: "1000",
+                            10: "",
+                            11: "",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-001",
+                            16: "2026-01-10",
+                        },
+                    ),
+                    WorkbookRow(
+                        row_index=12,
+                        values={
+                            1: "18",
+                            2: "P/26/0043",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "8000",
+                            7: "2026-04-20",
+                            8: "2026-05-20",
+                            9: "700",
+                            10: "1",
+                            11: "2026-02-01",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-002",
+                            16: "2026-01-10",
+                        },
+                    ),
+                ],
+            )
+            result = build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=persisted_mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+            persist_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                result=result,
+            )
+            lineage_drifted_mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        }
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                        {"row_index": 12, "column_key": "file_no"},
+                    ],
+                )
+            ]
+
+            with self.assertRaises(PrintAnnotationChecklistError) as ctx:
+                validate_print_annotation_checklist(
+                    artifact_paths=artifact_paths,
+                    run_report=run_report,
+                    print_batches=print_batches,
+                    mail_outcomes=lineage_drifted_mail_outcomes,
+                )
+
+        self.assertEqual(ctx.exception.code, "print_annotation_checklist_missing_or_invalid")
+        self.assertIn("saved-document lineage", str(ctx.exception))
+
+    def test_validate_print_annotation_checklist_accepts_export_artifact_with_reordered_rows_and_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            artifact_paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-1",
+            )
+            run_report = _build_export_run_report()
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.WRITTEN,
+                    final_decision=None,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=True,
+                    eligible_for_mail_move=True,
+                    source_entry_id="entry-1",
+                    subject_raw="Export subject",
+                    sender_address="export@example.com",
+                    saved_documents=[
+                        {
+                            "saved_document_id": "doc-1",
+                            "normalized_filename": "LC-0043.pdf",
+                            "destination_path": "C:/docs/LC-0043.pdf",
+                        },
+                        {
+                            "saved_document_id": "doc-2",
+                            "normalized_filename": "PI-0043.pdf",
+                            "destination_path": "C:/docs/PI-0043.pdf",
+                        },
+                    ],
+                    staged_write_operations=[
+                        {"row_index": 11, "column_key": "file_no"},
+                        {"row_index": 12, "column_key": "file_no"},
+                    ],
+                )
+            ]
+            print_batches = [
+                PrintBatch(
+                    print_group_id="group-1",
+                    run_id="run-1",
+                    mail_id="mail-1",
+                    print_group_index=0,
+                    document_paths=["C:/docs/LC-0043.pdf", "C:/docs/PI-0043.pdf"],
+                    document_path_hashes=["hash-1", "hash-2"],
+                    completion_marker_id="completion-1",
+                    manual_verification_summary={},
+                )
+            ]
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="Commercial File No."),
+                    WorkbookHeader(column_index=3, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=4, text="Name of Buyers"),
+                    WorkbookHeader(column_index=5, text="L/C Issuing Bank"),
+                    WorkbookHeader(column_index=6, text="Amount"),
+                    WorkbookHeader(column_index=7, text="Shipment Date"),
+                    WorkbookHeader(column_index=8, text="Expiry Date"),
+                    WorkbookHeader(column_index=9, text="Quantity of Fabrics (Yds/Mtr)"),
+                    WorkbookHeader(column_index=10, text="L/C Amnd No."),
+                    WorkbookHeader(column_index=11, text="L/C Amnd Date"),
+                    WorkbookHeader(column_index=12, text="Lien Bank"),
+                    WorkbookHeader(column_index=13, text="Master L/C No."),
+                    WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                    WorkbookHeader(column_index=15, text="Bangladesh Bank Ref."),
+                    WorkbookHeader(column_index=16, text="LC Issue Date"),
+                ],
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "17",
+                            2: "P/26/0042",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "12000",
+                            7: "2026-04-15",
+                            8: "2026-05-15",
+                            9: "1000",
+                            10: "",
+                            11: "",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-001",
+                            16: "2026-01-10",
+                        },
+                    ),
+                    WorkbookRow(
+                        row_index=12,
+                        values={
+                            1: "18",
+                            2: "P/26/0043",
+                            3: "LC-0043",
+                            4: "ANANTA GARMENTS LTD",
+                            5: "ABC BANK",
+                            6: "8000",
+                            7: "2026-04-20",
+                            8: "2026-05-20",
+                            9: "700",
+                            10: "1",
+                            11: "2026-02-01",
+                            12: "XYZ BANK",
+                            13: "MLC-001",
+                            14: "2026-01-15",
+                            15: "BB-002",
+                            16: "2026-01-10",
+                        },
+                    ),
+                ],
+            )
+
+            result = build_print_annotation_checklist(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                print_batches=print_batches,
+                workbook_snapshot=workbook_snapshot,
+            )
+            payload = dict(result.payload)
+            payload["rows"] = list(reversed(payload["rows"]))
+            for row in payload["rows"]:
+                if isinstance(row, dict):
+                    row["document_path_hashes"] = list(reversed(row.get("document_path_hashes", [])))
+            persist_print_annotation_checklist(
+                artifact_paths=artifact_paths,
+                result=type(result)(payload=payload, html=result.html),
             )
 
             validate_print_annotation_checklist(
@@ -629,6 +1614,29 @@ def _build_run_report() -> RunReport:
         workflow_id=WorkflowId.UD_IP_EXP,
         tool_version="0.1.0",
         rule_pack_id="ud_ip_exp.default",
+        rule_pack_version="1.0.0",
+        started_at_utc="2026-05-01T00:00:00Z",
+        completed_at_utc=None,
+        state_timezone="Asia/Dhaka",
+        mail_iteration_order=["mail-1"],
+        print_group_order=["group-1"],
+        write_phase_status=WritePhaseStatus.COMMITTED,
+        print_phase_status=PrintPhaseStatus.PLANNED,
+        mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+        hash_algorithm="sha256",
+        run_start_backup_hash="a" * 64,
+        current_workbook_hash="b" * 64,
+        staged_write_plan_hash="c" * 64,
+        summary={"pass": 1, "warning": 0, "hard_block": 0},
+    )
+
+
+def _build_export_run_report() -> RunReport:
+    return RunReport(
+        run_id="run-1",
+        workflow_id=WorkflowId.EXPORT_LC_SC,
+        tool_version="0.1.0",
+        rule_pack_id="export_lc_sc.default",
         rule_pack_version="1.0.0",
         started_at_utc="2026-05-01T00:00:00Z",
         completed_at_utc=None,

@@ -232,7 +232,11 @@ def execute_mail_moves(
                 },
             )
 
-        completed_report = replace(moving_report, mail_move_phase_status=MailMovePhaseStatus.COMPLETED)
+        completed_report = replace(
+            moving_report,
+            mail_move_phase_status=MailMovePhaseStatus.COMPLETED,
+            completed_at_utc=utc_timestamp(),
+        )
         _persist_run_report(run_report_persistor, completed_report)
         return (
             completed_report,

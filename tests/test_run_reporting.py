@@ -172,6 +172,71 @@ class RunReportingTests(unittest.TestCase):
         self.assertEqual(summary["write_disposition_counts"]["duplicate_only_noop"], 1)
         self.assertEqual(summary["write_disposition_counts"]["mixed_duplicate_and_new_writes"], 1)
         self.assertEqual(summary["mail_move_policy_summary"]["eligible_mail_count"], 0)
+        self.assertEqual(summary["consistency_checks"]["overall_status"], "ok")
+        self.assertEqual(summary["consistency_checks"]["issue_count"], 0)
+
+    def test_summarize_run_status_flags_terminal_success_missing_completed_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = create_run_artifact_layout(
+                run_artifact_root=root / "runs",
+                backup_root=root / "backups",
+                workflow_id="export_lc_sc",
+                run_id="run-123",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.EXPORT_LC_SC,
+                tool_version="0.1.0",
+                rule_pack_id="export_lc_sc.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-29T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-1"],
+                print_group_order=["group-1"],
+                write_phase_status=WritePhaseStatus.COMMITTED,
+                print_phase_status=PrintPhaseStatus.COMPLETED,
+                mail_move_phase_status=MailMovePhaseStatus.COMPLETED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 1, "warning": 0, "hard_block": 0},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-1",
+                    workflow_id=WorkflowId.EXPORT_LC_SC,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.MOVED,
+                    final_decision=FinalDecision.PASS,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=False,
+                    eligible_for_mail_move=False,
+                    source_entry_id="entry-1",
+                    subject_raw="subject-1",
+                    sender_address="sender@example.com",
+                    print_group_id="group-1",
+                    mail_move_operation_id="move-1",
+                )
+            ]
+
+            summary = summarize_run_status(
+                run_report=run_report,
+                mail_outcomes=mail_outcomes,
+                staged_write_plan=[],
+                artifact_paths=paths,
+            )
+
+        self.assertEqual(summary["consistency_checks"]["overall_status"], "attention")
+        self.assertEqual(summary["consistency_checks"]["issue_count"], 1)
+        self.assertEqual(
+            summary["consistency_checks"]["issues"][0]["code"],
+            "terminal_run_missing_completed_at_utc",
+        )
 
 
 if __name__ == "__main__":

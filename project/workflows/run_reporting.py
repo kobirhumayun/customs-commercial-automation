@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from project.models import MailOutcomeRecord, MailProcessingStatus, RunReport, WriteOperation
+from project.models import MailMovePhaseStatus, MailOutcomeRecord, MailProcessingStatus, RunReport, WriteOperation
 from project.storage import RunArtifactPaths
 from project.workflows.duplicate_handling import classify_write_disposition, summarize_duplicate_decision_reasons
 from project.workflows.document_verification import summarize_manual_document_verification
@@ -19,6 +19,7 @@ def summarize_run_status(
 ) -> dict[str, Any]:
     mail_status_counts = _mail_processing_status_counts(mail_outcomes)
     duplicate_summary = summarize_duplicate_file_handling(mail_outcomes)
+    consistency_checks = _summarize_consistency_checks(run_report)
     return {
         "run_id": run_report.run_id,
         "workflow_id": run_report.workflow_id.value,
@@ -72,6 +73,7 @@ def summarize_run_status(
         "artifact_counts": {
             "discrepancy_count": _count_jsonl_records(artifact_paths.discrepancies_path),
         },
+        "consistency_checks": consistency_checks,
     }
 
 
@@ -168,3 +170,26 @@ def _count_jsonl_records(path: Path) -> int:
 
 def _nonempty_file_exists(path: Path) -> bool:
     return path.exists() and bool(path.read_text(encoding="utf-8").strip())
+
+
+def _summarize_consistency_checks(run_report: RunReport) -> dict[str, Any]:
+    issues: list[dict[str, str]] = []
+    if (
+        run_report.mail_move_phase_status == MailMovePhaseStatus.COMPLETED
+        and not str(run_report.completed_at_utc or "").strip()
+    ):
+        issues.append(
+            {
+                "code": "terminal_run_missing_completed_at_utc",
+                "message": (
+                    "Run metadata shows terminal mail-move completion but the run-level "
+                    "`completed_at_utc` timestamp is missing. Older historical runs may "
+                    "show this gap even when the run finished successfully."
+                ),
+            }
+        )
+    return {
+        "overall_status": "attention" if issues else "ok",
+        "issue_count": len(issues),
+        "issues": issues,
+    }
