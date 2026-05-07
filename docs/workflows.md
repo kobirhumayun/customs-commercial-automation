@@ -826,6 +826,8 @@ Rows where:
 - checklist generation is a mandatory pre-print gate for `ud_ip_exp` and `export_lc_sc`; if the JSON or HTML checklist artifact cannot be generated successfully, print and post-run mail moves must hard-block
 - for `export_lc_sc`, the checklist may be generated from committed staged export row targets after print planning; the HTML view should preserve workbook header text/order for the exported row fields and append mail-level `Mail Subject` plus `Document Filename`
 - when one export mail produces multiple workbook rows, the HTML checklist should render one table row per workbook row while spanning the `Mail Subject` and `Document Filename` cells across that mail's related rows; multiple document filenames should appear in one cell separated by line breaks
+- current phase-1 limitation: unlike `ud_ip_exp`, `export_lc_sc` does not yet persist per-document checklist-source records that bind each printed document to an exact workbook-row selection. Its checklist currently derives row membership from committed staged export row targets and carries the planned print-document set at mail-group level.
+- because of that weaker provenance model, `export_lc_sc` checklist validation should prefer hard-blocking over silent fallback whenever saved-document lineage, print-plan document identity, or workbook-row membership becomes uncertain.
 - generate the JSON and HTML checklist artifacts before print execution using the persisted planned print order
 - after the full run reaches terminal mail-move success, automatically open the generated HTML checklist in the system default browser
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing

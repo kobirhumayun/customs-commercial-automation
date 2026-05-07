@@ -543,6 +543,8 @@ Required fields:
 - `document_path_hashes` (array): SHA-256 hashes for print payload documents in group order.
 - `completion_marker_id` (string): `sha256(run_id + "|" + mail_id + "|" + print_group_index + "|" + joined_document_hashes)`.
 - `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `row_indexes`, and `checklist_required`. `export_lc_sc` may leave `annotation_documents` empty and derive checklist rows from the persisted print-group document list plus committed staged export row targets.
+- Current phase-1 implementation note: `export_lc_sc` checklist evidence is still weaker than `ud_ip_exp` evidence. Export rows are currently derived mail-first from committed staged row targets plus the planned print document list, not from persisted per-document row-link records. That means export checklist artifacts currently preserve workbook-row visibility and print-plan document hashes, but they do **not** yet provide the same per-document-to-row provenance, recovery fidelity, or audit specificity as `ud_ip_exp`.
+- Future hardening target: when an `export_lc_sc` mail can produce multiple workbook rows and multiple printed documents, the persisted print-plan contract should evolve toward explicit export annotation records that bind each printed document or declared print bundle to the exact workbook row set it is meant to annotate.
 
 ### `MailMoveOperation`
 Required fields:
