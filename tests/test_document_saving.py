@@ -222,6 +222,47 @@ class DocumentSavingTests(unittest.TestCase):
         self.assertEqual(result.issues[0].severity, FinalDecision.HARD_BLOCK)
         self.assertEqual(result.saved_documents, [])
 
+    def test_save_export_mail_documents_uses_short_temp_filename_for_attachment_save(self) -> None:
+        mail = build_email_snapshot(
+            [
+                SourceEmailRecord(
+                    entry_id="entry-1",
+                    received_time="2026-03-28T03:00:00Z",
+                    subject_raw="LC-0038-ANANTA GARMENTS LTD",
+                    sender_address="sender@example.com",
+                    attachments=[SourceAttachmentRecord(attachment_name="Very Long Attachment Name.pdf")],
+                )
+            ],
+            state_timezone="Asia/Dhaka",
+        )[0]
+
+        class RecordingProvider:
+            def __init__(self) -> None:
+                self.saved_path: Path | None = None
+
+            def save_attachment(self, *, mail, attachment_index, destination_path) -> None:
+                self.saved_path = destination_path
+                destination_path.write_bytes(b"%PDF-1.4\nshort temp path\n")
+
+        provider = RecordingProvider()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document_root = Path(temp_dir)
+            result = save_export_mail_documents(
+                mail=mail,
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-0038",
+                    buyer_name="ANANTA GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                ),
+                document_root=document_root,
+                provider=provider,
+            )
+
+        self.assertEqual(result.issues, [])
+        self.assertIsNotNone(provider.saved_path)
+        self.assertEqual(provider.saved_path.suffix, ".tmp")
+        self.assertNotIn("Very Long Attachment Name.pdf", provider.saved_path.name)
+
     def test_win32com_attachment_content_provider_saves_requested_attachment_index(self) -> None:
         mail = build_email_snapshot(
             [

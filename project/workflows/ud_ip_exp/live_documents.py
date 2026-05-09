@@ -621,7 +621,7 @@ def _save_attachment_atomically(
     attachment_index: int,
     destination_path: Path,
 ) -> None:
-    temp_path = destination_path.parent / f"{destination_path.name}.{uuid.uuid4().hex}.tmp"
+    temp_path = destination_path.parent / f"{uuid.uuid4().hex}.tmp"
     try:
         provider.save_attachment(mail=mail, attachment_index=attachment_index, destination_path=temp_path)
         os.replace(temp_path, destination_path)
