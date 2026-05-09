@@ -173,12 +173,15 @@ def validate_run_snapshot(
         mail_outcomes.append(mail_outcome)
         mail_reports.append(mail_report)
         discrepancy_reports.extend(mail_discrepancies)
-        staged_write_plan.extend(staging_result.staged_write_operations)
+        effective_staged_write_operations = (
+            staging_result.staged_write_operations if mail_outcome.eligible_for_write else []
+        )
+        staged_write_plan.extend(effective_staged_write_operations)
         summary[mail_outcome.final_decision.value] += 1
         working_workbook_snapshot = _advance_workbook_snapshot_for_staged_writes(
             descriptor=descriptor,
             workbook_snapshot=working_workbook_snapshot,
-            staged_write_operations=staging_result.staged_write_operations,
+            staged_write_operations=effective_staged_write_operations,
         )
 
     staged_write_plan_hash = canonical_json_hash(to_jsonable(staged_write_plan))
