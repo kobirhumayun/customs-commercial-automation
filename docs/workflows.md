@@ -857,9 +857,12 @@ Rows where:
   - dashboard `Last Date of Shipment` matches ERP `Ship. DT.` by calendar date
   - dashboard `LC Expiry Date` matches ERP `Expiry DT.` by calendar date
   - dashboard `LC Value` matches aggregated ERP `Current LC Value`
-  - `Related Foreign LC/Contract Information -> Foreign LC No` matches workbook `Master L/C No.`
-  - `Local LC Commodity Detail -> QUANTITY` matches aggregated ERP `LC Qty`
-- `OK (KGS)` when all non-quantity checks above pass and dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
+  - at least one normalized `Related Foreign LC/Contract Information -> Foreign LC No` value is common with the normalized workbook `Master L/C No.` value list
+  - the sum of all dashboard `Local LC Commodity Detail -> QUANTITY` rows matches aggregated ERP `LC Qty`
+- workbook `Master L/C No.` may contain one or more line-break-separated values
+- dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
+- foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing
+- `OK (KGS)` when all non-quantity checks above pass and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 - buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
 - otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`

@@ -395,8 +395,12 @@ Comparison rules:
 - dashboard `Last Date of Shipment` must match ERP `Ship. DT.` by calendar date
 - dashboard `LC Expiry Date` must match ERP `Expiry DT.` by calendar date
 - dashboard `LC Value` must match aggregated ERP `Current LC Value`
-- `Related Foreign LC/Contract Information -> Foreign LC No` must match workbook `Master L/C No.`
-- `Local LC Commodity Detail -> QUANTITY` matches aggregated ERP `LC Qty` first and falls back to aggregated ERP `Net Weight`
+- workbook `Master L/C No.` may contain one or more line-break-separated values
+- dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
+- foreign-LC comparison normalizes each workbook/dashboard value using trim, whitespace collapse, case-insensitive comparison, and special-character normalization
+- foreign-LC comparison passes when at least one normalized workbook `Master L/C No.` value is common with at least one normalized dashboard `Foreign LC No` value
+- sum all dashboard `Local LC Commodity Detail -> QUANTITY` rows before quantity comparison
+- the summed dashboard quantity matches aggregated ERP `LC Qty` first and falls back to aggregated ERP `Net Weight`
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 
 Result rules:

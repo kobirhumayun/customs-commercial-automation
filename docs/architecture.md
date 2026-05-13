@@ -265,12 +265,14 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 ### Bangladesh Bank dashboard verification CLI
 - Reads candidate rows where `UP No.` is blank, `UD No. & IP No.` exists, the first non-empty line does not begin with `EXP` or `IP`, and `Bangladesh Bank Dashboard` is blank or not already compliant.
 - Dedupes candidate work by workbook `L/C & S/C No.` so dashboard fetch/comparison runs once per LC family.
-- Uses workbook `L/C & S/C No.` and `Master L/C No.` plus ERP-derived family aggregates and dates as the verification inputs.
+- Uses workbook `L/C & S/C No.` and workbook `Master L/C No.` plus ERP-derived family aggregates and dates as the verification inputs.
 - Aggregates ERP amendments for `Current LC Value`, `LC Qty`, and `Net Weight`, and uses the same ERP buyer split logic as `export_lc_sc`.
 - Uses Playwright login to inspect dashboard values through a captured authenticated redirected URL.
 - Opens a fresh dashboard tab for each LC-family fetch and closes that tab after data capture so search fields are cleared between lookups.
 - Uses ERP `Ship. Remarks` as the primary dashboard search key when available; otherwise uses workbook `L/C & S/C No.`.
 - For each search key path, retries once with `0` inserted immediately before the last 4 characters of the normalized key if the initial fetch returns no data.
+- Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides.
+- Sums all dashboard `Local LC Commodity Detail -> QUANTITY` rows before comparing against aggregated ERP `LC Qty` and, if needed, aggregated ERP `Net Weight`.
 - Writes verification-only results: `OK`, `OK (KGS)`, or a combined discrepancy string/message specific to the observed mismatch/no-data condition.
 - Writes the same family result back only to the filtered rows in that LC family and does not populate any additional workbook fields.
 - Emits JSON and HTML verification reports with family-oriented comparison evidence and grouped workbook `SL.No.` values, and automatically opens the HTML report at the end of the run.
