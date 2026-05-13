@@ -256,7 +256,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by exact LC-value group matching |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
-| `bb_dashboard_verification` | `dashboard_status` | `B. Bangladesh Bank Status` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
+| `bb_dashboard_verification` | `dashboard_status` | `Bangladesh Bank Dashboard` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
 
 If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns outside an explicitly declared duplicate-header exception, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
 
@@ -366,9 +366,50 @@ Both groups are valid only because they match the LC value first. Quantity compa
 
 ## Bangladesh Bank rules
 Verification uses:
-- workbook LC/SC number and master LC number
-- ERP totals across amendments for value, quantity, and net weight
-- shipment and expiry dates from final amendment rows
+- workbook `L/C & S/C No.` and workbook `Master L/C No.`
+- ERP totals across amendments for `Current LC Value`, `LC Qty`, and `Net Weight`
+- ERP `LC DT.`, `Ship. DT.`, and `Expiry DT.` parsed to calendar-date values
+- ERP buyer name split using the same logic as `export_lc_sc`
+
+Candidate-row and family rules:
+- candidate rows require blank `UP No.`
+- `UD No. & IP No.` must be non-blank
+- only the first non-empty line of `UD No. & IP No.` is considered for eligibility
+- rows whose first non-empty line begins with `EXP` are excluded
+- rows whose first non-empty line begins with `IP` are excluded
+- `Bangladesh Bank Dashboard` must be blank or contain a value other than `OK` or `OK (KGS)`
+- LC-family deduping is by workbook `L/C & S/C No.` only
+- verification is performed once per LC family and the resulting value is written only to the filtered rows in that family
+
+Dashboard fetch rules:
+- the dashboard search key is ERP `Ship. Remarks` when available; otherwise workbook `L/C & S/C No.`
+- search-key normalization before submission is limited to trim + whitespace collapse
+- if a search using ERP `Ship. Remarks` returns no data, retry once using the same value with `0` inserted immediately before the last 4 characters, then stop with no workbook-LC fallback
+- if a search using workbook `L/C & S/C No.` returns no data, retry once using the same value with `0` inserted immediately before the last 4 characters
+
+Comparison rules:
+- `Beneficiary's Name` must equal `PIONEER DENIM LIMITED` after normalization
+- normalized ERP split buyer name must appear in both `IRC Details` and `ERC Details`
+- buyer containment normalization may adjust case, whitespace, and special characters
+- dashboard `LC Date` must match ERP `LC DT.` by calendar date
+- dashboard `Last Date of Shipment` must match ERP `Ship. DT.` by calendar date
+- dashboard `LC Expiry Date` must match ERP `Expiry DT.` by calendar date
+- dashboard `LC Value` must match aggregated ERP `Current LC Value`
+- `Related Foreign LC/Contract Information -> Foreign LC No` must match workbook `Master L/C No.`
+- `Local LC Commodity Detail -> QUANTITY` matches aggregated ERP `LC Qty` first and falls back to aggregated ERP `Net Weight`
+- numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
+
+Result rules:
+- write `OK` when quantity matches ERP `LC Qty` and all other required comparisons pass
+- write `OK (KGS)` when all non-quantity comparisons pass and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
+- otherwise write a combined descriptive discrepancy string/message specific to the mismatch set
+- if the dashboard search returns no result, multiple results, or incomplete data, write a clear message specific to that occurrence type
+
+Reporting rules:
+- emit JSON and HTML verification reports for the run
+- one report row represents one LC family with grouped workbook `SL.No.` values
+- each report row should include compared workbook, ERP, and dashboard values plus the final workbook status written
+- the HTML report should automatically open at the end of the run
 
 The dashboard column is verification-only and should not be used to drive other writes in phase 1.
 

@@ -810,13 +810,71 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Candidate filters
 Rows where:
 - `UP No.` is blank
-- UD value exists
-- dashboard field is blank, not `OK`, or not `OK (Kgs)`
+- `UD No. & IP No.` is non-blank
+- only the first non-empty line of `UD No. & IP No.` is considered for eligibility
+- rows are excluded when that first non-empty line begins with `EXP`
+- rows are excluded when that first non-empty line begins with `IP`
+- `Bangladesh Bank Dashboard` is blank or contains a value other than `OK` or `OK (KGS)`
+
+### Family deduping and write scope
+- Candidate deduping is by workbook `L/C & S/C No.` only.
+- Dashboard fetch/comparison is performed once per deduped LC family.
+- The final family result is written back only to the filtered rows in that family.
+- Rows in the same LC family that were not eligible under the candidate filter are not rewritten by this workflow.
+
+### Source-of-truth inputs
+- Workbook provides:
+  - `L/C & S/C No.`
+  - `Master L/C No.`
+  - grouped `SL.No.` values for reporting
+- ERP provides:
+  - buyer name using the same buyer split logic as `export_lc_sc`
+  - aggregated `Current LC Value`, `LC Qty`, and `Net Weight` across the LC family
+  - parsed `LC DT.`, `Ship. DT.`, and `Expiry DT.`
+  - `Ship. Remarks` exactly as exported
+
+### Dashboard fetch contract
+- Login starts at `https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::` using configured credentials.
+- After successful login, the workflow must capture the redirected authenticated URL.
+- Each LC-family fetch must open a fresh browser tab from that redirected authenticated URL and close the tab after the fetch completes.
+- The workflow must not reuse the same active dashboard tab for multiple family lookups because uncleared fields may produce incorrect results.
+- Search uses the dashboard `Search Local LC` field plus the `Search` button.
+- Search key normalization before submission is limited to trim + whitespace collapse.
+- If ERP `Ship. Remarks` is available, search order is:
+  1. normalized `Ship. Remarks`
+  2. zero-inserted normalized `Ship. Remarks`
+  3. stop; do not fall back to workbook LC when `Ship. Remarks` originally existed
+- If ERP `Ship. Remarks` is blank/unavailable, search order is:
+  1. normalized workbook `L/C & S/C No.`
+  2. zero-inserted normalized workbook `L/C & S/C No.`
+- Zero insertion means inserting `0` immediately before the last 4 characters of the normalized search key.
 
 ### Verification result values
-- `OK` when quantity matches LC Qty and remaining fields are consistent
-- `OK (Kgs)` when quantity mismatches LC Qty but matches Net Weight and remaining fields are consistent
+- `OK` when:
+  - `Beneficiary's Name` equals `PIONEER DENIM LIMITED` after normalization
+  - normalized ERP split buyer name exists in both `IRC Details` and `ERC Details`
+  - dashboard `LC Date` matches ERP `LC DT.` by calendar date
+  - dashboard `Last Date of Shipment` matches ERP `Ship. DT.` by calendar date
+  - dashboard `LC Expiry Date` matches ERP `Expiry DT.` by calendar date
+  - dashboard `LC Value` matches aggregated ERP `Current LC Value`
+  - `Related Foreign LC/Contract Information -> Foreign LC No` matches workbook `Master L/C No.`
+  - `Local LC Commodity Detail -> QUANTITY` matches aggregated ERP `LC Qty`
+- `OK (KGS)` when all non-quantity checks above pass and dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
+- numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
+- buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
 - otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
+
+### No-data result handling
+- If the dashboard search returns no result, write a clear no-result message.
+- If the dashboard search resolves to multiple results, write a clear multiple-results message.
+- If the dashboard page resolves but required dashboard fields are missing or incomplete, write a clear incomplete-data message.
+- Message wording should be specific to the observed failure mode.
+
+### Reporting
+- This workflow must emit JSON and HTML verification reports even though it has no print phase.
+- The HTML report must open automatically at the end of the run, regardless of whether families matched or failed.
+- Report rows are family-oriented: one report row per LC family with grouped workbook `SL.No.` values for the filtered rows receiving the family result.
+- Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family.
 
 ## Printing
 - only newly saved PDFs are printed
