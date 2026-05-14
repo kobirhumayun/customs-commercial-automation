@@ -257,6 +257,8 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `Bangladesh Bank Dashboard` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
+| `bb_dashboard_verification` | `shipment_date` | `Shipment Date` | `update_from_erp_on_successful_family` | row eligible by workflow filters and family final result is `OK` or `OK (KGS)`; source ERP `Ship. DT.` formatted to workbook date representation |
+| `bb_dashboard_verification` | `expiry_date` | `Expiry Date` | `update_from_erp_on_successful_family` | row eligible by workflow filters and family final result is `OK` or `OK (KGS)`; source ERP `Expiry DT.` formatted to workbook date representation |
 
 If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns outside an explicitly declared duplicate-header exception, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
 
@@ -380,6 +382,10 @@ Candidate-row and family rules:
 - `Bangladesh Bank Dashboard` must be blank or contain a value other than `OK` or `OK (KGS)`
 - LC-family deduping is by workbook `L/C & S/C No.` only
 - verification is performed once per LC family and the resulting value is written only to the filtered rows in that family
+- only successful LC families also receive ERP-to-workbook date writeback on those same filtered rows:
+  - workbook `Shipment Date` <- ERP `Ship. DT.`
+  - workbook `Expiry Date` <- ERP `Expiry DT.`
+- successful LC family means final dashboard status is `OK` or `OK (KGS)`
 
 Dashboard fetch rules:
 - the dashboard search key is ERP `Ship. Remarks` when available; otherwise workbook `L/C & S/C No.`
@@ -408,11 +414,14 @@ Result rules:
 - write `OK (KGS)` when all non-quantity comparisons pass and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
 - otherwise write a combined descriptive discrepancy string/message specific to the mismatch set
 - if the dashboard search returns no result, multiple results, or incomplete data, write a clear message specific to that occurrence type
+- when result is `OK` or `OK (KGS)`, also update workbook `Shipment Date` and `Expiry Date` on the filtered rows in that LC family using ERP `Ship. DT.` and `Expiry DT.`
+- ERP is authoritative for those two fields inside this workflow's successful-family path; mismatch/no-data results do not trigger shipment/expiry date writeback
 
 Reporting rules:
 - emit JSON and HTML verification reports for the run
 - one report row represents one LC family with grouped workbook `SL.No.` values
 - each report row should include compared workbook, ERP, and dashboard values plus the final workbook status written
+- for successful families, each report row should also show the ERP shipment/expiry dates written back to workbook `Shipment Date` and `Expiry Date`
 - the HTML report should automatically open at the end of the run
 
 The dashboard column is verification-only and should not be used to drive other writes in phase 1.

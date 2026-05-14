@@ -80,12 +80,13 @@ Goal: process fabric-related import emails and map validated BTB LC data to a si
 - One import LC mapped to exactly one row.
 
 ### Phase 5 — Bangladesh Bank dashboard verification
-Goal: implement verification-only workflow with workbook status results.
+Goal: implement dashboard verification with workbook status results plus ERP shipment/expiry date refresh for successful families.
 - Dashboard login via Playwright.
 - Candidate-row filtering from master workbook using first-line `UD No. & IP No.` eligibility and non-`EXP`/non-`IP` exclusion.
 - LC-family deduping by `L/C & S/C No.` with writeback only to filtered rows in the family.
 - ERP amendment aggregation and dashboard comparison using `Ship. Remarks`-first search with zero-insert retry.
 - Status writeback of `OK`, `OK (KGS)`, or descriptive discrepancy/no-data message.
+- ERP `Ship. DT.` and `Expiry DT.` writeback to workbook `Shipment Date` and `Expiry Date` for successful LC families only.
 - Family-oriented JSON and HTML verification report generation with grouped `SL.No.` values and automatic HTML open at run end.
 
 ### Phase 6 — Hardening, operations, and future-ready extensions

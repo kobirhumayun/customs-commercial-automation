@@ -273,8 +273,9 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - For each search key path, retries once with `0` inserted immediately before the last 4 characters of the normalized key if the initial fetch returns no data.
 - Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides.
 - Sums all dashboard `Local LC Commodity Detail -> QUANTITY` rows before comparing against aggregated ERP `LC Qty` and, if needed, aggregated ERP `Net Weight`.
-- Writes verification-only results: `OK`, `OK (KGS)`, or a combined discrepancy string/message specific to the observed mismatch/no-data condition.
-- Writes the same family result back only to the filtered rows in that LC family and does not populate any additional workbook fields.
+- Writes `Bangladesh Bank Dashboard` results as `OK`, `OK (KGS)`, or a combined discrepancy string/message specific to the observed mismatch/no-data condition.
+- For successful LC families only, also writes ERP `Ship. DT.` to workbook `Shipment Date` and ERP `Expiry DT.` to workbook `Expiry Date` for the same filtered rows in that LC family.
+- Successful LC families are the families whose final dashboard outcome is compliant (`OK` or `OK (KGS)`); mismatch/no-data families do not receive shipment/expiry date writeback from this workflow.
 - Emits JSON and HTML verification reports with family-oriented comparison evidence and grouped workbook `SL.No.` values, and automatically opens the HTML report at the end of the run.
 
 ### Printing CLI/service
