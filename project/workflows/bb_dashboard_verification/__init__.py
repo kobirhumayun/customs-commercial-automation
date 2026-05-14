@@ -644,13 +644,20 @@ def _compare_dashboard_snapshot(
     if normalized_buyer not in _normalize_special_text(snapshot.erc_details):
         mismatch_messages.append("ERC Details did not contain the ERP buyer name.")
 
-    if _normalize_date(snapshot.lc_date) != aggregate.lc_date:
+    normalized_snapshot_lc_date = _normalize_date(snapshot.lc_date)
+    normalized_snapshot_ship_date = _normalize_date(snapshot.last_date_of_shipment)
+    normalized_snapshot_expiry_date = _normalize_date(snapshot.lc_expiry_date)
+    normalized_erp_lc_date = _normalize_date(aggregate.lc_date)
+    normalized_erp_ship_date = _normalize_date(aggregate.ship_date)
+    normalized_erp_expiry_date = _normalize_date(aggregate.expiry_date)
+
+    if normalized_snapshot_lc_date != normalized_erp_lc_date:
         mismatch_messages.append(f"LC Date mismatch: dashboard '{snapshot.lc_date}' != ERP '{aggregate.lc_date}'.")
-    if _normalize_date(snapshot.last_date_of_shipment) != aggregate.ship_date:
+    if normalized_snapshot_ship_date != normalized_erp_ship_date:
         mismatch_messages.append(
             f"Last Date of Shipment mismatch: dashboard '{snapshot.last_date_of_shipment}' != ERP '{aggregate.ship_date}'."
         )
-    if _normalize_date(snapshot.lc_expiry_date) != aggregate.expiry_date:
+    if normalized_snapshot_expiry_date != normalized_erp_expiry_date:
         mismatch_messages.append(
             f"LC Expiry Date mismatch: dashboard '{snapshot.lc_expiry_date}' != ERP '{aggregate.expiry_date}'."
         )
@@ -682,21 +689,26 @@ def _compare_dashboard_snapshot(
             "decision_reasons": mismatch_messages,
         }
 
-    non_quantity_pass = not mismatch_messages
-    if non_quantity_pass and _decimal_matches(quantity_sum, aggregate.lc_qty):
+    quantity_matches_lc_qty = _decimal_matches(quantity_sum, aggregate.lc_qty)
+    quantity_matches_net_weight = (
+        aggregate.net_weight is not None and _decimal_matches(quantity_sum, aggregate.net_weight)
+    )
+
+    if not mismatch_messages and quantity_matches_lc_qty:
         return {"status": "OK", "decision_reasons": ["Dashboard quantity matched ERP LC quantity."]}
-    if non_quantity_pass and aggregate.net_weight is not None and _decimal_matches(quantity_sum, aggregate.net_weight):
+    if not mismatch_messages and quantity_matches_net_weight:
         return {"status": "OK (KGS)", "decision_reasons": ["Dashboard quantity matched ERP net weight."]}
 
-    mismatch_messages.append(
-        "Quantity mismatch: dashboard total "
-        f"'{_decimal_to_string(quantity_sum)}' did not match ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'"
-        + (
-            f" or ERP Net Weight '{_decimal_to_string(aggregate.net_weight)}'."
-            if aggregate.net_weight is not None
-            else "."
+    if not quantity_matches_lc_qty and not quantity_matches_net_weight:
+        mismatch_messages.append(
+            "Quantity mismatch: dashboard total "
+            f"'{_decimal_to_string(quantity_sum)}' did not match ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'"
+            + (
+                f" or ERP Net Weight '{_decimal_to_string(aggregate.net_weight)}'."
+                if aggregate.net_weight is not None
+                else "."
+            )
         )
-    )
     return {
         "status": "; ".join(mismatch_messages),
         "decision_reasons": mismatch_messages,

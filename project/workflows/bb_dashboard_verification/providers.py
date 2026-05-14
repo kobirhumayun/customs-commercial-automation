@@ -182,7 +182,11 @@ class PlaywrightDashboardLookupProvider:
                 page.locator(self.search_button_selector).click()
                 _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
 
-                if self.no_result_selector and _selector_visible(page, self.no_result_selector):
+                if self.no_result_selector and _selector_visible(
+                    page,
+                    self.no_result_selector,
+                    timeout_ms=min(self.timeout_ms, 5_000),
+                ):
                     attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                     continue
 
@@ -200,6 +204,35 @@ class PlaywrightDashboardLookupProvider:
                     self.detail_ready_selector,
                     timeout_ms=self.timeout_ms,
                 ):
+                    if self.no_result_selector and _selector_visible(
+                        page,
+                        self.no_result_selector,
+                        timeout_ms=min(self.timeout_ms, 5_000),
+                    ):
+                        attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
+                        continue
+                    snapshot = DashboardFamilySnapshot(
+                        beneficiary_name=_read_text(page, self.beneficiary_selector),
+                        irc_details=_read_text(page, self.irc_selector),
+                        erc_details=_read_text(page, self.erc_selector),
+                        lc_date=_read_text(page, self.lc_date_selector),
+                        last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
+                        lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
+                        lc_value=_read_text(page, self.lc_value_selector),
+                        foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
+                        commodity_quantities=_read_all_texts(page, self.quantity_selector),
+                        source_url=page.url,
+                    )
+                    if _snapshot_is_empty(snapshot):
+                        attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
+                        continue
+                    attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="resolved"))
+                    return DashboardLookupResult(
+                        outcome="resolved",
+                        attempts=attempts,
+                        matched_search_key=search_key,
+                        snapshot=snapshot,
+                    )
                     attempts.append(
                         DashboardLookupAttempt(
                             search_key=search_key,
@@ -211,26 +244,32 @@ class PlaywrightDashboardLookupProvider:
                         outcome="incomplete_data",
                         attempts=attempts,
                         matched_search_key=search_key,
+                        snapshot=snapshot,
                         message=f"Dashboard detail view did not become ready for '{search_key}'.",
                     )
+
+                snapshot = DashboardFamilySnapshot(
+                    beneficiary_name=_read_text(page, self.beneficiary_selector),
+                    irc_details=_read_text(page, self.irc_selector),
+                    erc_details=_read_text(page, self.erc_selector),
+                    lc_date=_read_text(page, self.lc_date_selector),
+                    last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
+                    lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
+                    lc_value=_read_text(page, self.lc_value_selector),
+                    foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
+                    commodity_quantities=_read_all_texts(page, self.quantity_selector),
+                    source_url=page.url,
+                )
+                if _snapshot_is_empty(snapshot):
+                    attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
+                    continue
 
                 attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="resolved"))
                 return DashboardLookupResult(
                     outcome="resolved",
                     attempts=attempts,
                     matched_search_key=search_key,
-                    snapshot=DashboardFamilySnapshot(
-                        beneficiary_name=_read_text(page, self.beneficiary_selector),
-                        irc_details=_read_text(page, self.irc_selector),
-                        erc_details=_read_text(page, self.erc_selector),
-                        lc_date=_read_text(page, self.lc_date_selector),
-                        last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
-                        lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
-                        lc_value=_read_text(page, self.lc_value_selector),
-                        foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
-                        commodity_quantities=_read_all_texts(page, self.quantity_selector),
-                        source_url=page.url,
-                    ),
+                    snapshot=snapshot,
                 )
             except Exception as exc:
                 attempts.append(
@@ -369,6 +408,22 @@ def _coerce_string_list(value: object) -> list[str]:
     return [_optional_string(item) for item in value if _optional_string(item)]
 
 
+def _snapshot_is_empty(snapshot: DashboardFamilySnapshot) -> bool:
+    return not any(
+        [
+            snapshot.beneficiary_name,
+            snapshot.irc_details,
+            snapshot.erc_details,
+            snapshot.lc_date,
+            snapshot.last_date_of_shipment,
+            snapshot.lc_expiry_date,
+            snapshot.lc_value,
+            snapshot.foreign_lc_numbers,
+            snapshot.commodity_quantities,
+        ]
+    )
+
+
 def _optional_string(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
@@ -408,7 +463,33 @@ def _selector_visible(page, selector: str, *, timeout_ms: int = 2_000) -> bool:
 
 def _read_text(page, selector: str) -> str:
     locator = page.locator(selector)
-    locator.wait_for(state="visible", timeout=5_000)
+    locator.first.wait_for(state="attached", timeout=5_000)
+    try:
+        tag_name = _optional_string(locator.first.evaluate("node => node.tagName")).upper()
+    except Exception:
+        tag_name = ""
+
+    if tag_name in {"INPUT", "TEXTAREA", "SELECT"}:
+        try:
+            value = locator.first.input_value()
+        except Exception:
+            value = ""
+        normalized_value = _optional_string(value)
+        if normalized_value:
+            return normalized_value
+
+        if tag_name == "SELECT":
+            try:
+                selected_text = locator.first.evaluate(
+                    "node => node.options[node.selectedIndex]?.text || ''"
+                )
+            except Exception:
+                selected_text = ""
+            normalized_selected_text = _optional_string(selected_text)
+            if normalized_selected_text:
+                return normalized_selected_text
+
+    locator.first.wait_for(state="visible", timeout=5_000)
     text = locator.first.text_content()
     return _optional_string(text)
 
