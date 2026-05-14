@@ -942,6 +942,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         for family in families:
             if not isinstance(family, dict):
                 continue
+            dashboard = family.get("dashboard") if isinstance(family.get("dashboard"), dict) else {}
             rendered_rows.append(
                 "<tr>"
                 f"<td>{escape(str(family.get('lc_sc_no', '')))}</td>"
@@ -953,11 +954,20 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
                 f"<td>{escape(str(family.get('final_workbook_value', '') or ''))}</td>"
                 f"<td>{escape(str(family.get('written_shipment_date', '') or ''))}</td>"
                 f"<td>{escape(str(family.get('written_expiry_date', '') or ''))}</td>"
+                f"<td>{escape(str(dashboard.get('beneficiary_name', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('irc_details', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('erc_details', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('lc_date', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('last_date_of_shipment', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('lc_expiry_date', '')))}</td>"
+                f"<td>{escape(str(dashboard.get('lc_value', '')))}</td>"
+                f"<td>{_format_report_multiline_values(dashboard.get('foreign_lc_numbers', []))}</td>"
+                f"<td>{escape(_format_report_quantity_total(dashboard.get('commodity_quantities', [])))}</td>"
                 "</tr>"
             )
         rows_html = "\n".join(rendered_rows)
     else:
-        rows_html = '<tr><td colspan="9">No eligible workbook families were found.</td></tr>'
+        rows_html = '<tr><td colspan="18">No eligible workbook families were found.</td></tr>'
 
     return (
         "<!DOCTYPE html>\n"
@@ -971,9 +981,11 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "    h1 { margin-bottom: 4px; }\n"
         "    .meta { color: #52606d; margin-bottom: 20px; }\n"
         "    .card { background: #fff; border: 1px solid #d9e2ec; border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }\n"
-        "    table { width: 100%; border-collapse: collapse; }\n"
-        "    th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; vertical-align: top; }\n"
+        "    .table-wrap { max-width: 100%; overflow-x: auto; }\n"
+        "    table { width: 100%; border-collapse: collapse; table-layout: fixed; }\n"
+        "    th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }\n"
         "    th { background: #f0f4f8; }\n"
+        "    td { line-height: 1.4; }\n"
         "  </style>\n"
         "</head>\n"
         "<body>\n"
@@ -981,17 +993,34 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         f"    <h1>Bangladesh Bank Dashboard Verification</h1>\n"
         f"    <p class=\"meta\">Run ID: {escape(str(report_payload.get('run_id', '')))} | Generated at: {escape(str(report_payload.get('generated_at_utc', '')))}</p>\n"
         "    <section class=\"card\">\n"
+        "      <div class=\"table-wrap\">\n"
         "      <table>\n"
-        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>Final Workbook Value</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th></tr></thead>\n"
+        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>Final Workbook Value</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th><th>Dashboard Beneficiary</th><th>Dashboard IRC</th><th>Dashboard ERC</th><th>Dashboard LC Date</th><th>Dashboard Last Shipment</th><th>Dashboard Expiry</th><th>Dashboard LC Value</th><th>Dashboard Foreign LC No</th><th>Dashboard Quantity Total</th></tr></thead>\n"
         "        <tbody>\n"
         f"{rows_html}\n"
         "        </tbody>\n"
         "      </table>\n"
+        "      </div>\n"
         "    </section>\n"
         "  </main>\n"
         "</body>\n"
         "</html>\n"
     )
+
+
+def _format_report_multiline_values(values: object) -> str:
+    if not isinstance(values, list):
+        return ""
+    return "<br>".join(escape(str(item)) for item in values if str(item).strip())
+
+
+def _format_report_quantity_total(values: object) -> str:
+    if not isinstance(values, list):
+        return ""
+    total = _sum_decimal_strings(values)
+    if total is not None:
+        return _decimal_to_string(total) or ""
+    return ", ".join(str(item).strip() for item in values if str(item).strip())
 
 
 def _build_search_keys(*, ship_remarks: str | None, workbook_lc_sc_no: str) -> list[str]:

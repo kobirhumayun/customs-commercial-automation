@@ -19,6 +19,7 @@ from project.workflows.bb_dashboard_verification import (
     DashboardCandidateFamily,
     DashboardCandidateRow,
     ERPFamilyAggregate,
+    _build_report_html,
     _compare_dashboard_snapshot,
     validate_bb_dashboard_verification_run,
 )
@@ -157,6 +158,46 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(len(outcome.staged_write_operations), 1)
         self.assertEqual(outcome.staged_write_operations[0]["column_key"], "dashboard_status")
         self.assertIn("Quantity mismatch", outcome.staged_write_operations[0]["expected_post_write_value"])
+
+    def test_report_html_renders_dashboard_columns_with_quantity_sum_and_foreign_lc_breaks(self) -> None:
+        report_html = _build_report_html(
+            report_payload={
+                "run_id": "run-1",
+                "generated_at_utc": "2026-05-14T00:00:00Z",
+                "families": [
+                    {
+                        "lc_sc_no": "2159260400534",
+                        "sl_no_values": ["633.0"],
+                        "workbook_master_lc_values": ["COG/VDAL/08/2025"],
+                        "erp": {
+                            "buyer_name": "VINTAGE DENIM APPARELS LTD",
+                            "current_lc_value": "98315.5",
+                            "lc_qty": "33170",
+                        },
+                        "final_workbook_value": "IRC Details did not contain the ERP buyer name.",
+                        "written_shipment_date": "",
+                        "written_expiry_date": "",
+                        "dashboard": {
+                            "beneficiary_name": "PIONEER DENIM LIMITED",
+                            "irc_details": "TUSUKA FASHIONS LTD., BLOCK-B,TONGI I/A,GAZIPUR",
+                            "erc_details": "Tusuka Fashions Ltd., Plot-10,Block-B, Shahid Sundar Ali Road, P.S. Tongi ,Gazipur-1710",
+                            "lc_date": "22-Apr-2026",
+                            "last_date_of_shipment": "15-Jun-2026",
+                            "lc_expiry_date": "30-Jun-2026",
+                            "lc_value": "98315.5",
+                            "foreign_lc_numbers": ["COG/VDAL/08/2025", "EXTRA-FLC-002"],
+                            "commodity_quantities": ["4850", "3670", "24650"],
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Dashboard Beneficiary", report_html)
+        self.assertIn("Dashboard Foreign LC No", report_html)
+        self.assertIn("Dashboard Quantity Total", report_html)
+        self.assertIn("COG/VDAL/08/2025<br>EXTRA-FLC-002", report_html)
+        self.assertIn(">33170<", report_html)
 
     def test_read_text_uses_input_value_for_form_controls(self) -> None:
         class FakeLocator:
