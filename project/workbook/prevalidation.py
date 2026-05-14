@@ -13,7 +13,11 @@ from project.models import (
     WriteOperation,
 )
 from project.utils.time import utc_timestamp
-from project.workbook.mapping import resolve_export_header_mapping, resolve_ud_ip_exp_header_mapping
+from project.workbook.mapping import (
+    resolve_bb_dashboard_header_mapping,
+    resolve_export_header_mapping,
+    resolve_ud_ip_exp_header_mapping,
+)
 from project.workbook.models import WorkbookRow, WorkbookSnapshot
 
 
@@ -152,6 +156,8 @@ def _resolve_workflow_header_mapping(
         return resolve_export_header_mapping(workbook_snapshot)
     if workflow_id == WorkflowId.UD_IP_EXP:
         return resolve_ud_ip_exp_header_mapping(workbook_snapshot)
+    if workflow_id == WorkflowId.BB_DASHBOARD_VERIFICATION:
+        return resolve_bb_dashboard_header_mapping(workbook_snapshot)
     return {}
 
 

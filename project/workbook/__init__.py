@@ -1,9 +1,11 @@
 from project.workbook.mapping import (
+    BB_DASHBOARD_HEADER_SPECS,
     EXPORT_HEADER_SPECS,
     EXPORT_OPTIONAL_HEADER_SPECS,
     UD_IP_EXP_HEADER_SPECS,
     UD_IP_EXP_OPTIONAL_HEADER_SPECS,
     HeaderMappingSpec,
+    resolve_bb_dashboard_header_mapping,
     resolve_export_header_mapping,
     resolve_header_mapping,
     resolve_ud_ip_exp_header_mapping,
@@ -33,6 +35,7 @@ from project.workbook.session import (
 )
 
 __all__ = [
+    "BB_DASHBOARD_HEADER_SPECS",
     "EXPORT_HEADER_SPECS",
     "EXPORT_OPTIONAL_HEADER_SPECS",
     "UD_IP_EXP_HEADER_SPECS",
@@ -54,6 +57,7 @@ __all__ = [
     "WorkbookWriteSessionProvider",
     "WorkbookWriteSessionResult",
     "prevalidate_staged_write_plan",
+    "resolve_bb_dashboard_header_mapping",
     "resolve_export_header_mapping",
     "resolve_header_mapping",
     "resolve_ud_ip_exp_header_mapping",

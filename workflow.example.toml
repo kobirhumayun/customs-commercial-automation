@@ -32,6 +32,33 @@ playwright_browser_channel = "msedge"
 # erp_report_download_menu_selector = "#downloadDropdown"
 # erp_report_download_format_selector = "text=CSV"
 
+# Optional Bangladesh Bank dashboard live settings for `bb_dashboard_verification`.
+# The workflow also supports deterministic fixtures through:
+#   validate-run bb_dashboard_verification --dashboard-json <manifest.json>
+#
+# bb_dashboard_login_url = "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::"
+# bb_dashboard_username = "REPLACE_WITH_USERNAME"
+# bb_dashboard_password = "REPLACE_WITH_PASSWORD"
+# bb_dashboard_username_selector = "#P101_USERNAME"
+# bb_dashboard_password_selector = "#P101_PASSWORD"
+# bb_dashboard_submit_selector = "button[type=submit]"
+# bb_dashboard_post_login_wait_selector = "#P75_SEARCH_LOCAL_LC"
+# bb_dashboard_search_input_selector = "#P75_SEARCH_LOCAL_LC"
+# bb_dashboard_search_button_selector = "button:has-text('Search')"
+# bb_dashboard_detail_ready_selector = ".dashboard-detail"
+# bb_dashboard_no_result_selector = ".no-data"
+# bb_dashboard_multiple_results_selector = ".result-row.multiple"
+# bb_dashboard_beneficiary_selector = "#beneficiary-name"
+# bb_dashboard_irc_selector = "#irc-details"
+# bb_dashboard_erc_selector = "#erc-details"
+# bb_dashboard_lc_date_selector = "#lc-date"
+# bb_dashboard_last_shipment_selector = "#last-date-of-shipment"
+# bb_dashboard_expiry_date_selector = "#lc-expiry-date"
+# bb_dashboard_lc_value_selector = "#lc-value"
+# bb_dashboard_foreign_lc_selector = ".foreign-lc-no"
+# bb_dashboard_quantity_selector = ".commodity-quantity"
+# bb_dashboard_timeout_seconds = 120
+
 # Write-capable workflow settings.
 # Use the exact real workbook filename here.
 # Manual exact-name configuration is the normal production pattern.

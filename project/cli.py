@@ -83,6 +83,15 @@ from project.workflows.document_verification import (
     load_document_manual_verification_bundle,
     summarize_manual_document_verification,
 )
+from project.workflows.bb_dashboard_verification import (
+    open_bb_dashboard_verification_report_in_browser,
+    persist_bb_dashboard_verification_report,
+    validate_bb_dashboard_verification_run,
+)
+from project.workflows.bb_dashboard_verification.providers import (
+    JsonManifestDashboardLookupProvider,
+    PlaywrightDashboardLookupProvider,
+)
 from project.workflows.dashboard_export import build_workflow_dashboard_markdown
 from project.workflows.dashboard_html_export import build_workflow_dashboard_html
 from project.workflows.erp_inspection import inspect_erp_rows
@@ -1656,6 +1665,16 @@ def _add_common_workflow_args(parser: argparse.ArgumentParser) -> None:
         help="Optional JSON workbook snapshot manifest for deterministic write staging.",
     )
     parser.add_argument(
+        "--dashboard-json",
+        type=Path,
+        help="Optional JSON manifest of Bangladesh Bank dashboard lookup results for deterministic verification.",
+    )
+    parser.add_argument(
+        "--live-dashboard",
+        action="store_true",
+        help="Load Bangladesh Bank dashboard verification data from the configured live dashboard via Playwright.",
+    )
+    parser.add_argument(
         "--live-workbook",
         action="store_true",
         help="Use a read-only live workbook snapshot instead of a JSON workbook manifest.",
@@ -1744,6 +1763,9 @@ def _handle_init_run(args: argparse.Namespace) -> int:
 
 
 def _handle_validate_run(args: argparse.Namespace) -> int:
+    dashboard_provider = None
+    report_output_json = None
+    report_output_html = None
     try:
         descriptor = _descriptor_from_args(args.workflow_id)
         config = load_workflow_config(
@@ -1765,44 +1787,60 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
         )
         if args.document_root is not None and not args.live_outlook_snapshot:
             raise ValueError("--document-root currently requires --live-outlook-snapshot")
-        validation_result = validate_run_snapshot(
-            descriptor=descriptor,
-            run_report=initialized.run_report,
-            rule_pack=rule_pack,
-            erp_row_provider=_load_erp_provider(
-                erp_json=args.erp_json,
-                erp_export=args.erp_export,
-                live_erp=args.live_erp,
-                config=config,
-            ),
-            workbook_snapshot=_load_workbook_snapshot(
-                workbook_json=args.workbook_json,
-                live_workbook=args.live_workbook,
-                config=config,
-            ),
-            attachment_content_provider=(
-                Win32ComAttachmentContentProvider(
-                    outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None
-                )
-                if args.document_root is not None
-                else None
-            ),
-            document_root=args.document_root,
-            document_analysis_provider=(
-                JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
-                if args.document_analysis_json is not None
-                else (
-                    LayeredSavedDocumentAnalysisProvider()
-                    if descriptor.workflow_id == WorkflowId.UD_IP_EXP and args.document_root is not None
-                    else NullSavedDocumentAnalysisProvider()
-                )
-            ),
-            ud_document_provider=(
-                JsonManifestUDDocumentPayloadProvider(args.ud_payload_json)
-                if args.ud_payload_json is not None
-                else None
-            ),
+        workbook_snapshot = _load_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            live_workbook=args.live_workbook,
+            config=config,
         )
+        erp_provider = _load_erp_provider(
+            erp_json=args.erp_json,
+            erp_export=args.erp_export,
+            live_erp=args.live_erp,
+            config=config,
+        )
+        if descriptor.workflow_id == WorkflowId.BB_DASHBOARD_VERIFICATION:
+            dashboard_provider = _load_dashboard_provider(
+                dashboard_json=args.dashboard_json,
+                live_dashboard=args.live_dashboard,
+                config=config,
+            )
+            dashboard_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=erp_provider.load_rows(),
+                dashboard_provider=dashboard_provider,
+            )
+            validation_result = dashboard_result.validation_result
+        else:
+            validation_result = validate_run_snapshot(
+                descriptor=descriptor,
+                run_report=initialized.run_report,
+                rule_pack=rule_pack,
+                erp_row_provider=erp_provider,
+                workbook_snapshot=workbook_snapshot,
+                attachment_content_provider=(
+                    Win32ComAttachmentContentProvider(
+                        outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None
+                    )
+                    if args.document_root is not None
+                    else None
+                ),
+                document_root=args.document_root,
+                document_analysis_provider=(
+                    JsonManifestSavedDocumentAnalysisProvider(args.document_analysis_json)
+                    if args.document_analysis_json is not None
+                    else (
+                        LayeredSavedDocumentAnalysisProvider()
+                        if descriptor.workflow_id == WorkflowId.UD_IP_EXP and args.document_root is not None
+                        else NullSavedDocumentAnalysisProvider()
+                    )
+                ),
+                ud_document_provider=(
+                    JsonManifestUDDocumentPayloadProvider(args.ud_payload_json)
+                    if args.ud_payload_json is not None
+                    else None
+                ),
+            )
         if args.apply_live_writes and not args.live_workbook:
             raise ValueError("--apply-live-writes requires --live-workbook")
         if args.apply_live_writes and not descriptor.write_capable:
@@ -1862,9 +1900,34 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             initialized.artifact_paths,
             to_jsonable(validation_result.commit_marker),
         )
+        if descriptor.workflow_id == WorkflowId.BB_DASHBOARD_VERIFICATION:
+            report_output_json, report_output_html = persist_bb_dashboard_verification_report(
+                run_root=initialized.artifact_paths.run_root,
+                report_payload=dashboard_result.report_payload,
+                report_html=dashboard_result.report_html,
+            )
+            try:
+                open_bb_dashboard_verification_report_in_browser(html_path=report_output_html)
+            except Exception as exc:
+                append_discrepancy(
+                    initialized.artifact_paths,
+                    to_jsonable(
+                        _build_cli_dashboard_browser_discrepancy(
+                            run_report=validation_result.run_report,
+                            message=str(exc),
+                            html_path=report_output_html,
+                        )
+                    ),
+                )
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    finally:
+        if dashboard_provider is not None:
+            try:
+                dashboard_provider.close()
+            except Exception:
+                pass
 
     payload = {
         "run_id": validation_result.run_report.run_id,
@@ -1883,6 +1946,9 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             else 0
         ),
     }
+    if report_output_json is not None and report_output_html is not None:
+        payload["verification_report_json"] = str(report_output_json)
+        payload["verification_report_html"] = str(report_output_html)
     print(pretty_json_dumps(payload), end="")
     return 0
 
@@ -3837,6 +3903,85 @@ def _load_erp_provider(
     return EmptyERPRowProvider()
 
 
+def _load_dashboard_provider(
+    *,
+    dashboard_json: Path | None,
+    live_dashboard: bool,
+    config,
+):
+    selected_count = int(dashboard_json is not None) + int(live_dashboard)
+    if selected_count > 1:
+        raise ValueError("Choose one dashboard source: --dashboard-json or --live-dashboard")
+    if dashboard_json is not None:
+        return JsonManifestDashboardLookupProvider(dashboard_json)
+    if not live_dashboard:
+        raise ValueError(
+            "Bangladesh Bank dashboard verification requires --dashboard-json or --live-dashboard"
+        )
+
+    required_selector_keys = (
+        "bb_dashboard_search_input_selector",
+        "bb_dashboard_search_button_selector",
+        "bb_dashboard_beneficiary_selector",
+        "bb_dashboard_irc_selector",
+        "bb_dashboard_erc_selector",
+        "bb_dashboard_lc_date_selector",
+        "bb_dashboard_last_shipment_selector",
+        "bb_dashboard_expiry_date_selector",
+        "bb_dashboard_lc_value_selector",
+        "bb_dashboard_foreign_lc_selector",
+        "bb_dashboard_quantity_selector",
+    )
+    missing_selector_keys = [
+        key
+        for key in required_selector_keys
+        if not str(config.values.get(key, "")).strip()
+    ]
+    if missing_selector_keys:
+        raise ValueError(
+            "Live dashboard verification is missing required config selector key(s): "
+            + ", ".join(missing_selector_keys)
+        )
+
+    storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+    return PlaywrightDashboardLookupProvider(
+        login_url=str(
+            config.values.get(
+                "bb_dashboard_login_url",
+                "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::",
+            )
+        ).strip()
+        or "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::",
+        username=str(config.values.get("bb_dashboard_username", "")).strip() or None,
+        password=str(config.values.get("bb_dashboard_password", "")).strip() or None,
+        username_selector=str(config.values.get("bb_dashboard_username_selector", "")).strip() or None,
+        password_selector=str(config.values.get("bb_dashboard_password_selector", "")).strip() or None,
+        submit_selector=str(config.values.get("bb_dashboard_submit_selector", "")).strip() or None,
+        post_login_wait_selector=str(config.values.get("bb_dashboard_post_login_wait_selector", "")).strip() or None,
+        search_input_selector=str(config.values.get("bb_dashboard_search_input_selector", "")).strip(),
+        search_button_selector=str(config.values.get("bb_dashboard_search_button_selector", "")).strip(),
+        detail_ready_selector=str(config.values.get("bb_dashboard_detail_ready_selector", "")).strip() or None,
+        no_result_selector=str(config.values.get("bb_dashboard_no_result_selector", "")).strip() or None,
+        multiple_results_selector=str(config.values.get("bb_dashboard_multiple_results_selector", "")).strip()
+        or None,
+        beneficiary_selector=str(config.values.get("bb_dashboard_beneficiary_selector", "")).strip(),
+        irc_selector=str(config.values.get("bb_dashboard_irc_selector", "")).strip(),
+        erc_selector=str(config.values.get("bb_dashboard_erc_selector", "")).strip(),
+        lc_date_selector=str(config.values.get("bb_dashboard_lc_date_selector", "")).strip(),
+        last_date_of_shipment_selector=str(
+            config.values.get("bb_dashboard_last_shipment_selector", "")
+        ).strip(),
+        lc_expiry_date_selector=str(config.values.get("bb_dashboard_expiry_date_selector", "")).strip(),
+        lc_value_selector=str(config.values.get("bb_dashboard_lc_value_selector", "")).strip(),
+        foreign_lc_selector=str(config.values.get("bb_dashboard_foreign_lc_selector", "")).strip(),
+        quantity_selector=str(config.values.get("bb_dashboard_quantity_selector", "")).strip(),
+        browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
+        storage_state_path=Path(storage_state_value) if storage_state_value else None,
+        timeout_ms=max(1, int(str(config.values.get("bb_dashboard_timeout_seconds", 120)))) * 1000,
+        headless=bool(config.values.get("playwright_headless", True)),
+    )
+
+
 def _load_workbook_snapshot(
     *,
     workbook_json: Path | None,
@@ -3881,6 +4026,29 @@ def _build_cli_print_annotation_discrepancy(
         message=message,
         rule_id=None,
         details={"non_rule_source": "print_annotation", **details},
+        created_at_utc=utc_timestamp(),
+    )
+
+
+def _build_cli_dashboard_browser_discrepancy(
+    *,
+    run_report,
+    message: str,
+    html_path: Path,
+) -> DiscrepancyReport:
+    return DiscrepancyReport(
+        run_id=run_report.run_id,
+        mail_id=None,
+        workflow_id=run_report.workflow_id,
+        severity=FinalDecision.WARNING,
+        code="dashboard_report_browser_open_failed",
+        message="The dashboard verification HTML report was generated successfully, but the system could not open it automatically in the default browser.",
+        rule_id=None,
+        details={
+            "non_rule_source": "bb_dashboard_verification_report",
+            "error": message,
+            "html_path": str(html_path),
+        },
         created_at_utc=utc_timestamp(),
     )
 

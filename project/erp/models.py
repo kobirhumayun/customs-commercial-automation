@@ -28,6 +28,7 @@ class ERPRegisterRow:
     ship_date: str = ""
     expiry_date: str = ""
     lc_qty: str = ""
+    net_weight: str = ""
     lc_unit: str = ""
     amd_no: str = ""
     amd_date: str = ""
