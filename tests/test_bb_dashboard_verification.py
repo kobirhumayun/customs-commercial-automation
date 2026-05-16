@@ -26,6 +26,7 @@ from project.workflows.bb_dashboard_verification import (
 from project.workflows.bb_dashboard_verification.providers import (
     DashboardFamilySnapshot,
     JsonManifestDashboardLookupProvider,
+    PlaywrightDashboardLookupProvider,
     _read_text,
 )
 from project.workflows.bootstrap import initialize_workflow_run
@@ -328,6 +329,115 @@ class BBDashboardVerificationTests(unittest.TestCase):
             _read_text(page, "xpath=//table[@id='report_R483371920050373531']//tr[td]/td[2]"),
             "TDL-199",
         )
+
+    def test_playwright_provider_uses_fresh_authenticated_context_per_lookup(self) -> None:
+        class FakeLocator:
+            def wait_for(self, **kwargs) -> None:
+                return None
+
+            def click(self) -> None:
+                return None
+
+            def fill(self, _value: str) -> None:
+                return None
+
+        class FakePage:
+            def __init__(self, url: str) -> None:
+                self.url = url
+                self.closed = False
+
+            def locator(self, _selector: str) -> FakeLocator:
+                return FakeLocator()
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeContext:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeBrowser:
+            def __init__(self) -> None:
+                self.contexts: list[FakeContext] = []
+
+            def new_context(self, **kwargs) -> FakeContext:
+                context = FakeContext(name=f"context-{len(self.contexts) + 1}")
+                self.contexts.append(context)
+                return context
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector=None,
+            no_result_selector=None,
+            multiple_results_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        fake_browser = FakeBrowser()
+        provider._browser = fake_browser
+
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_browser") as ensure_browser_mock:
+            ensure_browser_mock.return_value = None
+            with patch.object(PlaywrightDashboardLookupProvider, "_open_authenticated_lookup_page") as open_page_mock:
+                open_page_mock.side_effect = [
+                    FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1"),
+                    FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=2"),
+                ]
+                with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
+                    read_snapshot_mock.side_effect = [
+                        DashboardFamilySnapshot(
+                            beneficiary_name="PIONEER DENIM LIMITED",
+                            irc_details="IRC 1",
+                            erc_details="ERC 1",
+                            lc_date="2026-04-22",
+                            last_date_of_shipment="2026-06-15",
+                            lc_expiry_date="2026-06-30",
+                            lc_value="98315.5",
+                            foreign_lc_numbers=["FLC-001"],
+                            commodity_quantities=["33170"],
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+                        ),
+                        DashboardFamilySnapshot(
+                            beneficiary_name="PIONEER DENIM LIMITED",
+                            irc_details="IRC 2",
+                            erc_details="ERC 2",
+                            lc_date="2026-04-23",
+                            last_date_of_shipment="2026-06-16",
+                            lc_expiry_date="2026-07-01",
+                            lc_value="99999.0",
+                            foreign_lc_numbers=["FLC-002"],
+                            commodity_quantities=["12345"],
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=2",
+                        ),
+                    ]
+                    first_result = provider.lookup_family(search_keys=["1741260401172"])
+                    second_result = provider.lookup_family(search_keys=["2159260400534"])
+
+        self.assertEqual(first_result.outcome, "resolved")
+        self.assertEqual(second_result.outcome, "resolved")
+        self.assertEqual(len(fake_browser.contexts), 2)
+        self.assertTrue(all(context.closed for context in fake_browser.contexts))
+        self.assertEqual(first_result.snapshot.irc_details, "IRC 1")
+        self.assertEqual(second_result.snapshot.irc_details, "IRC 2")
 
     def test_compare_dashboard_snapshot_normalizes_dates_before_comparison(self) -> None:
         family = DashboardCandidateFamily(

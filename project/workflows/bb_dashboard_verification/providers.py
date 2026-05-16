@@ -159,21 +159,19 @@ class PlaywrightDashboardLookupProvider:
     headless: bool = True
     _playwright_manager: object | None = None
     _browser: object | None = None
-    _context: object | None = None
-    _authenticated_url: str | None = None
 
     def lookup_family(self, *, search_keys: list[str]) -> DashboardLookupResult:
-        self._ensure_authenticated_context()
-        if self._context is None or self._authenticated_url is None:
-            raise ValueError("Dashboard browser context could not be initialized.")
+        self._ensure_browser()
+        if self._browser is None:
+            raise ValueError("Dashboard browser could not be initialized.")
 
         attempts: list[DashboardLookupAttempt] = []
         for raw_key in search_keys:
             search_key = normalize_dashboard_search_key(raw_key)
-            page = self._context.new_page()
+            context = self._browser.new_context(**self._build_context_kwargs())
+            page = None
             try:
-                page.goto(self._authenticated_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-                _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+                page = self._open_authenticated_lookup_page(context)
                 input_locator = page.locator(self.search_input_selector)
                 input_locator.wait_for(state="visible", timeout=self.timeout_ms)
                 input_locator.click()
@@ -211,18 +209,7 @@ class PlaywrightDashboardLookupProvider:
                     ):
                         attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                         continue
-                    snapshot = DashboardFamilySnapshot(
-                        beneficiary_name=_read_text(page, self.beneficiary_selector),
-                        irc_details=_read_text(page, self.irc_selector),
-                        erc_details=_read_text(page, self.erc_selector),
-                        lc_date=_read_text(page, self.lc_date_selector),
-                        last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
-                        lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
-                        lc_value=_read_text(page, self.lc_value_selector),
-                        foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
-                        commodity_quantities=_read_all_texts(page, self.quantity_selector),
-                        source_url=page.url,
-                    )
+                    snapshot = self._read_snapshot(page)
                     if _snapshot_is_empty(snapshot):
                         attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                         continue
@@ -248,18 +235,7 @@ class PlaywrightDashboardLookupProvider:
                         message=f"Dashboard detail view did not become ready for '{search_key}'.",
                     )
 
-                snapshot = DashboardFamilySnapshot(
-                    beneficiary_name=_read_text(page, self.beneficiary_selector),
-                    irc_details=_read_text(page, self.irc_selector),
-                    erc_details=_read_text(page, self.erc_selector),
-                    lc_date=_read_text(page, self.lc_date_selector),
-                    last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
-                    lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
-                    lc_value=_read_text(page, self.lc_value_selector),
-                    foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
-                    commodity_quantities=_read_all_texts(page, self.quantity_selector),
-                    source_url=page.url,
-                )
+                snapshot = self._read_snapshot(page)
                 if _snapshot_is_empty(snapshot):
                     attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                     continue
@@ -287,7 +263,12 @@ class PlaywrightDashboardLookupProvider:
                 )
             finally:
                 try:
-                    page.close()
+                    if page is not None:
+                        page.close()
+                except Exception:
+                    pass
+                try:
+                    context.close()
                 except Exception:
                     pass
 
@@ -299,13 +280,6 @@ class PlaywrightDashboardLookupProvider:
         )
 
     def close(self) -> None:
-        if self._context is not None:
-            try:
-                self._context.close()
-            except Exception:
-                pass
-            finally:
-                self._context = None
         if self._browser is not None:
             try:
                 self._browser.close()
@@ -320,10 +294,9 @@ class PlaywrightDashboardLookupProvider:
                 pass
             finally:
                 self._playwright_manager = None
-        self._authenticated_url = None
 
-    def _ensure_authenticated_context(self) -> None:
-        if self._context is not None and self._authenticated_url is not None:
+    def _ensure_browser(self) -> None:
+        if self._browser is not None:
             return
         sync_playwright = _load_playwright_sync_api()
         playwright_manager = sync_playwright()
@@ -333,30 +306,7 @@ class PlaywrightDashboardLookupProvider:
             if self.browser_channel:
                 browser_launch_kwargs["channel"] = self.browser_channel
             browser = playwright.chromium.launch(**browser_launch_kwargs)
-            context_kwargs: dict[str, object] = {}
-            if self.storage_state_path is not None:
-                if not self.storage_state_path.exists():
-                    raise ValueError(f"Playwright storage state path does not exist: {self.storage_state_path}")
-                context_kwargs["storage_state"] = str(self.storage_state_path)
-            context = browser.new_context(**context_kwargs)
-            page = context.new_page()
-            try:
-                page.goto(self.login_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-                _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
-                if not _selector_visible(page, self.search_input_selector):
-                    self._perform_login(page)
-                if self.post_login_wait_selector:
-                    page.locator(self.post_login_wait_selector).wait_for(state="visible", timeout=self.timeout_ms)
-                elif not _selector_visible(page, self.search_input_selector, timeout_ms=self.timeout_ms):
-                    raise ValueError("Dashboard login did not reach a searchable authenticated page.")
-                self._authenticated_url = page.url
-            finally:
-                try:
-                    page.close()
-                except Exception:
-                    pass
             self._browser = browser
-            self._context = context
             self._playwright_manager = playwright_manager
         except Exception:
             try:
@@ -364,6 +314,51 @@ class PlaywrightDashboardLookupProvider:
             except Exception:
                 pass
             raise
+
+    def _build_context_kwargs(self) -> dict[str, object]:
+        context_kwargs: dict[str, object] = {}
+        if self.storage_state_path is not None:
+            if not self.storage_state_path.exists():
+                raise ValueError(f"Playwright storage state path does not exist: {self.storage_state_path}")
+            context_kwargs["storage_state"] = str(self.storage_state_path)
+        return context_kwargs
+
+    def _open_authenticated_lookup_page(self, context):
+        page = context.new_page()
+        try:
+            page.goto(self.login_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+            if not _selector_visible(page, self.search_input_selector):
+                self._perform_login(page)
+            if self.post_login_wait_selector:
+                page.locator(self.post_login_wait_selector).wait_for(state="visible", timeout=self.timeout_ms)
+            elif not _selector_visible(page, self.search_input_selector, timeout_ms=self.timeout_ms):
+                raise ValueError("Dashboard login did not reach a searchable authenticated page.")
+            post_login_redirect_url = page.url
+            page.goto(post_login_redirect_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+            page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
+            return page
+        except Exception:
+            try:
+                page.close()
+            except Exception:
+                pass
+            raise
+
+    def _read_snapshot(self, page) -> DashboardFamilySnapshot:
+        return DashboardFamilySnapshot(
+            beneficiary_name=_read_text(page, self.beneficiary_selector),
+            irc_details=_read_text(page, self.irc_selector),
+            erc_details=_read_text(page, self.erc_selector),
+            lc_date=_read_text(page, self.lc_date_selector),
+            last_date_of_shipment=_read_text(page, self.last_date_of_shipment_selector),
+            lc_expiry_date=_read_text(page, self.lc_expiry_date_selector),
+            lc_value=_read_text(page, self.lc_value_selector),
+            foreign_lc_numbers=_read_all_texts(page, self.foreign_lc_selector),
+            commodity_quantities=_read_all_texts(page, self.quantity_selector),
+            source_url=page.url,
+        )
 
     def _perform_login(self, page) -> None:
         if not all(
