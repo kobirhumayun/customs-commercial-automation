@@ -106,7 +106,7 @@ def prevalidate_staged_write_plan(
                 classification=classification,
             )
         )
-        if classification != "matches_pre_write":
+        if classification not in {"matches_pre_write", "matches_post_write"}:
             discrepancy_reports.append(
                 DiscrepancyReport(
                     run_id=run_id,

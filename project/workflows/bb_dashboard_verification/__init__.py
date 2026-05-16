@@ -39,6 +39,7 @@ _FIRST_LINE_PREFIXES = ("EXP", "IP")
 _PIONEER_BENEFICIARY = "PIONEER DENIM LIMITED"
 _WHITESPACE_RE = re.compile(r"\s+")
 _SPECIAL_RE = re.compile(r"[^A-Z0-9]+")
+_DATE_NUMBER_FORMAT = "dd/mm/yyyy"
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,6 +52,8 @@ class DashboardCandidateRow:
     dashboard_status: str
     shipment_date: str
     expiry_date: str
+    shipment_date_number_format: str
+    expiry_date_number_format: str
     number_formats: dict[int, str]
 
 
@@ -159,6 +162,16 @@ def validate_bb_dashboard_verification_run(
             )
             discrepancy_reports.append(discrepancy)
             summary["hard_block"] += 1
+            family_operations = _build_family_write_operations(
+                run_report=run_report,
+                family=family,
+                sheet_name=workbook_snapshot.sheet_name,
+                final_status=discrepancy.message,
+                writes_dates=True,
+                ship_date=aggregate.ship_date,
+                expiry_date=aggregate.expiry_date,
+            )
+            staged_write_plan.extend(family_operations)
             mail_outcomes.append(
                 _build_family_mail_outcome(
                     run_report=run_report,
@@ -166,14 +179,14 @@ def validate_bb_dashboard_verification_run(
                     family_index=len(mail_outcomes),
                     final_decision=FinalDecision.HARD_BLOCK,
                     decision_reasons=[discrepancy.message],
-                    staged_write_operations=[],
+                    staged_write_operations=family_operations,
                 )
             )
             report_families.append(
                 _build_report_family(
                     family=family,
                     final_decision=FinalDecision.HARD_BLOCK,
-                    final_workbook_value=None,
+                    final_workbook_value=discrepancy.message,
                     decision_reasons=[discrepancy.message],
                     search_attempts=[],
                     erp_aggregate=None,
@@ -192,6 +205,16 @@ def validate_bb_dashboard_verification_run(
         if family_discrepancy is not None:
             discrepancy_reports.append(family_discrepancy)
             summary["hard_block"] += 1
+            family_operations = _build_family_write_operations(
+                run_report=run_report,
+                family=family,
+                sheet_name=workbook_snapshot.sheet_name,
+                final_status=family_discrepancy.message,
+                writes_dates=False,
+                ship_date="",
+                expiry_date="",
+            )
+            staged_write_plan.extend(family_operations)
             mail_outcomes.append(
                 _build_family_mail_outcome(
                     run_report=run_report,
@@ -199,14 +222,14 @@ def validate_bb_dashboard_verification_run(
                     family_index=len(mail_outcomes),
                     final_decision=FinalDecision.HARD_BLOCK,
                     decision_reasons=[family_discrepancy.message],
-                    staged_write_operations=[],
+                    staged_write_operations=family_operations,
                 )
             )
             report_families.append(
                 _build_report_family(
                     family=family,
                     final_decision=FinalDecision.HARD_BLOCK,
-                    final_workbook_value=None,
+                    final_workbook_value=family_discrepancy.message,
                     decision_reasons=[family_discrepancy.message],
                     search_attempts=[],
                     erp_aggregate=None,
@@ -237,6 +260,16 @@ def validate_bb_dashboard_verification_run(
             )
             discrepancy_reports.append(discrepancy)
             summary["hard_block"] += 1
+            family_operations = _build_family_write_operations(
+                run_report=run_report,
+                family=family,
+                sheet_name=workbook_snapshot.sheet_name,
+                final_status=discrepancy.message,
+                writes_dates=False,
+                ship_date="",
+                expiry_date="",
+            )
+            staged_write_plan.extend(family_operations)
             mail_outcomes.append(
                 _build_family_mail_outcome(
                     run_report=run_report,
@@ -244,20 +277,20 @@ def validate_bb_dashboard_verification_run(
                     family_index=len(mail_outcomes),
                     final_decision=FinalDecision.HARD_BLOCK,
                     decision_reasons=[discrepancy.message],
-                    staged_write_operations=[],
+                    staged_write_operations=family_operations,
                 )
             )
             report_families.append(
                 _build_report_family(
                     family=family,
                     final_decision=FinalDecision.HARD_BLOCK,
-                    final_workbook_value=None,
+                    final_workbook_value=discrepancy.message,
                     decision_reasons=[discrepancy.message],
                     search_attempts=[to_jsonable(item) for item in lookup_result.attempts] if "lookup_result" in locals() else [],
                     erp_aggregate=aggregate,
                     dashboard_snapshot=None,
-                    written_shipment_date=None,
-                    written_expiry_date=None,
+                    written_shipment_date=_format_workbook_date(aggregate.ship_date),
+                    written_expiry_date=_format_workbook_date(aggregate.expiry_date),
                 )
             )
             continue
@@ -283,6 +316,16 @@ def validate_bb_dashboard_verification_run(
             )
             discrepancy_reports.append(discrepancy)
             summary["hard_block"] += 1
+            family_operations = _build_family_write_operations(
+                run_report=run_report,
+                family=family,
+                sheet_name=workbook_snapshot.sheet_name,
+                final_status=discrepancy.message,
+                writes_dates=True,
+                ship_date=aggregate.ship_date,
+                expiry_date=aggregate.expiry_date,
+            )
+            staged_write_plan.extend(family_operations)
             mail_outcomes.append(
                 _build_family_mail_outcome(
                     run_report=run_report,
@@ -290,14 +333,14 @@ def validate_bb_dashboard_verification_run(
                     family_index=len(mail_outcomes),
                     final_decision=FinalDecision.HARD_BLOCK,
                     decision_reasons=[discrepancy.message],
-                    staged_write_operations=[],
+                    staged_write_operations=family_operations,
                 )
             )
             report_families.append(
                 _build_report_family(
                     family=family,
                     final_decision=FinalDecision.HARD_BLOCK,
-                    final_workbook_value=None,
+                    final_workbook_value=discrepancy.message,
                     decision_reasons=[discrepancy.message],
                     search_attempts=[
                         {
@@ -309,8 +352,8 @@ def validate_bb_dashboard_verification_run(
                     ],
                     erp_aggregate=aggregate,
                     dashboard_snapshot=None,
-                    written_shipment_date=None,
-                    written_expiry_date=None,
+                    written_shipment_date=_format_workbook_date(aggregate.ship_date),
+                    written_expiry_date=_format_workbook_date(aggregate.expiry_date),
                 )
             )
             continue
@@ -501,6 +544,14 @@ def _build_candidate_row(
         dashboard_status=dashboard_status,
         shipment_date=row.values.get(header_mapping["shipment_date"], "").strip(),
         expiry_date=row.values.get(header_mapping["expiry_date"], "").strip(),
+        shipment_date_number_format=(
+            str(row.number_formats.get(header_mapping["shipment_date"], "")).strip()
+            or _DATE_NUMBER_FORMAT
+        ),
+        expiry_date_number_format=(
+            str(row.number_formats.get(header_mapping["expiry_date"], "")).strip()
+            or _DATE_NUMBER_FORMAT
+        ),
         number_formats=dict(row.number_formats),
     )
 
@@ -603,15 +654,15 @@ def _evaluate_lookup_result(
     if lookup_result.outcome == "no_result":
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = f"No dashboard result was found for '{search_key}'."
-        return FinalDecision.WARNING, message, [message], None, False
+        return FinalDecision.WARNING, message, [message], None, True
     if lookup_result.outcome == "multiple_results":
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = f"Multiple dashboard results were returned for '{search_key}'."
-        return FinalDecision.WARNING, message, [message], None, False
+        return FinalDecision.WARNING, message, [message], None, True
     if lookup_result.outcome == "incomplete_data" or lookup_result.snapshot is None:
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = lookup_result.message or f"Dashboard data was incomplete for '{search_key}'."
-        return FinalDecision.WARNING, message, [message], lookup_result.snapshot, False
+        return FinalDecision.WARNING, message, [message], lookup_result.snapshot, True
 
     comparison = _compare_dashboard_snapshot(
         family=family,
@@ -622,7 +673,7 @@ def _evaluate_lookup_result(
         return FinalDecision.PASS, "OK", ["Dashboard verification matched ERP and workbook inputs."], lookup_result.snapshot, True
     if comparison["status"] == "OK (KGS)":
         return FinalDecision.PASS, "OK (KGS)", ["Dashboard quantity matched ERP net weight instead of ERP LC quantity."], lookup_result.snapshot, True
-    return FinalDecision.WARNING, str(comparison["status"]), list(comparison["decision_reasons"]), lookup_result.snapshot, False
+    return FinalDecision.WARNING, str(comparison["status"]), list(comparison["decision_reasons"]), lookup_result.snapshot, True
 
 
 def _compare_dashboard_snapshot(
@@ -772,6 +823,7 @@ def _build_family_write_operations(
                     expected_pre_write_value=row.shipment_date,
                     expected_post_write_value=shipment_value,
                     row_eligibility_checks=["target_cell_matches_expected_pre_write"],
+                    number_format=row.shipment_date_number_format,
                 )
             )
             operation_index += 1
@@ -794,6 +846,7 @@ def _build_family_write_operations(
                     expected_pre_write_value=row.expiry_date,
                     expected_post_write_value=expiry_value,
                     row_eligibility_checks=["target_cell_matches_expected_pre_write"],
+                    number_format=row.expiry_date_number_format,
                 )
             )
             operation_index += 1
@@ -821,7 +874,7 @@ def _build_family_mail_outcome(
         ),
         final_decision=final_decision,
         decision_reasons=list(decision_reasons),
-        eligible_for_write=final_decision != FinalDecision.HARD_BLOCK and bool(staged_write_operations),
+        eligible_for_write=bool(staged_write_operations),
         eligible_for_print=False,
         eligible_for_mail_move=False,
         source_entry_id=family.family_id,

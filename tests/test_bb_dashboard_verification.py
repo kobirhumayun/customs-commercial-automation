@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 from project.cli import main
 from project.config import load_workflow_config
 from project.erp import JsonManifestERPRowProvider
-from project.models import WorkbookSessionPreflight, WorkflowId, WritePhaseStatus
+from project.models import FinalDecision, WorkbookSessionPreflight, WorkflowId, WritePhaseStatus
 from project.rules import load_rule_pack
 from project.workbook import JsonManifestWorkbookSnapshotProvider, WorkbookWriteSessionResult
 from project.workflows.bb_dashboard_verification import (
@@ -71,9 +71,12 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(report_payload["family_count"], 3)
         self.assertEqual(report_payload["families"][0]["final_workbook_value"], "OK")
         self.assertEqual(report_payload["families"][1]["final_workbook_value"], "OK (KGS)")
-        self.assertIsNone(report_payload["families"][2]["final_workbook_value"])
+        self.assertEqual(
+            report_payload["families"][2]["final_workbook_value"],
+            "No ERP rows were available for workbook family LC-003.",
+        )
         self.assertEqual(len(mail_outcomes), 3)
-        self.assertEqual(sum(len(item["staged_write_operations"]) for item in mail_outcomes), 9)
+        self.assertEqual(sum(len(item["staged_write_operations"]) for item in mail_outcomes), 10)
         self.assertEqual([item["code"] for item in discrepancies], ["bb_dashboard_family_input_invalid"])
 
     def test_prepare_live_write_batch_supports_bb_dashboard_targets(self) -> None:
@@ -125,8 +128,25 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(prepared.run_report.write_phase_status, WritePhaseStatus.PREVALIDATED)
         self.assertEqual(prepared.run_report.target_prevalidation_summary.status, "passed")
-        self.assertEqual(len(prepared.target_probes), 9)
+        self.assertEqual(len(prepared.target_probes), 10)
         self.assertTrue(all(probe.classification == "matches_pre_write" for probe in prepared.target_probes))
+
+        shipment_date_ops = [
+            operation
+            for outcome in workflow_result.validation_result.mail_outcomes
+            for operation in outcome.staged_write_operations
+            if operation["column_key"] == "shipment_date"
+        ]
+        expiry_date_ops = [
+            operation
+            for outcome in workflow_result.validation_result.mail_outcomes
+            for operation in outcome.staged_write_operations
+            if operation["column_key"] == "expiry_date"
+        ]
+        self.assertTrue(shipment_date_ops)
+        self.assertTrue(expiry_date_ops)
+        self.assertTrue(all(operation["number_format"] == "dd/mm/yyyy" for operation in shipment_date_ops))
+        self.assertTrue(all(operation["number_format"] == "dd/mm/yyyy" for operation in expiry_date_ops))
 
     def test_warning_result_still_stages_dashboard_status_write(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -155,9 +175,48 @@ class BBDashboardVerificationTests(unittest.TestCase):
         outcome = workflow_result.validation_result.mail_outcomes[0]
         self.assertTrue(outcome.eligible_for_write)
         self.assertEqual(outcome.write_disposition, "new_writes_staged")
-        self.assertEqual(len(outcome.staged_write_operations), 1)
+        self.assertEqual(len(outcome.staged_write_operations), 3)
         self.assertEqual(outcome.staged_write_operations[0]["column_key"], "dashboard_status")
         self.assertIn("Quantity mismatch", outcome.staged_write_operations[0]["expected_post_write_value"])
+        self.assertEqual(outcome.staged_write_operations[1]["column_key"], "shipment_date")
+        self.assertEqual(outcome.staged_write_operations[1]["expected_post_write_value"], "10/02/2026")
+        self.assertEqual(outcome.staged_write_operations[2]["column_key"], "expiry_date")
+        self.assertEqual(outcome.staged_write_operations[2]["expected_post_write_value"], "10/03/2026")
+
+    def test_hard_block_result_still_stages_dashboard_status_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path, workbook_manifest_path, erp_manifest_path, dashboard_manifest_path = _write_dashboard_fixture_bundle(root)
+
+            descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=[],
+            )
+            workbook_snapshot = JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot()
+            workflow_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=JsonManifestERPRowProvider(erp_manifest_path).load_rows(),
+                dashboard_provider=JsonManifestDashboardLookupProvider(dashboard_manifest_path),
+            )
+
+        self.assertEqual(workflow_result.validation_result.run_report.summary, {"pass": 2, "warning": 0, "hard_block": 1})
+        self.assertEqual(len(workflow_result.validation_result.mail_outcomes), 3)
+        hard_block_outcome = workflow_result.validation_result.mail_outcomes[2]
+        self.assertEqual(hard_block_outcome.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertTrue(hard_block_outcome.eligible_for_write)
+        self.assertEqual(hard_block_outcome.write_disposition, "new_writes_staged")
+        self.assertEqual(len(hard_block_outcome.staged_write_operations), 1)
+        self.assertEqual(hard_block_outcome.staged_write_operations[0]["column_key"], "dashboard_status")
+        self.assertEqual(
+            hard_block_outcome.staged_write_operations[0]["expected_post_write_value"],
+            "No ERP rows were available for workbook family LC-003.",
+        )
 
     def test_report_html_renders_dashboard_columns_with_quantity_sum_and_foreign_lc_breaks(self) -> None:
         report_html = _build_report_html(
@@ -288,6 +347,8 @@ class BBDashboardVerificationTests(unittest.TestCase):
                     dashboard_status="",
                     shipment_date="",
                     expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
                     number_formats={},
                 )
             ],
@@ -344,6 +405,8 @@ class BBDashboardVerificationTests(unittest.TestCase):
                     dashboard_status="",
                     shipment_date="",
                     expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
                     number_formats={},
                 )
             ],
