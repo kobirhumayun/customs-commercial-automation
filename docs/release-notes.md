@@ -87,6 +87,9 @@
   - `mail move = completed`
 - for `ud_ip_exp`, the bundled one-click launcher is:
   `scripts/run_ud_ip_exp_live_cycle.cmd`
+- for `bb_dashboard_verification`, bundled one-click launchers are:
+  `scripts/run_bb_dashboard_verification_live_cycle.ps1`
+  `scripts/run_bb_dashboard_verification_live_cycle.cmd`
 
 ### Out of scope for this release
 - scheduler/orchestrator service

@@ -125,14 +125,23 @@ For daily use on Windows, operators can launch the full happy-path cycle with th
   `scripts/run_export_lc_sc_live_cycle.cmd`
 - one-click `ud_ip_exp` launcher:
   `scripts/run_ud_ip_exp_live_cycle.cmd`
+- one-click `bb_dashboard_verification` PowerShell launcher:
+  `scripts/run_bb_dashboard_verification_live_cycle.ps1`
+- one-click `bb_dashboard_verification` CMD launcher:
+  `scripts/run_bb_dashboard_verification_live_cycle.cmd`
 
-The launcher performs:
+For `export_lc_sc` and `ud_ip_exp`, the launcher performs:
 - `report-live-readiness`
 - `validate-run --apply-live-writes`
 - `plan-print`
 - `generate-print-annotation-html --live-workbook`
 - `execute-print`
 - `execute-mail-moves`
+- `report-run-status`
+
+For `bb_dashboard_verification`, the launcher performs:
+- `report-live-readiness`
+- `validate-run --live-dashboard --apply-live-writes`
 - `report-run-status`
 
 It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
