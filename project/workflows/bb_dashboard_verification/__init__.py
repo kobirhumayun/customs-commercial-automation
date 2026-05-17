@@ -40,6 +40,8 @@ _PIONEER_BENEFICIARY = "PIONEER DENIM LIMITED"
 _WHITESPACE_RE = re.compile(r"\s+")
 _SPECIAL_RE = re.compile(r"[^A-Z0-9]+")
 _DATE_NUMBER_FORMAT = "dd/mm/yyyy"
+_DEFAULT_DECIMAL_TOLERANCE = Decimal("0.01")
+_NET_WEIGHT_TOLERANCE = Decimal("0.8")
 
 
 @dataclass(slots=True, frozen=True)
@@ -704,11 +706,17 @@ def _compare_dashboard_snapshot(
 
     if normalized_snapshot_lc_date != normalized_erp_lc_date:
         mismatch_messages.append(f"LC Date mismatch: dashboard '{snapshot.lc_date}' != ERP '{aggregate.lc_date}'.")
-    if normalized_snapshot_ship_date != normalized_erp_ship_date:
+    if not _date_is_same_or_after(
+        dashboard_date=normalized_snapshot_ship_date,
+        erp_date=normalized_erp_ship_date,
+    ):
         mismatch_messages.append(
             f"Last Date of Shipment mismatch: dashboard '{snapshot.last_date_of_shipment}' != ERP '{aggregate.ship_date}'."
         )
-    if normalized_snapshot_expiry_date != normalized_erp_expiry_date:
+    if not _date_is_same_or_after(
+        dashboard_date=normalized_snapshot_expiry_date,
+        erp_date=normalized_erp_expiry_date,
+    ):
         mismatch_messages.append(
             f"LC Expiry Date mismatch: dashboard '{snapshot.lc_expiry_date}' != ERP '{aggregate.expiry_date}'."
         )
@@ -742,7 +750,12 @@ def _compare_dashboard_snapshot(
 
     quantity_matches_lc_qty = _decimal_matches(quantity_sum, aggregate.lc_qty)
     quantity_matches_net_weight = (
-        aggregate.net_weight is not None and _decimal_matches(quantity_sum, aggregate.net_weight)
+        aggregate.net_weight is not None
+        and _decimal_matches(
+            quantity_sum,
+            aggregate.net_weight,
+            tolerance=_NET_WEIGHT_TOLERANCE,
+        )
     )
 
     if not mismatch_messages and quantity_matches_lc_qty:
@@ -1128,6 +1141,12 @@ def _normalize_date(value: str) -> str | None:
     return normalize_lc_sc_date(value)
 
 
+def _date_is_same_or_after(*, dashboard_date: str | None, erp_date: str | None) -> bool:
+    if dashboard_date is None or erp_date is None:
+        return False
+    return dashboard_date >= erp_date
+
+
 def _parse_decimal(value: object) -> Decimal | None:
     candidate = str(value).strip().replace(",", "")
     if not candidate:
@@ -1154,8 +1173,13 @@ def _sum_decimal_strings(values) -> Decimal | None:
     return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _decimal_matches(left: Decimal, right: Decimal) -> bool:
-    return abs(left - right) <= Decimal("0.01")
+def _decimal_matches(
+    left: Decimal,
+    right: Decimal,
+    *,
+    tolerance: Decimal = _DEFAULT_DECIMAL_TOLERANCE,
+) -> bool:
+    return abs(left - right) <= tolerance
 
 
 def _decimal_to_string(value: Decimal | None) -> str | None:

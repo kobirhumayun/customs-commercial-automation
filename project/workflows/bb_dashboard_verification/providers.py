@@ -8,6 +8,8 @@ from typing import Protocol
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_BACK_LINK_TEXT = "Back"
+_INLAND_BTB_SEARCH_LINK_TEXT = "Inland BTB LC/Contract Search/Edit"
 
 
 def normalize_dashboard_search_key(value: str) -> str:
@@ -159,25 +161,30 @@ class PlaywrightDashboardLookupProvider:
     headless: bool = True
     _playwright_manager: object | None = None
     _browser: object | None = None
+    _context: object | None = None
+    _page: object | None = None
+    _page_dirty: bool = False
 
     def lookup_family(self, *, search_keys: list[str]) -> DashboardLookupResult:
-        self._ensure_browser()
-        if self._browser is None:
-            raise ValueError("Dashboard browser could not be initialized.")
+        self._ensure_authenticated_page()
+        if self._page is None:
+            raise ValueError("Dashboard page could not be initialized.")
+
+        if self._page_dirty:
+            self._reset_to_fresh_search_page()
 
         attempts: list[DashboardLookupAttempt] = []
         for raw_key in search_keys:
             search_key = normalize_dashboard_search_key(raw_key)
-            context = self._browser.new_context(**self._build_context_kwargs())
-            page = None
             try:
-                page = self._open_authenticated_lookup_page(context)
+                page = self._page
                 input_locator = page.locator(self.search_input_selector)
                 input_locator.wait_for(state="visible", timeout=self.timeout_ms)
                 input_locator.click()
                 input_locator.fill("")
                 input_locator.fill(search_key)
                 page.locator(self.search_button_selector).click()
+                self._page_dirty = True
                 _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
 
                 if self.no_result_selector and _selector_visible(
@@ -248,29 +255,20 @@ class PlaywrightDashboardLookupProvider:
                     snapshot=snapshot,
                 )
             except Exception as exc:
+                error_message = str(exc)
                 attempts.append(
                     DashboardLookupAttempt(
                         search_key=search_key,
                         outcome="fetch_error",
-                        message=str(exc),
+                        message=error_message,
                     )
                 )
                 return DashboardLookupResult(
                     outcome="fetch_error",
                     attempts=attempts,
                     matched_search_key=search_key,
-                    message=str(exc),
+                    message=error_message,
                 )
-            finally:
-                try:
-                    if page is not None:
-                        page.close()
-                except Exception:
-                    pass
-                try:
-                    context.close()
-                except Exception:
-                    pass
 
         return DashboardLookupResult(
             outcome="no_result",
@@ -280,6 +278,20 @@ class PlaywrightDashboardLookupProvider:
         )
 
     def close(self) -> None:
+        if self._page is not None:
+            try:
+                self._page.close()
+            except Exception:
+                pass
+            finally:
+                self._page = None
+        if self._context is not None:
+            try:
+                self._context.close()
+            except Exception:
+                pass
+            finally:
+                self._context = None
         if self._browser is not None:
             try:
                 self._browser.close()
@@ -294,9 +306,10 @@ class PlaywrightDashboardLookupProvider:
                 pass
             finally:
                 self._playwright_manager = None
+        self._page_dirty = False
 
-    def _ensure_browser(self) -> None:
-        if self._browser is not None:
+    def _ensure_authenticated_page(self) -> None:
+        if self._page is not None:
             return
         sync_playwright = _load_playwright_sync_api()
         playwright_manager = sync_playwright()
@@ -306,9 +319,38 @@ class PlaywrightDashboardLookupProvider:
             if self.browser_channel:
                 browser_launch_kwargs["channel"] = self.browser_channel
             browser = playwright.chromium.launch(**browser_launch_kwargs)
+            context = browser.new_context(**self._build_context_kwargs())
+            page = context.new_page()
+            page.goto(self.login_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+            if not _selector_visible(page, self.search_input_selector):
+                self._perform_login(page)
+            if self.post_login_wait_selector:
+                page.locator(self.post_login_wait_selector).wait_for(state="visible", timeout=self.timeout_ms)
+            elif not _selector_visible(page, self.search_input_selector, timeout_ms=self.timeout_ms):
+                raise ValueError("Dashboard login did not reach a searchable authenticated page.")
+            post_login_redirect_url = page.url
+            page.goto(post_login_redirect_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+            page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
             self._browser = browser
+            self._context = context
+            self._page = page
             self._playwright_manager = playwright_manager
+            self._page_dirty = False
         except Exception:
+            try:
+                page.close()
+            except Exception:
+                pass
+            try:
+                context.close()
+            except Exception:
+                pass
+            try:
+                browser.close()
+            except Exception:
+                pass
             try:
                 playwright_manager.__exit__(None, None, None)
             except Exception:
@@ -323,28 +365,18 @@ class PlaywrightDashboardLookupProvider:
             context_kwargs["storage_state"] = str(self.storage_state_path)
         return context_kwargs
 
-    def _open_authenticated_lookup_page(self, context):
-        page = context.new_page()
-        try:
-            page.goto(self.login_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
-            if not _selector_visible(page, self.search_input_selector):
-                self._perform_login(page)
-            if self.post_login_wait_selector:
-                page.locator(self.post_login_wait_selector).wait_for(state="visible", timeout=self.timeout_ms)
-            elif not _selector_visible(page, self.search_input_selector, timeout_ms=self.timeout_ms):
-                raise ValueError("Dashboard login did not reach a searchable authenticated page.")
-            post_login_redirect_url = page.url
-            page.goto(post_login_redirect_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-            _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
-            page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
-            return page
-        except Exception:
-            try:
-                page.close()
-            except Exception:
-                pass
-            raise
+    def _reset_to_fresh_search_page(self) -> None:
+        if self._page is None:
+            raise ValueError("Dashboard page could not be initialized.")
+        page = self._page
+        page.get_by_text(_BACK_LINK_TEXT, exact=True).click()
+        page.wait_for_url("**/350?session=*", timeout=self.timeout_ms)
+        _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+        page.get_by_text(_INLAND_BTB_SEARCH_LINK_TEXT, exact=True).click()
+        page.wait_for_url("**/75?clear=75**", timeout=self.timeout_ms)
+        _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+        page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
+        self._page_dirty = False
 
     def _read_snapshot(self, page) -> DashboardFamilySnapshot:
         return DashboardFamilySnapshot(

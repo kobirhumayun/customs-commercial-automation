@@ -330,7 +330,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             "TDL-199",
         )
 
-    def test_playwright_provider_uses_fresh_authenticated_context_per_lookup(self) -> None:
+    def test_playwright_provider_resets_to_fresh_search_page_between_lookup_calls(self) -> None:
         class FakeLocator:
             def wait_for(self, **kwargs) -> None:
                 return None
@@ -351,23 +351,6 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
             def close(self) -> None:
                 self.closed = True
-
-        class FakeContext:
-            def __init__(self, name: str) -> None:
-                self.name = name
-                self.closed = False
-
-            def close(self) -> None:
-                self.closed = True
-
-        class FakeBrowser:
-            def __init__(self) -> None:
-                self.contexts: list[FakeContext] = []
-
-            def new_context(self, **kwargs) -> FakeContext:
-                context = FakeContext(name=f"context-{len(self.contexts) + 1}")
-                self.contexts.append(context)
-                return context
 
         provider = PlaywrightDashboardLookupProvider(
             login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
@@ -392,16 +375,13 @@ class BBDashboardVerificationTests(unittest.TestCase):
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
         )
-        fake_browser = FakeBrowser()
-        provider._browser = fake_browser
+        provider._page = FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1")
+        provider._page_dirty = False
 
-        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_browser") as ensure_browser_mock:
-            ensure_browser_mock.return_value = None
-            with patch.object(PlaywrightDashboardLookupProvider, "_open_authenticated_lookup_page") as open_page_mock:
-                open_page_mock.side_effect = [
-                    FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1"),
-                    FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=2"),
-                ]
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_authenticated_page") as ensure_page_mock:
+            ensure_page_mock.return_value = None
+            with patch.object(PlaywrightDashboardLookupProvider, "_reset_to_fresh_search_page") as reset_page_mock:
+                reset_page_mock.return_value = None
                 with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
                     read_snapshot_mock.side_effect = [
                         DashboardFamilySnapshot(
@@ -426,7 +406,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
                             lc_value="99999.0",
                             foreign_lc_numbers=["FLC-002"],
                             commodity_quantities=["12345"],
-                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=2",
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
                         ),
                     ]
                     first_result = provider.lookup_family(search_keys=["1741260401172"])
@@ -434,10 +414,83 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(first_result.outcome, "resolved")
         self.assertEqual(second_result.outcome, "resolved")
-        self.assertEqual(len(fake_browser.contexts), 2)
-        self.assertTrue(all(context.closed for context in fake_browser.contexts))
+        reset_page_mock.assert_called_once()
         self.assertEqual(first_result.snapshot.irc_details, "IRC 1")
         self.assertEqual(second_result.snapshot.irc_details, "IRC 2")
+        self.assertTrue(provider._page_dirty)
+
+    def test_playwright_provider_reset_flow_uses_back_then_inland_btb_search_link(self) -> None:
+        class FakeLink:
+            def __init__(self, *, page, text: str) -> None:
+                self._page = page
+                self._text = text
+
+            def click(self) -> None:
+                self._page.clicks.append(self._text)
+
+        class FakeLocator:
+            def __init__(self) -> None:
+                self.wait_calls: list[tuple[str, int]] = []
+
+            def wait_for(self, *, state: str, timeout: int) -> None:
+                self.wait_calls.append((state, timeout))
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.clicks: list[str] = []
+                self.waited_urls: list[str] = []
+                self.locator_calls: list[str] = []
+
+            def get_by_text(self, text: str, exact: bool = False) -> FakeLink:
+                return FakeLink(page=self, text=text)
+
+            def wait_for_url(self, pattern: str, timeout: int) -> None:
+                self.waited_urls.append(pattern)
+
+            def locator(self, selector: str) -> FakeLocator:
+                self.locator_calls.append(selector)
+                return FakeLocator()
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector=None,
+            no_result_selector=None,
+            multiple_results_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        provider._page = FakePage()
+        provider._page_dirty = True
+
+        with patch("project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_network_idle") as idle_mock:
+            idle_mock.return_value = None
+            provider._reset_to_fresh_search_page()
+
+        self.assertEqual(
+            provider._page.clicks,
+            ["Back", "Inland BTB LC/Contract Search/Edit"],
+        )
+        self.assertEqual(
+            provider._page.waited_urls,
+            ["**/350?session=*", "**/75?clear=75**"],
+        )
+        self.assertEqual(provider._page.locator_calls, ["#P75_SEARCH_LC"])
+        self.assertFalse(provider._page_dirty)
 
     def test_compare_dashboard_snapshot_normalizes_dates_before_comparison(self) -> None:
         family = DashboardCandidateFamily(
@@ -560,6 +613,122 @@ class BBDashboardVerificationTests(unittest.TestCase):
                 "ERC Details did not contain the ERP buyer name.",
             ],
         )
+
+    def test_compare_dashboard_snapshot_accepts_later_dashboard_shipment_and_expiry_dates(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3",
+            lc_sc_no="LC-003",
+            lc_sc_key="LC 003",
+            row_indexes=[13],
+            sl_no_values=["103"],
+            master_lc_values=["MLC-003"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=13,
+                    sl_no="103",
+                    lc_sc_no="LC-003",
+                    lc_sc_key="LC 003",
+                    master_lc_values=["MLC-003"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003",
+            lc_sc_key="LC 003",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="09-Apr-26",
+            ship_date="01-Jun-26",
+            expiry_date="15-Jun-26",
+            current_lc_value=Decimal("45165"),
+            lc_qty=Decimal("17650"),
+            net_weight=Decimal("10361.6"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd., Plot#532, Tonga Bari, Ashulia,",
+            erc_details="NATURAL DENIMS LTD, PLOT NO-532, TONGA BARI,  ASHULIA, SAVAR, DHAKA.",
+            lc_date="09-Apr-2026",
+            last_date_of_shipment="05-Jun-2026",
+            lc_expiry_date="20-Jun-2026",
+            lc_value="45165",
+            foreign_lc_numbers=["MLC-003"],
+            commodity_quantities=["17650"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+        self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP LC quantity."])
+
+    def test_compare_dashboard_snapshot_accepts_net_weight_with_point_eight_tolerance(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-4",
+            lc_sc_no="LC-004",
+            lc_sc_key="LC 004",
+            row_indexes=[14],
+            sl_no_values=["104"],
+            master_lc_values=["MLC-004"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=14,
+                    sl_no="104",
+                    lc_sc_no="LC-004",
+                    lc_sc_key="LC 004",
+                    master_lc_values=["MLC-004"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-004",
+            lc_sc_key="LC 004",
+            buyer_name="ANANTA GARMENTS LTD",
+            lc_date="10-Jan-26",
+            ship_date="10-Feb-26",
+            expiry_date="10-Mar-26",
+            current_lc_value=Decimal("50"),
+            lc_qty=Decimal("40"),
+            net_weight=Decimal("18"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="ANANTA GARMENTS LTD",
+            erc_details="ANANTA GARMENTS LTD",
+            lc_date="2026-01-10",
+            last_date_of_shipment="2026-02-10",
+            lc_expiry_date="2026-03-10",
+            lc_value="50",
+            foreign_lc_numbers=["MLC-004"],
+            commodity_quantities=["18.79"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK (KGS)")
+        self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP net weight."])
 
 
 def _write_dashboard_fixture_bundle(root: Path) -> tuple[Path, Path, Path, Path]:
