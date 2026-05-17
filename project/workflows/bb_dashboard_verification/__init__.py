@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import webbrowser
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -23,7 +24,7 @@ from project.storage.artifacts import atomic_write_text
 from project.utils.hashing import canonical_json_hash
 from project.utils.ids import build_mail_id, build_write_operation_id
 from project.utils.json import to_jsonable
-from project.utils.time import utc_timestamp
+from project.utils.time import utc_timestamp, validate_timezone
 from project.workbook import WorkbookRow, WorkbookSnapshot, resolve_bb_dashboard_header_mapping
 from project.workflows.bb_dashboard_verification.providers import (
     DashboardFamilySnapshot,
@@ -98,6 +99,7 @@ def validate_bb_dashboard_verification_run(
     workbook_snapshot: WorkbookSnapshot | None,
     erp_rows: list,
     dashboard_provider: DashboardLookupProvider,
+    live_workbook_path: Path | None = None,
 ) -> BBDashboardVerificationResult:
     if run_report.workflow_id != WorkflowId.BB_DASHBOARD_VERIFICATION:
         raise ValueError("Bangladesh Bank dashboard validation requires workflow_id=bb_dashboard_verification")
@@ -140,9 +142,15 @@ def validate_bb_dashboard_verification_run(
             ),
         )
 
+    sl_no_values_by_row = _resolve_sl_no_values_by_row(
+        workbook_snapshot=workbook_snapshot,
+        sl_no_column_index=header_mapping["sl_no"],
+        live_workbook_path=live_workbook_path,
+    )
     candidate_families = _build_candidate_families(
         workbook_snapshot=workbook_snapshot,
         header_mapping=header_mapping,
+        sl_no_values_by_row=sl_no_values_by_row,
     )
     erp_rows_by_family = _group_erp_rows_by_family(erp_rows)
 
@@ -474,11 +482,16 @@ def _build_candidate_families(
     *,
     workbook_snapshot: WorkbookSnapshot,
     header_mapping: dict[str, int],
+    sl_no_values_by_row: dict[int, str],
 ) -> list[DashboardCandidateFamily]:
     families: dict[str, list[DashboardCandidateRow]] = {}
     ordered_keys: list[str] = []
     for row in workbook_snapshot.rows:
-        candidate = _build_candidate_row(row=row, header_mapping=header_mapping)
+        candidate = _build_candidate_row(
+            row=row,
+            header_mapping=header_mapping,
+            sl_no_values_by_row=sl_no_values_by_row,
+        )
         if candidate is None:
             continue
         if candidate.lc_sc_key not in families:
@@ -514,6 +527,7 @@ def _build_candidate_row(
     *,
     row: WorkbookRow,
     header_mapping: dict[str, int],
+    sl_no_values_by_row: dict[int, str],
 ) -> DashboardCandidateRow | None:
     up_no = row.values.get(header_mapping["up_no"], "").strip()
     if up_no:
@@ -535,7 +549,7 @@ def _build_candidate_row(
     if not lc_sc_key:
         return None
 
-    sl_no = row.values.get(header_mapping["sl_no"], "").strip()
+    sl_no = sl_no_values_by_row.get(row.row_index, "").strip()
     master_lc_values = _split_multiline_values(row.values.get(header_mapping["master_lc_no"], ""))
     return DashboardCandidateRow(
         row_index=row.row_index,
@@ -556,6 +570,97 @@ def _build_candidate_row(
         ),
         number_formats=dict(row.number_formats),
     )
+
+
+def _resolve_sl_no_values_by_row(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    sl_no_column_index: int,
+    live_workbook_path: Path | None,
+) -> dict[int, str]:
+    row_indexes = {row.row_index for row in workbook_snapshot.rows}
+    if live_workbook_path is not None:
+        return _resolve_live_sl_no_values_by_row(
+            workbook_path=live_workbook_path,
+            column_index=sl_no_column_index,
+            row_indexes=row_indexes,
+        )
+    rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
+    resolved: dict[int, str] = {}
+    for row_index in row_indexes:
+        row = rows_by_index.get(row_index)
+        if row is None:
+            continue
+        resolved[row_index] = _stringify_sl_no_text(row.values.get(sl_no_column_index, ""))
+    return resolved
+
+
+def _resolve_live_sl_no_values_by_row(
+    *,
+    workbook_path: Path,
+    column_index: int,
+    row_indexes: set[int],
+) -> dict[int, str]:
+    if not row_indexes:
+        return {}
+    try:
+        import xlwings  # type: ignore
+    except ImportError as exc:
+        raise ValueError("xlwings is required to resolve displayed workbook SL.No. values from the live workbook.") from exc
+
+    app = xlwings.App(visible=False, add_book=False)
+    book = None
+    try:
+        book = app.books.open(str(workbook_path), update_links=False, read_only=True)
+        sheet = book.sheets[0]
+        resolved: dict[int, str] = {}
+        for row_index in sorted(row_indexes):
+            displayed_value = sheet.range((row_index, column_index)).api.Text
+            resolved[row_index] = _stringify_sl_no_text(displayed_value)
+        return resolved
+    finally:
+        if book is not None:
+            book.close()
+        app.quit()
+
+
+def _stringify_sl_no_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text_value = value.strip()
+        if not text_value:
+            return ""
+        if "." not in text_value and "e" not in text_value.lower():
+            return text_value
+        try:
+            decimal_value = Decimal(text_value.replace(",", ""))
+        except (InvalidOperation, ValueError):
+            return text_value
+        if decimal_value == decimal_value.to_integral_value():
+            return str(int(decimal_value))
+        return text_value
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return str(int(value))
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        decimal_value = Decimal(str(value))
+        if decimal_value == decimal_value.to_integral_value():
+            return str(int(decimal_value))
+        return str(value)
+    text_value = str(value).strip()
+    if not text_value:
+        return ""
+    try:
+        decimal_value = Decimal(text_value.replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return text_value
+    if decimal_value == decimal_value.to_integral_value():
+        return str(int(decimal_value))
+    return text_value
 
 
 def _group_erp_rows_by_family(erp_rows: list) -> dict[str, list]:
@@ -935,6 +1040,7 @@ def _build_report_payload(
         "workflow_id": run_report.workflow_id.value,
         "rule_pack_id": run_report.rule_pack_id,
         "rule_pack_version": run_report.rule_pack_version,
+        "state_timezone": run_report.state_timezone,
         "generated_at_utc": utc_timestamp(),
         "summary": dict(run_report.summary),
         "family_count": len(families),
@@ -1002,6 +1108,13 @@ def _build_report_family(
 
 def _build_report_html(*, report_payload: dict[str, object]) -> str:
     families = report_payload.get("families", [])
+    summary = report_payload.get("summary") if isinstance(report_payload.get("summary"), dict) else {}
+    family_count = report_payload.get("family_count", 0)
+    state_timezone = str(report_payload.get("state_timezone", "Asia/Dhaka") or "Asia/Dhaka")
+    generated_at_display = _local_display_timestamp(
+        generated_at_utc=report_payload.get("generated_at_utc"),
+        state_timezone=state_timezone,
+    )
     rows_html = ""
     if isinstance(families, list) and families:
         rendered_rows: list[str] = []
@@ -1009,15 +1122,18 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
             if not isinstance(family, dict):
                 continue
             dashboard = family.get("dashboard") if isinstance(family.get("dashboard"), dict) else {}
+            erp = family.get("erp") if isinstance(family.get("erp"), dict) else {}
             rendered_rows.append(
                 "<tr>"
                 f"<td>{escape(str(family.get('lc_sc_no', '')))}</td>"
-                f"<td>{escape(', '.join(str(item) for item in family.get('sl_no_values', [])))}</td>"
+                f"<td>{escape(_format_report_sl_no_values(family.get('sl_no_values', [])))}</td>"
                 f"<td>{'<br>'.join(escape(str(item)) for item in family.get('workbook_master_lc_values', []))}</td>"
-                f"<td>{escape(str((family.get('erp') or {}).get('buyer_name', '') if isinstance(family.get('erp'), dict) else ''))}</td>"
-                f"<td>{escape(str((family.get('erp') or {}).get('current_lc_value', '') if isinstance(family.get('erp'), dict) else ''))}</td>"
-                f"<td>{escape(str((family.get('erp') or {}).get('lc_qty', '') if isinstance(family.get('erp'), dict) else ''))}</td>"
+                f"<td>{escape(str(family.get('final_decision', '')))}</td>"
+                f"<td>{escape(str(erp.get('buyer_name', '')))}</td>"
+                f"<td>{escape(str(erp.get('current_lc_value', '')))}</td>"
+                f"<td>{escape(str(erp.get('lc_qty', '')))}</td>"
                 f"<td>{escape(str(family.get('final_workbook_value', '') or ''))}</td>"
+                f"<td>{'<br>'.join(escape(str(item)) for item in family.get('decision_reasons', []))}</td>"
                 f"<td>{escape(str(family.get('written_shipment_date', '') or ''))}</td>"
                 f"<td>{escape(str(family.get('written_expiry_date', '') or ''))}</td>"
                 f"<td>{escape(str(dashboard.get('beneficiary_name', '')))}</td>"
@@ -1033,35 +1149,83 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
             )
         rows_html = "\n".join(rendered_rows)
     else:
-        rows_html = '<tr><td colspan="18">No eligible workbook families were found.</td></tr>'
+        rows_html = '<tr><td colspan="20">No eligible workbook families were found.</td></tr>'
+
+    snapshot_rows = [
+        ("Run ID", report_payload.get("run_id", "")),
+        ("Workflow ID", report_payload.get("workflow_id", "")),
+        ("Rule Pack", f"{report_payload.get('rule_pack_id', '')} ({report_payload.get('rule_pack_version', '')})"),
+        ("Generated At", f"{generated_at_display} ({state_timezone})"),
+        ("Family Count", family_count),
+    ]
+    summary_rows = [
+        ("Pass", summary.get("pass", 0)),
+        ("Warning", summary.get("warning", 0)),
+        ("Hard Block", summary.get("hard_block", 0)),
+    ]
 
     return (
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
         "<head>\n"
         "  <meta charset=\"utf-8\">\n"
-        "  <title>Bangladesh Bank Dashboard Verification</title>\n"
+        "  <title>Workflow Dashboard: bb_dashboard_verification</title>\n"
         "  <style>\n"
-        "    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 24px; color: #123; background: #f5f7fb; }\n"
-        "    main { max-width: 1280px; margin: 0 auto; }\n"
+        "    :root { color-scheme: light; }\n"
+        "    html, body { height: 100%; }\n"
+        "    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; color: #1f2933; background: #f6f8fb; }\n"
+        "    main { width: 100%; max-width: none; margin: 0; padding: 24px; box-sizing: border-box; }\n"
+        "    h1, h2 { color: #102a43; }\n"
         "    h1 { margin-bottom: 4px; }\n"
-        "    .meta { color: #52606d; margin-bottom: 20px; }\n"
-        "    .card { background: #fff; border: 1px solid #d9e2ec; border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }\n"
-        "    .table-wrap { max-width: 100%; overflow-x: auto; }\n"
-        "    table { width: 100%; border-collapse: collapse; table-layout: fixed; }\n"
-        "    th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }\n"
-        "    th { background: #f0f4f8; }\n"
+        "    .meta { color: #52606d; margin-bottom: 24px; }\n"
+        "    .section { background: #ffffff; border: 1px solid #d9e2ec; border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }\n"
+        "    .family-results-section { padding-bottom: 12px; }\n"
+        "    .sticky-section-title { position: sticky; top: 0; z-index: 5; background: #ffffff; padding-bottom: 12px; margin-bottom: 0; }\n"
+        "    .table-wrap { width: 100%; max-width: 100%; overflow-x: scroll; overflow-y: auto; max-height: calc(100vh - 240px); padding-bottom: 8px; scrollbar-gutter: stable both-edges; }\n"
+        "    table { width: 100%; border-collapse: collapse; margin-top: 10px; }\n"
+        "    .wide-table { width: max-content; min-width: 100%; table-layout: auto; margin-top: 0; }\n"
+        "    th, td { border-bottom: 1px solid #e5e7eb; border-right: 1px solid #d9e2ec; padding: 10px 12px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; background: #ffffff; }\n"
+        "    th:last-child, td:last-child { border-right: none; }\n"
+        "    th { background: #f0f4f8; font-weight: 600; }\n"
+        "    .wide-table thead th { position: sticky; top: 0; z-index: 4; box-shadow: inset 0 -1px 0 #d9e2ec; }\n"
         "    td { line-height: 1.4; }\n"
+        "    code { font-family: Consolas, 'Courier New', monospace; background: #f0f4f8; padding: 1px 4px; border-radius: 4px; }\n"
+        "    .empty { color: #7b8794; font-style: italic; }\n"
         "  </style>\n"
         "</head>\n"
         "<body>\n"
         "  <main>\n"
-        f"    <h1>Bangladesh Bank Dashboard Verification</h1>\n"
-        f"    <p class=\"meta\">Run ID: {escape(str(report_payload.get('run_id', '')))} | Generated at: {escape(str(report_payload.get('generated_at_utc', '')))}</p>\n"
-        "    <section class=\"card\">\n"
+        "    <h1>Workflow Dashboard: bb_dashboard_verification</h1>\n"
+        f"    <p class=\"meta\">Generated at: {escape(generated_at_display)} ({escape(state_timezone)})</p>\n"
+        f"{_render_report_key_value_section('Snapshot', snapshot_rows)}\n"
+        f"{_render_report_key_value_section('Summary', summary_rows)}\n"
+        "    <section class=\"section family-results-section\">\n"
+        "      <h2 class=\"sticky-section-title\">Family Results</h2>\n"
         "      <div class=\"table-wrap\">\n"
-        "      <table>\n"
-        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>Final Workbook Value</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th><th>Dashboard Beneficiary</th><th>Dashboard IRC</th><th>Dashboard ERC</th><th>Dashboard LC Date</th><th>Dashboard Last Shipment</th><th>Dashboard Expiry</th><th>Dashboard LC Value</th><th>Dashboard Foreign LC No</th><th>Dashboard Quantity Total</th></tr></thead>\n"
+        "      <table class=\"wide-table\">\n"
+        "        <colgroup>\n"
+        "          <col style=\"width: 240px\">\n"
+        "          <col style=\"width: 90px\">\n"
+        "          <col style=\"width: 240px\">\n"
+        "          <col style=\"width: 120px\">\n"
+        "          <col style=\"width: 240px\">\n"
+        "          <col style=\"width: 130px\">\n"
+        "          <col style=\"width: 130px\">\n"
+        "          <col style=\"width: 360px\">\n"
+        "          <col style=\"width: 360px\">\n"
+        "          <col style=\"width: 170px\">\n"
+        "          <col style=\"width: 170px\">\n"
+        "          <col style=\"width: 260px\">\n"
+        "          <col style=\"width: 340px\">\n"
+        "          <col style=\"width: 340px\">\n"
+        "          <col style=\"width: 150px\">\n"
+        "          <col style=\"width: 170px\">\n"
+        "          <col style=\"width: 150px\">\n"
+        "          <col style=\"width: 130px\">\n"
+        "          <col style=\"width: 280px\">\n"
+        "          <col style=\"width: 180px\">\n"
+        "        </colgroup>\n"
+        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>Decision</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>Final Workbook Value</th><th>Decision Reasons</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th><th>Dashboard Beneficiary</th><th>Dashboard IRC</th><th>Dashboard ERC</th><th>Dashboard LC Date</th><th>Dashboard Last Shipment</th><th>Dashboard Expiry</th><th>Dashboard LC Value</th><th>Dashboard Foreign LC No</th><th>Dashboard Quantity Total</th></tr></thead>\n"
         "        <tbody>\n"
         f"{rows_html}\n"
         "        </tbody>\n"
@@ -1071,6 +1235,38 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "  </main>\n"
         "</body>\n"
         "</html>\n"
+    )
+
+
+def _local_display_timestamp(*, generated_at_utc: object, state_timezone: str) -> str:
+    value = str(generated_at_utc or "").strip()
+    if not value:
+        return ""
+    normalized = value.replace("Z", "+00:00")
+    try:
+        generated_at = datetime.fromisoformat(normalized)
+    except ValueError:
+        return value
+    timezone = validate_timezone(state_timezone)
+    return generated_at.astimezone(timezone).strftime("%d/%m/%Y %I:%M:%S %p")
+
+
+def _render_report_key_value_section(title: str, rows: list[tuple[str, object]]) -> str:
+    items = "\n".join(
+        f"        <tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>"
+        for label, value in rows
+    )
+    return "\n".join(
+        [
+            '    <section class="section">',
+            f"      <h2>{escape(title)}</h2>",
+            "      <table>",
+            "        <tbody>",
+            items,
+            "        </tbody>",
+            "      </table>",
+            "    </section>",
+        ]
     )
 
 
@@ -1087,6 +1283,25 @@ def _format_report_quantity_total(values: object) -> str:
     if total is not None:
         return _decimal_to_string(total) or ""
     return ", ".join(str(item).strip() for item in values if str(item).strip())
+
+
+def _format_report_sl_no_values(values: object) -> str:
+    if not isinstance(values, list):
+        return ""
+    return ", ".join(_format_report_sl_no_value(item) for item in values if str(item).strip())
+
+
+def _format_report_sl_no_value(value: object) -> str:
+    candidate = str(value).strip()
+    if not candidate:
+        return ""
+    try:
+        decimal_value = Decimal(candidate.replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return candidate
+    if decimal_value == decimal_value.to_integral_value():
+        return str(int(decimal_value))
+    return candidate
 
 
 def _build_search_keys(*, ship_remarks: str | None, workbook_lc_sc_no: str) -> list[str]:

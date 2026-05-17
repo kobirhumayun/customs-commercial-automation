@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import tempfile
 import unittest
 from decimal import Decimal
@@ -14,13 +15,20 @@ from project.config import load_workflow_config
 from project.erp import JsonManifestERPRowProvider
 from project.models import FinalDecision, WorkbookSessionPreflight, WorkflowId, WritePhaseStatus
 from project.rules import load_rule_pack
-from project.workbook import JsonManifestWorkbookSnapshotProvider, WorkbookWriteSessionResult
+from project.workbook import (
+    JsonManifestWorkbookSnapshotProvider,
+    WorkbookHeader,
+    WorkbookRow,
+    WorkbookSnapshot,
+    WorkbookWriteSessionResult,
+)
 from project.workflows.bb_dashboard_verification import (
     DashboardCandidateFamily,
     DashboardCandidateRow,
     ERPFamilyAggregate,
     _build_report_html,
     _compare_dashboard_snapshot,
+    _resolve_sl_no_values_by_row,
     validate_bb_dashboard_verification_run,
 )
 from project.workflows.bb_dashboard_verification.providers import (
@@ -219,22 +227,103 @@ class BBDashboardVerificationTests(unittest.TestCase):
             "No ERP rows were available for workbook family LC-003.",
         )
 
+    def test_validate_run_normalizes_snapshot_numeric_sl_no_to_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path, workbook_manifest_path, erp_manifest_path, dashboard_manifest_path = _write_dashboard_warning_fixture_bundle(root)
+            workbook_payload = json.loads(workbook_manifest_path.read_text(encoding="utf-8"))
+            workbook_payload["rows"][0]["values"]["1"] = 633.0
+            workbook_manifest_path.write_text(json.dumps(workbook_payload), encoding="utf-8")
+
+            descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=[],
+            )
+            workbook_snapshot = JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot()
+            workflow_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=JsonManifestERPRowProvider(erp_manifest_path).load_rows(),
+                dashboard_provider=JsonManifestDashboardLookupProvider(dashboard_manifest_path),
+            )
+
+        self.assertEqual(workflow_result.report_payload["families"][0]["sl_no_values"], ["633"])
+        self.assertIn(">633<", workflow_result.report_html)
+
+    def test_resolve_sl_no_values_by_row_uses_live_workbook_display_text(self) -> None:
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[WorkbookHeader(column_index=1, text="SL.No.")],
+            rows=[WorkbookRow(row_index=11, values={1: "633.0"}, number_formats={})],
+        )
+
+        class FakeCell:
+            def __init__(self, text: str) -> None:
+                self.api = type("Api", (), {"Text": text})()
+
+        class FakeSheet:
+            def range(self, coordinates):
+                self.last_coordinates = coordinates
+                return FakeCell("21A")
+
+        class FakeBook:
+            def __init__(self) -> None:
+                self.sheets = [FakeSheet()]
+
+            def close(self) -> None:
+                return None
+
+        class FakeBooks:
+            def open(self, *_args, **_kwargs):
+                return FakeBook()
+
+        class FakeApp:
+            def __init__(self, **_kwargs) -> None:
+                self.books = FakeBooks()
+
+            def quit(self) -> None:
+                return None
+
+        fake_xlwings = type("FakeXLWings", (), {"App": FakeApp})
+
+        with patch.dict(sys.modules, {"xlwings": fake_xlwings}):
+            resolved = _resolve_sl_no_values_by_row(
+                workbook_snapshot=workbook_snapshot,
+                sl_no_column_index=1,
+                live_workbook_path=Path("D:/customs-automation/2026-master.xlsx"),
+            )
+
+        self.assertEqual(resolved, {11: "21A"})
+
     def test_report_html_renders_dashboard_columns_with_quantity_sum_and_foreign_lc_breaks(self) -> None:
         report_html = _build_report_html(
             report_payload={
                 "run_id": "run-1",
+                "workflow_id": "bb_dashboard_verification",
+                "rule_pack_id": "bb_dashboard_verification.default",
+                "rule_pack_version": "1.0.0",
+                "state_timezone": "Asia/Dhaka",
                 "generated_at_utc": "2026-05-14T00:00:00Z",
+                "summary": {"pass": 0, "warning": 1, "hard_block": 0},
+                "family_count": 1,
                 "families": [
                     {
                         "lc_sc_no": "2159260400534",
                         "sl_no_values": ["633.0"],
                         "workbook_master_lc_values": ["COG/VDAL/08/2025"],
+                        "final_decision": "warning",
                         "erp": {
                             "buyer_name": "VINTAGE DENIM APPARELS LTD",
                             "current_lc_value": "98315.5",
                             "lc_qty": "33170",
                         },
                         "final_workbook_value": "IRC Details did not contain the ERP buyer name.",
+                        "decision_reasons": ["IRC Details did not contain the ERP buyer name."],
                         "written_shipment_date": "",
                         "written_expiry_date": "",
                         "dashboard": {
@@ -253,10 +342,21 @@ class BBDashboardVerificationTests(unittest.TestCase):
             }
         )
 
+        self.assertIn("<h1>Workflow Dashboard: bb_dashboard_verification</h1>", report_html)
+        self.assertIn("<h2>Snapshot</h2>", report_html)
+        self.assertIn("<h2>Summary</h2>", report_html)
+        self.assertIn("<h2 class=\"sticky-section-title\">Family Results</h2>", report_html)
+        self.assertIn("Generated at: 14/05/2026 06:00:00 AM (Asia/Dhaka)", report_html)
+        self.assertIn("overflow-x: scroll", report_html)
+        self.assertIn("position: sticky", report_html)
+        self.assertIn("border-right: 1px solid #d9e2ec", report_html)
+        self.assertIn("Decision Reasons", report_html)
         self.assertIn("Dashboard Beneficiary", report_html)
         self.assertIn("Dashboard Foreign LC No", report_html)
         self.assertIn("Dashboard Quantity Total", report_html)
         self.assertIn("COG/VDAL/08/2025<br>EXTRA-FLC-002", report_html)
+        self.assertIn(">633<", report_html)
+        self.assertNotIn(">633.0<", report_html)
         self.assertIn(">33170<", report_html)
 
     def test_read_text_uses_input_value_for_form_controls(self) -> None:

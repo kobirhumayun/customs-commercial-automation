@@ -1809,6 +1809,7 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
                 workbook_snapshot=workbook_snapshot,
                 erp_rows=erp_provider.load_rows(),
                 dashboard_provider=dashboard_provider,
+                live_workbook_path=_resolve_live_workbook_path(config) if args.live_workbook else None,
             )
             validation_result = dashboard_result.validation_result
         else:
