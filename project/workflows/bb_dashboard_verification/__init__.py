@@ -1260,6 +1260,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
                 f"<td>{escape(str(erp.get('buyer_name', '')))}</td>"
                 f"<td>{escape(str(erp.get('current_lc_value', '')))}</td>"
                 f"<td>{escape(str(erp.get('lc_qty', '')))}</td>"
+                f"<td>{escape(str(erp.get('net_weight', '')))}</td>"
                 f"<td>{escape(str(family.get('final_workbook_value', '') or ''))}</td>"
                 f"<td>{'<br>'.join(escape(str(item)) for item in family.get('decision_reasons', []))}</td>"
                 f"<td>{escape(str(family.get('written_shipment_date', '') or ''))}</td>"
@@ -1277,7 +1278,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
             )
         rows_html = "\n".join(rendered_rows)
     else:
-        rows_html = '<tr><td colspan="20">No eligible workbook families were found.</td></tr>'
+        rows_html = '<tr><td colspan="21">No eligible workbook families were found.</td></tr>'
 
     snapshot_rows = [
         ("Run ID", report_payload.get("run_id", "")),
@@ -1339,6 +1340,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "          <col style=\"width: 240px\">\n"
         "          <col style=\"width: 130px\">\n"
         "          <col style=\"width: 130px\">\n"
+        "          <col style=\"width: 130px\">\n"
         "          <col style=\"width: 360px\">\n"
         "          <col style=\"width: 360px\">\n"
         "          <col style=\"width: 170px\">\n"
@@ -1353,7 +1355,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "          <col style=\"width: 280px\">\n"
         "          <col style=\"width: 180px\">\n"
         "        </colgroup>\n"
-        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>Decision</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>Final Workbook Value</th><th>Decision Reasons</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th><th>Dashboard Beneficiary</th><th>Dashboard IRC</th><th>Dashboard ERC</th><th>Dashboard LC Date</th><th>Dashboard Last Shipment</th><th>Dashboard Expiry</th><th>Dashboard LC Value</th><th>Dashboard Foreign LC No</th><th>Dashboard Quantity Total</th></tr></thead>\n"
+        "        <thead><tr><th>LC/SC</th><th>SL.No.</th><th>Workbook Master L/C</th><th>Decision</th><th>ERP Buyer</th><th>ERP LC Value</th><th>ERP LC Qty</th><th>ERP Net Weight</th><th>Final Workbook Value</th><th>Decision Reasons</th><th>Shipment Date Writeback</th><th>Expiry Date Writeback</th><th>Dashboard Beneficiary</th><th>Dashboard IRC</th><th>Dashboard ERC</th><th>Dashboard LC Date</th><th>Dashboard Last Shipment</th><th>Dashboard Expiry</th><th>Dashboard LC Value</th><th>Dashboard Foreign LC No</th><th>Dashboard Quantity Total</th></tr></thead>\n"
         "        <tbody>\n"
         f"{rows_html}\n"
         "        </tbody>\n"

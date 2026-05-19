@@ -887,7 +887,7 @@ Rows where:
 - This workflow must emit JSON and HTML verification reports even though it has no print phase.
 - The HTML report must open automatically at the end of the run, regardless of whether families matched or failed.
 - Report rows are family-oriented: one report row per LC family with grouped workbook `SL.No.` values for the filtered rows receiving the family result.
-- Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family.
+- Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family; the ERP columns shown in the family table include `LC Value`, `LC Qty`, and calculated `Net Weight`.
 - The current implementation also stages ERP `Ship. DT.` and `Expiry DT.` writeback on dashboard warning/failure families produced after lookup/comparison, not just on `OK` / `OK (KGS)` families; upstream ERP/input hard-block families still skip that date writeback.
 
 ## Printing

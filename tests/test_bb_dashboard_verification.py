@@ -321,6 +321,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
                             "buyer_name": "VINTAGE DENIM APPARELS LTD",
                             "current_lc_value": "98315.5",
                             "lc_qty": "33170",
+                            "net_weight": "21054.11",
                         },
                         "final_workbook_value": "IRC Details mismatch",
                         "decision_reasons": ["IRC Details did not contain the ERP buyer name."],
@@ -354,10 +355,14 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertIn("Dashboard Beneficiary", report_html)
         self.assertIn("Dashboard Foreign LC No", report_html)
         self.assertIn("Dashboard Quantity Total", report_html)
+        self.assertIn("ERP Net Weight", report_html)
         self.assertIn("COG/VDAL/08/2025<br>EXTRA-FLC-002", report_html)
         self.assertIn(">633<", report_html)
         self.assertNotIn(">633.0<", report_html)
         self.assertIn(">33170<", report_html)
+        self.assertIn(">21054.11<", report_html)
+        self.assertLess(report_html.index("ERP LC Qty"), report_html.index("ERP Net Weight"))
+        self.assertLess(report_html.index("ERP Net Weight"), report_html.index("Final Workbook Value"))
 
     def test_read_text_uses_input_value_for_form_controls(self) -> None:
         class FakeLocator:
