@@ -882,7 +882,7 @@ def _compare_dashboard_snapshot(
         mismatch_messages.append("Dashboard quantity rows could not be parsed.")
     if dashboard_lc_value is None or quantity_sum is None:
         return {
-            "status": "; ".join(mismatch_messages),
+            "status": _build_mismatch_status(mismatch_messages),
             "decision_reasons": mismatch_messages,
         }
 
@@ -896,7 +896,7 @@ def _compare_dashboard_snapshot(
     if value_quantity_result["status"] not in _COMPLIANT_VALUES:
         mismatch_messages.extend(value_quantity_result["decision_reasons"])
     return {
-        "status": "; ".join(mismatch_messages),
+        "status": _build_mismatch_status(mismatch_messages),
         "decision_reasons": mismatch_messages,
     }
 
@@ -1522,6 +1522,49 @@ def _compare_buyer_details(
     if erc_has_data:
         return [] if erc_matches else ["ERC Details did not contain the ERP buyer name."]
     return ["Both IRC Details and ERC Details were empty, so the ERP buyer name could not be verified."]
+
+
+def _build_mismatch_status(decision_reasons: list[str]) -> str:
+    topics = _unique_preserve_order(
+        topic
+        for reason in decision_reasons
+        for topic in _decision_reason_to_topics(reason)
+        if topic
+    )
+    if topics:
+        return f"{', '.join(topics)} mismatch"
+    return "Mismatch"
+
+
+def _decision_reason_to_topics(reason: str) -> list[str]:
+    normalized = str(reason).strip()
+    if not normalized:
+        return []
+    if normalized.startswith("Beneficiary mismatch:"):
+        return ["Beneficiary"]
+    if normalized.startswith("IRC Details"):
+        return ["IRC Details"]
+    if normalized.startswith("ERC Details"):
+        return ["ERC Details"]
+    if normalized.startswith("Both IRC Details and ERC Details"):
+        return ["IRC Details", "ERC Details"]
+    if normalized.startswith("LC Date mismatch:"):
+        return ["LC Date"]
+    if normalized.startswith("Last Date of Shipment mismatch:"):
+        return ["Shipment Date"]
+    if normalized.startswith("LC Expiry Date mismatch:"):
+        return ["Expiry Date"]
+    if normalized.startswith("ERP date window mismatch:"):
+        return ["ERP Date Window"]
+    if normalized.startswith("LC Value could not be parsed") or normalized.startswith("LC Value mismatch:"):
+        return ["Value"]
+    if normalized.startswith("Related Foreign LC/Contract Information"):
+        return ["Foreign LC No"]
+    if normalized.startswith("Dashboard quantity rows could not be parsed.") or normalized.startswith("Quantity mismatch:"):
+        return ["Quantity"]
+    if normalized.startswith("Excess mismatch:"):
+        return ["Value", "Quantity"]
+    return []
 
 
 def _normalize_date(value: str) -> str | None:

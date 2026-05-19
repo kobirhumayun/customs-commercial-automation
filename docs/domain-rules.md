@@ -421,7 +421,7 @@ Comparison rules:
 Result rules:
 - write `OK` when all required comparisons pass, including either exact LC value/LC qty agreement or the approved excess rule
 - write `OK (KGS)` when all non-quantity comparisons pass, dashboard `LC Value` exactly matches ERP, and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
-- otherwise write a combined descriptive discrepancy string/message specific to the mismatch set
+- otherwise keep verbose mismatch evidence in report `decision_reasons`, but write a compact comma-separated topic label ending in `mismatch` into workbook `Bangladesh Bank Dashboard` and report `final_workbook_value`; example: `Value, Quantity mismatch`
 - if the dashboard search returns no result, multiple results, or incomplete data, write a clear message specific to that occurrence type
 - the current implementation also stages workbook `Shipment Date` and `Expiry Date` updates on warning/failure families produced after dashboard lookup/comparison; upstream ERP/input hard-block families still skip that date writeback
 - ERP is authoritative for those two fields whenever this workflow stages those writes

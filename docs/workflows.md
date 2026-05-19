@@ -875,7 +875,7 @@ Rows where:
 - within those buyer checks, `ltd` and `limited` are interchangeable equivalents regardless of word position
 - if both `IRC Details` and `ERC Details` contain data, one passing and the other failing rejects the family
 - if both `IRC Details` and `ERC Details` are empty, buyer verification fails
-- otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
+- otherwise keep verbose discrepancy detail in `Decision Reasons`, but write a compact comma-separated topic label ending in `mismatch` into `Bangladesh Bank Dashboard` and report `Final Workbook Value` for comparison-based mismatch families; for example `Value, Quantity mismatch`
 
 ### No-data result handling
 - If the dashboard search returns no result, write a clear no-result message.

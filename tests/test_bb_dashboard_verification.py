@@ -186,7 +186,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(outcome.write_disposition, "new_writes_staged")
         self.assertEqual(len(outcome.staged_write_operations), 3)
         self.assertEqual(outcome.staged_write_operations[0]["column_key"], "dashboard_status")
-        self.assertIn("Quantity mismatch", outcome.staged_write_operations[0]["expected_post_write_value"])
+        self.assertEqual(outcome.staged_write_operations[0]["expected_post_write_value"], "Quantity mismatch")
         self.assertEqual(outcome.staged_write_operations[1]["column_key"], "shipment_date")
         self.assertEqual(outcome.staged_write_operations[1]["expected_post_write_value"], "10/02/2026")
         self.assertEqual(outcome.staged_write_operations[2]["column_key"], "expiry_date")
@@ -322,7 +322,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
                             "current_lc_value": "98315.5",
                             "lc_qty": "33170",
                         },
-                        "final_workbook_value": "IRC Details did not contain the ERP buyer name.",
+                        "final_workbook_value": "IRC Details mismatch",
                         "decision_reasons": ["IRC Details did not contain the ERP buyer name."],
                         "written_shipment_date": "",
                         "written_expiry_date": "",
@@ -705,6 +705,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             snapshot=snapshot,
         )
 
+        self.assertEqual(comparison["status"], "IRC Details, ERC Details mismatch")
         self.assertNotIn("Quantity mismatch", comparison["status"])
         self.assertEqual(
             comparison["decision_reasons"],
@@ -1234,7 +1235,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             snapshot=snapshot,
         )
 
-        self.assertIn("Last Date of Shipment mismatch", comparison["status"])
+        self.assertEqual(comparison["status"], "Shipment Date mismatch")
 
     def test_compare_dashboard_snapshot_accepts_approved_excess_rule(self) -> None:
         family = DashboardCandidateFamily(
@@ -1349,6 +1350,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             snapshot=snapshot,
         )
 
+        self.assertEqual(comparison["status"], "Value, Quantity mismatch")
         self.assertIn("single-field excess is not allowed", " ".join(comparison["decision_reasons"]))
 
     def test_compare_dashboard_snapshot_accepts_net_weight_with_point_eight_tolerance(self) -> None:
