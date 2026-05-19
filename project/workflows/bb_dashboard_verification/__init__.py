@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import webbrowser
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -43,6 +43,12 @@ _SPECIAL_RE = re.compile(r"[^A-Z0-9]+")
 _DATE_NUMBER_FORMAT = "dd/mm/yyyy"
 _DEFAULT_DECIMAL_TOLERANCE = Decimal("0.01")
 _NET_WEIGHT_TOLERANCE = Decimal("0.8")
+_MAX_SHIPMENT_DATE_OFFSET_DAYS = 250
+_EXPIRY_MIN_OFFSET_DAYS = 5
+_EXPIRY_MAX_OFFSET_DAYS = 90
+_MIN_LC_VALUE_EXCESS = Decimal("100.00")
+_MIN_EXCESS_QUANTITY_RATIO = Decimal("0.20")
+_MAX_EXCESS_QUANTITY_RATIO = Decimal("0.80")
 
 
 @dataclass(slots=True, frozen=True)
@@ -811,26 +817,49 @@ def _compare_dashboard_snapshot(
 
     if normalized_snapshot_lc_date != normalized_erp_lc_date:
         mismatch_messages.append(f"LC Date mismatch: dashboard '{snapshot.lc_date}' != ERP '{aggregate.lc_date}'.")
-    if not _date_is_same_or_after(
+    if not _date_is_same_or_after_and_within_days(
         dashboard_date=normalized_snapshot_ship_date,
         erp_date=normalized_erp_ship_date,
+        max_days=_MAX_SHIPMENT_DATE_OFFSET_DAYS,
     ):
         mismatch_messages.append(
-            f"Last Date of Shipment mismatch: dashboard '{snapshot.last_date_of_shipment}' != ERP '{aggregate.ship_date}'."
+            "Last Date of Shipment mismatch: dashboard "
+            f"'{snapshot.last_date_of_shipment}' must be on or after ERP '{aggregate.ship_date}' and no more than "
+            f"{_MAX_SHIPMENT_DATE_OFFSET_DAYS} days later."
         )
     if not _date_is_same_or_after(
         dashboard_date=normalized_snapshot_expiry_date,
         erp_date=normalized_erp_expiry_date,
     ):
         mismatch_messages.append(
-            f"LC Expiry Date mismatch: dashboard '{snapshot.lc_expiry_date}' != ERP '{aggregate.expiry_date}'."
+            f"LC Expiry Date mismatch: dashboard '{snapshot.lc_expiry_date}' must be on or after ERP '{aggregate.expiry_date}'."
+        )
+    if not _date_is_between_days_after(
+        earlier_date=normalized_snapshot_ship_date,
+        later_date=normalized_snapshot_expiry_date,
+        min_days=_EXPIRY_MIN_OFFSET_DAYS,
+        max_days=_EXPIRY_MAX_OFFSET_DAYS,
+    ):
+        mismatch_messages.append(
+            "LC Expiry Date mismatch: dashboard expiry "
+            f"'{snapshot.lc_expiry_date}' must be between {_EXPIRY_MIN_OFFSET_DAYS} and {_EXPIRY_MAX_OFFSET_DAYS} days "
+            f"after dashboard shipment '{snapshot.last_date_of_shipment}'."
+        )
+    if not _date_is_between_days_after(
+        earlier_date=normalized_erp_ship_date,
+        later_date=normalized_erp_expiry_date,
+        min_days=_EXPIRY_MIN_OFFSET_DAYS,
+        max_days=_EXPIRY_MAX_OFFSET_DAYS,
+    ):
+        mismatch_messages.append(
+            "ERP date window mismatch: ERP expiry "
+            f"'{aggregate.expiry_date}' must be between {_EXPIRY_MIN_OFFSET_DAYS} and {_EXPIRY_MAX_OFFSET_DAYS} days "
+            f"after ERP shipment '{aggregate.ship_date}'."
         )
 
     dashboard_lc_value = _parse_decimal(snapshot.lc_value)
-    if dashboard_lc_value is None or not _decimal_matches(dashboard_lc_value, aggregate.current_lc_value):
-        mismatch_messages.append(
-            f"LC Value mismatch: dashboard '{snapshot.lc_value}' != ERP '{_decimal_to_string(aggregate.current_lc_value)}'."
-        )
+    if dashboard_lc_value is None:
+        mismatch_messages.append(f"LC Value could not be parsed from dashboard value '{snapshot.lc_value}'.")
 
     workbook_master_values = {
         _normalize_special_text(value)
@@ -848,11 +877,33 @@ def _compare_dashboard_snapshot(
     quantity_sum = _sum_decimal_strings(snapshot.commodity_quantities)
     if quantity_sum is None:
         mismatch_messages.append("Dashboard quantity rows could not be parsed.")
+    if dashboard_lc_value is None or quantity_sum is None:
         return {
             "status": "; ".join(mismatch_messages),
             "decision_reasons": mismatch_messages,
         }
 
+    value_quantity_result = _compare_value_and_quantity(
+        dashboard_lc_value=dashboard_lc_value,
+        quantity_sum=quantity_sum,
+        aggregate=aggregate,
+    )
+    if not mismatch_messages and value_quantity_result["status"] in _COMPLIANT_VALUES:
+        return value_quantity_result
+    if value_quantity_result["status"] not in _COMPLIANT_VALUES:
+        mismatch_messages.extend(value_quantity_result["decision_reasons"])
+    return {
+        "status": "; ".join(mismatch_messages),
+        "decision_reasons": mismatch_messages,
+    }
+
+
+def _compare_value_and_quantity(
+    *,
+    dashboard_lc_value: Decimal,
+    quantity_sum: Decimal,
+    aggregate: ERPFamilyAggregate,
+) -> dict[str, object]:
     quantity_matches_lc_qty = _decimal_matches(quantity_sum, aggregate.lc_qty)
     quantity_matches_net_weight = (
         aggregate.net_weight is not None
@@ -862,14 +913,91 @@ def _compare_dashboard_snapshot(
             tolerance=_NET_WEIGHT_TOLERANCE,
         )
     )
+    value_matches_exact = _decimal_matches(dashboard_lc_value, aggregate.current_lc_value)
 
-    if not mismatch_messages and quantity_matches_lc_qty:
+    if value_matches_exact and quantity_matches_lc_qty:
         return {"status": "OK", "decision_reasons": ["Dashboard quantity matched ERP LC quantity."]}
-    if not mismatch_messages and quantity_matches_net_weight:
+    if value_matches_exact and quantity_matches_net_weight:
         return {"status": "OK (KGS)", "decision_reasons": ["Dashboard quantity matched ERP net weight."]}
 
-    if not quantity_matches_lc_qty and not quantity_matches_net_weight:
-        mismatch_messages.append(
+    value_relation = _decimal_relation(dashboard_lc_value, aggregate.current_lc_value)
+    quantity_relation = _decimal_relation(quantity_sum, aggregate.lc_qty)
+
+    if value_relation == "lower":
+        return {
+            "status": "",
+            "decision_reasons": [
+                "LC Value mismatch: dashboard "
+                f"'{_decimal_to_string(dashboard_lc_value)}' was lower than ERP "
+                f"'{_decimal_to_string(aggregate.current_lc_value)}'."
+            ],
+        }
+    if quantity_relation == "lower":
+        return {
+            "status": "",
+            "decision_reasons": [
+                "Quantity mismatch: dashboard total "
+                f"'{_decimal_to_string(quantity_sum)}' was lower than ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'."
+            ],
+        }
+    if value_relation == "higher" and quantity_relation == "equal":
+        return {
+            "status": "",
+            "decision_reasons": [
+                "Excess mismatch: dashboard LC Value exceeded ERP while dashboard quantity matched ERP LC Qty; both fields must be higher together to use the excess rule."
+            ],
+        }
+    if value_relation == "equal" and quantity_relation == "higher":
+        return {
+            "status": "",
+            "decision_reasons": [
+                "Excess mismatch: dashboard quantity exceeded ERP LC Qty while dashboard LC Value matched ERP; single-field excess is not allowed."
+            ],
+        }
+    if value_relation == "higher" and quantity_relation == "higher":
+        value_excess = (dashboard_lc_value - aggregate.current_lc_value).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        quantity_excess = (quantity_sum - aggregate.lc_qty).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        if value_excess < _MIN_LC_VALUE_EXCESS:
+            return {
+                "status": "",
+                "decision_reasons": [
+                    "Excess mismatch: dashboard LC Value excess "
+                    f"'{_decimal_to_string(value_excess)}' was below the minimum allowed "
+                    f"'{_decimal_to_string(_MIN_LC_VALUE_EXCESS)}'."
+                ],
+            }
+
+        minimum_quantity_excess = (value_excess * _MIN_EXCESS_QUANTITY_RATIO).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        maximum_quantity_excess = (value_excess * _MAX_EXCESS_QUANTITY_RATIO).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        if minimum_quantity_excess <= quantity_excess <= maximum_quantity_excess:
+            return {
+                "status": "OK",
+                "decision_reasons": ["Dashboard LC value and quantity satisfied the approved excess rule."],
+            }
+        return {
+            "status": "",
+            "decision_reasons": [
+                "Excess mismatch: dashboard quantity excess "
+                f"'{_decimal_to_string(quantity_excess)}' was outside the allowed range "
+                f"'{_decimal_to_string(minimum_quantity_excess)}' to '{_decimal_to_string(maximum_quantity_excess)}' "
+                f"for dashboard LC Value excess '{_decimal_to_string(value_excess)}'."
+            ],
+        }
+    return {
+        "status": "",
+        "decision_reasons": [
             "Quantity mismatch: dashboard total "
             f"'{_decimal_to_string(quantity_sum)}' did not match ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'"
             + (
@@ -877,10 +1005,7 @@ def _compare_dashboard_snapshot(
                 if aggregate.net_weight is not None
                 else "."
             )
-        )
-    return {
-        "status": "; ".join(mismatch_messages),
-        "decision_reasons": mismatch_messages,
+        ],
     }
 
 
@@ -1356,10 +1481,52 @@ def _normalize_date(value: str) -> str | None:
     return normalize_lc_sc_date(value)
 
 
+def _parse_iso_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _date_is_same_or_after(*, dashboard_date: str | None, erp_date: str | None) -> bool:
     if dashboard_date is None or erp_date is None:
         return False
     return dashboard_date >= erp_date
+
+
+def _date_is_same_or_after_and_within_days(
+    *,
+    dashboard_date: str | None,
+    erp_date: str | None,
+    max_days: int,
+) -> bool:
+    day_delta = _days_between_dates(start_date=erp_date, end_date=dashboard_date)
+    if day_delta is None:
+        return False
+    return 0 <= day_delta <= max_days
+
+
+def _date_is_between_days_after(
+    *,
+    earlier_date: str | None,
+    later_date: str | None,
+    min_days: int,
+    max_days: int,
+) -> bool:
+    day_delta = _days_between_dates(start_date=earlier_date, end_date=later_date)
+    if day_delta is None:
+        return False
+    return min_days <= day_delta <= max_days
+
+
+def _days_between_dates(*, start_date: str | None, end_date: str | None) -> int | None:
+    start = _parse_iso_date(start_date)
+    end = _parse_iso_date(end_date)
+    if start is None or end is None:
+        return None
+    return (end - start).days
 
 
 def _parse_decimal(value: object) -> Decimal | None:
@@ -1395,6 +1562,19 @@ def _decimal_matches(
     tolerance: Decimal = _DEFAULT_DECIMAL_TOLERANCE,
 ) -> bool:
     return abs(left - right) <= tolerance
+
+
+def _decimal_relation(
+    left: Decimal,
+    right: Decimal,
+    *,
+    tolerance: Decimal = _DEFAULT_DECIMAL_TOLERANCE,
+) -> str:
+    if _decimal_matches(left, right, tolerance=tolerance):
+        return "equal"
+    if left > right:
+        return "higher"
+    return "lower"
 
 
 def _decimal_to_string(value: Decimal | None) -> str | None:

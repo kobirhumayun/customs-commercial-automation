@@ -398,24 +398,28 @@ Comparison rules:
 - normalized ERP split buyer name must appear in both `IRC Details` and `ERC Details`
 - buyer containment normalization may adjust case, whitespace, and special characters
 - dashboard `LC Date` must match ERP `LC DT.` by calendar date
-- dashboard `Last Date of Shipment` must match ERP `Ship. DT.` by calendar date
-- dashboard `LC Expiry Date` must match ERP `Expiry DT.` by calendar date
-- dashboard `LC Value` must match aggregated ERP `Current LC Value`
+- dashboard `Last Date of Shipment` must be on or after ERP `Ship. DT.` and no more than `250` days later
+- ERP `Expiry DT.` must be between `5` and `90` days after ERP `Ship. DT.`, inclusive
+- dashboard `LC Expiry Date` must be on or after ERP `Expiry DT.` and between `5` and `90` days after dashboard `Last Date of Shipment`, inclusive
+- dashboard `LC Value` lower than aggregated ERP `Current LC Value` fails immediately
 - workbook `Master L/C No.` may contain one or more line-break-separated values
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
 - foreign-LC comparison normalizes each workbook/dashboard value using trim, whitespace collapse, case-insensitive comparison, and special-character normalization
 - foreign-LC comparison passes when at least one normalized workbook `Master L/C No.` value is common with at least one normalized dashboard `Foreign LC No` value
 - sum all dashboard `Local LC Commodity Detail -> QUANTITY` rows before quantity comparison
-- the summed dashboard quantity matches aggregated ERP `LC Qty` first and falls back to aggregated ERP `Net Weight`
+- if dashboard `LC Value` exactly matches ERP and summed dashboard quantity exactly matches aggregated ERP `LC Qty`, write `OK`
+- if dashboard `LC Value` exceeds ERP by at least `100`, summed dashboard quantity also exceeds ERP `LC Qty`, and quantity excess is between `20%` and `80%` of the value excess inclusive, treat that as compliant and write `OK`
+- if only one of dashboard `LC Value` or summed dashboard quantity is higher while the other remains equal to ERP, fail immediately
+- `OK (KGS)` remains valid only when dashboard `LC Value` exactly matches ERP, summed dashboard quantity fails the ERP `LC Qty` check, and it matches aggregated ERP `Net Weight`
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 
 Result rules:
-- write `OK` when quantity matches ERP `LC Qty` and all other required comparisons pass
-- write `OK (KGS)` when all non-quantity comparisons pass and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
+- write `OK` when all required comparisons pass, including either exact LC value/LC qty agreement or the approved excess rule
+- write `OK (KGS)` when all non-quantity comparisons pass, dashboard `LC Value` exactly matches ERP, and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
 - otherwise write a combined descriptive discrepancy string/message specific to the mismatch set
 - if the dashboard search returns no result, multiple results, or incomplete data, write a clear message specific to that occurrence type
-- when result is `OK` or `OK (KGS)`, also update workbook `Shipment Date` and `Expiry Date` on the filtered rows in that LC family using ERP `Ship. DT.` and `Expiry DT.`
-- ERP is authoritative for those two fields inside this workflow's successful-family path; mismatch/no-data results do not trigger shipment/expiry date writeback
+- the current implementation also stages workbook `Shipment Date` and `Expiry Date` updates on warning/failure families produced after dashboard lookup/comparison; upstream ERP/input hard-block families still skip that date writeback
+- ERP is authoritative for those two fields whenever this workflow stages those writes
 
 Reporting rules:
 - emit JSON and HTML verification reports for the run

@@ -772,6 +772,294 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "OK")
         self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP LC quantity."])
 
+    def test_compare_dashboard_snapshot_accepts_inclusive_minimum_expiry_window(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3b",
+            lc_sc_no="LC-003B",
+            lc_sc_key="LC 003B",
+            row_indexes=[131],
+            sl_no_values=["103B"],
+            master_lc_values=["MLC-003B"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=131,
+                    sl_no="103B",
+                    lc_sc_no="LC-003B",
+                    lc_sc_key="LC 003B",
+                    master_lc_values=["MLC-003B"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003B",
+            lc_sc_key="LC 003B",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="01-Jan-26",
+            ship_date="01-Jan-26",
+            expiry_date="06-Jan-26",
+            current_lc_value=Decimal("45165"),
+            lc_qty=Decimal("17650"),
+            net_weight=Decimal("10361.6"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd.",
+            erc_details="Natural Denims Ltd.",
+            lc_date="01-Jan-2026",
+            last_date_of_shipment="01-Jan-2026",
+            lc_expiry_date="06-Jan-2026",
+            lc_value="45165",
+            foreign_lc_numbers=["MLC-003B"],
+            commodity_quantities=["17650"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+        self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP LC quantity."])
+
+    def test_compare_dashboard_snapshot_accepts_250_day_shipment_offset_and_90_day_expiry_window(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3c",
+            lc_sc_no="LC-003C",
+            lc_sc_key="LC 003C",
+            row_indexes=[132],
+            sl_no_values=["103C"],
+            master_lc_values=["MLC-003C"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=132,
+                    sl_no="103C",
+                    lc_sc_no="LC-003C",
+                    lc_sc_key="LC 003C",
+                    master_lc_values=["MLC-003C"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003C",
+            lc_sc_key="LC 003C",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="01-Jan-26",
+            ship_date="01-Jan-26",
+            expiry_date="01-Apr-26",
+            current_lc_value=Decimal("45165"),
+            lc_qty=Decimal("17650"),
+            net_weight=Decimal("10361.6"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd.",
+            erc_details="Natural Denims Ltd.",
+            lc_date="01-Jan-2026",
+            last_date_of_shipment="08-Sep-2026",
+            lc_expiry_date="07-Dec-2026",
+            lc_value="45165",
+            foreign_lc_numbers=["MLC-003C"],
+            commodity_quantities=["17650"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+        self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP LC quantity."])
+
+    def test_compare_dashboard_snapshot_rejects_shipment_more_than_250_days_later(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3d",
+            lc_sc_no="LC-003D",
+            lc_sc_key="LC 003D",
+            row_indexes=[133],
+            sl_no_values=["103D"],
+            master_lc_values=["MLC-003D"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=133,
+                    sl_no="103D",
+                    lc_sc_no="LC-003D",
+                    lc_sc_key="LC 003D",
+                    master_lc_values=["MLC-003D"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003D",
+            lc_sc_key="LC 003D",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="01-Jan-26",
+            ship_date="01-Jan-26",
+            expiry_date="01-Apr-26",
+            current_lc_value=Decimal("45165"),
+            lc_qty=Decimal("17650"),
+            net_weight=Decimal("10361.6"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd.",
+            erc_details="Natural Denims Ltd.",
+            lc_date="01-Jan-2026",
+            last_date_of_shipment="09-Sep-2026",
+            lc_expiry_date="08-Dec-2026",
+            lc_value="45165",
+            foreign_lc_numbers=["MLC-003D"],
+            commodity_quantities=["17650"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertIn("Last Date of Shipment mismatch", comparison["status"])
+
+    def test_compare_dashboard_snapshot_accepts_approved_excess_rule(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3e",
+            lc_sc_no="LC-003E",
+            lc_sc_key="LC 003E",
+            row_indexes=[134],
+            sl_no_values=["103E"],
+            master_lc_values=["MLC-003E"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=134,
+                    sl_no="103E",
+                    lc_sc_no="LC-003E",
+                    lc_sc_key="LC 003E",
+                    master_lc_values=["MLC-003E"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003E",
+            lc_sc_key="LC 003E",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="01-Jan-26",
+            ship_date="01-Jan-26",
+            expiry_date="01-Apr-26",
+            current_lc_value=Decimal("150"),
+            lc_qty=Decimal("100"),
+            net_weight=Decimal("90"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd.",
+            erc_details="Natural Denims Ltd.",
+            lc_date="01-Jan-2026",
+            last_date_of_shipment="01-Jan-2026",
+            lc_expiry_date="01-Apr-2026",
+            lc_value="250",
+            foreign_lc_numbers=["MLC-003E"],
+            commodity_quantities=["180"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+        self.assertEqual(comparison["decision_reasons"], ["Dashboard LC value and quantity satisfied the approved excess rule."])
+
+    def test_compare_dashboard_snapshot_rejects_single_field_excess(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-3f",
+            lc_sc_no="LC-003F",
+            lc_sc_key="LC 003F",
+            row_indexes=[135],
+            sl_no_values=["103F"],
+            master_lc_values=["MLC-003F"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=135,
+                    sl_no="103F",
+                    lc_sc_no="LC-003F",
+                    lc_sc_key="LC 003F",
+                    master_lc_values=["MLC-003F"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-003F",
+            lc_sc_key="LC 003F",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="01-Jan-26",
+            ship_date="01-Jan-26",
+            expiry_date="01-Apr-26",
+            current_lc_value=Decimal("150"),
+            lc_qty=Decimal("100"),
+            net_weight=Decimal("90"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Ltd.",
+            erc_details="Natural Denims Ltd.",
+            lc_date="01-Jan-2026",
+            last_date_of_shipment="01-Jan-2026",
+            lc_expiry_date="01-Apr-2026",
+            lc_value="150",
+            foreign_lc_numbers=["MLC-003F"],
+            commodity_quantities=["180"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertIn("single-field excess is not allowed", " ".join(comparison["decision_reasons"]))
+
     def test_compare_dashboard_snapshot_accepts_net_weight_with_point_eight_tolerance(self) -> None:
         family = DashboardCandidateFamily(
             family_id="mail-4",

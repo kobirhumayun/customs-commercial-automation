@@ -854,15 +854,19 @@ Rows where:
   - `Beneficiary's Name` equals `PIONEER DENIM LIMITED` after normalization
   - normalized ERP split buyer name exists in both `IRC Details` and `ERC Details`
   - dashboard `LC Date` matches ERP `LC DT.` by calendar date
-  - dashboard `Last Date of Shipment` matches ERP `Ship. DT.` by calendar date
-  - dashboard `LC Expiry Date` matches ERP `Expiry DT.` by calendar date
-  - dashboard `LC Value` matches aggregated ERP `Current LC Value`
+  - dashboard `Last Date of Shipment` is the same as or after ERP `Ship. DT.` and no more than `250` days later
+  - ERP `Expiry DT.` is between `5` and `90` days after ERP `Ship. DT.`, inclusive
+  - dashboard `LC Expiry Date` is the same as or after ERP `Expiry DT.` and also between `5` and `90` days after the dashboard `Last Date of Shipment`, inclusive
+  - dashboard `LC Value` is not lower than aggregated ERP `Current LC Value`
   - at least one normalized `Related Foreign LC/Contract Information -> Foreign LC No` value is common with the normalized workbook `Master L/C No.` value list
-  - the sum of all dashboard `Local LC Commodity Detail -> QUANTITY` rows matches aggregated ERP `LC Qty`
+  - value/quantity compliance satisfies one of:
+    - dashboard `LC Value` exactly matches ERP `Current LC Value` and the summed dashboard quantity exactly matches aggregated ERP `LC Qty`
+    - dashboard `LC Value` exceeds ERP by at least `100`, dashboard quantity also exceeds ERP `LC Qty`, and dashboard quantity excess is between `20%` and `80%` of the dashboard value excess, inclusive
 - workbook `Master L/C No.` may contain one or more line-break-separated values
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
 - foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing
-- `OK (KGS)` when all non-quantity checks above pass and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
+- `OK (KGS)` when all non-quantity checks above pass, dashboard `LC Value` exactly matches ERP `Current LC Value`, and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
+- if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 - buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
 - otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
@@ -878,6 +882,7 @@ Rows where:
 - The HTML report must open automatically at the end of the run, regardless of whether families matched or failed.
 - Report rows are family-oriented: one report row per LC family with grouped workbook `SL.No.` values for the filtered rows receiving the family result.
 - Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family.
+- The current implementation also stages ERP `Ship. DT.` and `Expiry DT.` writeback on dashboard warning/failure families produced after lookup/comparison, not just on `OK` / `OK (KGS)` families; upstream ERP/input hard-block families still skip that date writeback.
 
 ## Printing
 - only newly saved PDFs are printed
