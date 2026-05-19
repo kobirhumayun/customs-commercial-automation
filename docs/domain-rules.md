@@ -382,7 +382,10 @@ Candidate-row and family rules:
 - `Bangladesh Bank Dashboard` must be blank or contain a value other than `OK` or `OK (KGS)`
 - LC-family deduping is by workbook `L/C & S/C No.` only
 - verification is performed once per LC family and the resulting value is written only to the filtered rows in that family
-- only successful LC families also receive ERP-to-workbook date writeback on those same filtered rows:
+- ERP-to-workbook date writeback is staged on those same filtered rows for:
+  - successful LC families with final dashboard status `OK` or `OK (KGS)`
+  - warning/failure families produced after dashboard lookup/comparison
+- ERP-to-workbook date writeback is not staged for upstream ERP/input hard-block families
   - workbook `Shipment Date` <- ERP `Ship. DT.`
   - workbook `Expiry Date` <- ERP `Expiry DT.`
 - successful LC family means final dashboard status is `OK` or `OK (KGS)`
@@ -430,7 +433,7 @@ Reporting rules:
 - emit JSON and HTML verification reports for the run
 - one report row represents one LC family with grouped workbook `SL.No.` values
 - each report row should include compared workbook, ERP, and dashboard values plus the final workbook status written
-- for successful families, each report row should also show the ERP shipment/expiry dates written back to workbook `Shipment Date` and `Expiry Date`
+- for families where this workflow stages date writeback, each report row should also show the ERP shipment/expiry dates written back to workbook `Shipment Date` and `Expiry Date`
 - the HTML report should automatically open at the end of the run
 
 The dashboard column is verification-only and should not be used to drive other writes in phase 1.
