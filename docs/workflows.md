@@ -867,6 +867,7 @@ Rows where:
 - workbook `Master L/C No.` may contain one or more line-break-separated values
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
 - foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing
+- within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - `OK (KGS)` when all non-quantity checks above pass, dashboard `LC Value` exactly matches ERP `Current LC Value`, and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
 - if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`

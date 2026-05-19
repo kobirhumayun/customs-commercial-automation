@@ -771,6 +771,63 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(comparison["status"], "OK")
 
+    def test_compare_dashboard_snapshot_accepts_and_and_ampersand_as_equivalent_in_foreign_lc_numbers(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-2aa",
+            lc_sc_no="LC-002AA",
+            lc_sc_key="LC 002AA",
+            row_indexes=[1211],
+            sl_no_values=["102AA"],
+            master_lc_values=["SDL-H AND M-2026-05"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=1211,
+                    sl_no="102AA",
+                    lc_sc_no="LC-002AA",
+                    lc_sc_key="LC 002AA",
+                    master_lc_values=["SDL-H AND M-2026-05"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-002AA",
+            lc_sc_key="LC 002AA",
+            buyer_name="VINTAGE DENIM APPARELS LIMITED",
+            lc_date="22-Apr-26",
+            ship_date="15-Jun-26",
+            expiry_date="30-Jun-26",
+            current_lc_value=Decimal("98315.5"),
+            lc_qty=Decimal("33170"),
+            net_weight=Decimal("21054.11"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Vintage Denim Apparels Ltd., Block-B, Tongi I/A, Gazipur",
+            erc_details="Vintage Denim Apparels Ltd., Plot-10, Block-B, Gazipur",
+            lc_date="22-Apr-2026",
+            last_date_of_shipment="15-Jun-2026",
+            lc_expiry_date="30-Jun-2026",
+            lc_value="98315.5",
+            foreign_lc_numbers=["SDL-H&M-2026-05"],
+            commodity_quantities=["33170"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+
     def test_compare_dashboard_snapshot_accepts_when_irc_passes_and_erc_is_empty(self) -> None:
         family = DashboardCandidateFamily(
             family_id="mail-2b",

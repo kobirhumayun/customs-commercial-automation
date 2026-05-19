@@ -409,6 +409,7 @@ Comparison rules:
 - workbook `Master L/C No.` may contain one or more line-break-separated values
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
 - foreign-LC comparison normalizes each workbook/dashboard value using trim, whitespace collapse, case-insensitive comparison, and special-character normalization
+- within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - foreign-LC comparison passes when at least one normalized workbook `Master L/C No.` value is common with at least one normalized dashboard `Foreign LC No` value
 - sum all dashboard `Local LC Commodity Detail -> QUANTITY` rows before quantity comparison
 - if dashboard `LC Value` exactly matches ERP and summed dashboard quantity exactly matches aggregated ERP `LC Qty`, write `OK`

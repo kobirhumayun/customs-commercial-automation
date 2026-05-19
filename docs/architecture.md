@@ -271,7 +271,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Opens a fresh dashboard tab for each LC-family fetch and closes that tab after data capture so search fields are cleared between lookups.
 - Uses ERP `Ship. Remarks` as the primary dashboard search key when available; otherwise uses workbook `L/C & S/C No.`.
 - For each search key path, retries once with `0` inserted immediately before the last 4 characters of the normalized key if the initial fetch returns no data.
-- Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides.
+- Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides, with `and` and `&` treated as equivalent anywhere in those values.
 - Sums all dashboard `Local LC Commodity Detail -> QUANTITY` rows before comparing against aggregated ERP `LC Qty` and, if needed, aggregated ERP `Net Weight`.
 - Validates dashboard shipment/expiry timing using the approved BB windows: shipment must be on/after ERP shipment and within `250` days, and expiry must be on/after ERP expiry plus between `5` and `90` days after shipment.
 - Applies the approved dashboard excess rule only when `LC Value` and `LC Qty` are both higher than ERP, dashboard `LC Value` excess is at least `100`, and dashboard quantity excess is between `20%` and `80%` of that value excess.

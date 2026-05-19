@@ -865,14 +865,14 @@ def _compare_dashboard_snapshot(
         mismatch_messages.append(f"LC Value could not be parsed from dashboard value '{snapshot.lc_value}'.")
 
     workbook_master_values = {
-        _normalize_special_text(value)
+        _normalize_foreign_lc_reference(value)
         for value in family.master_lc_values
-        if _normalize_special_text(value)
+        if _normalize_foreign_lc_reference(value)
     }
     dashboard_foreign_values = {
-        _normalize_special_text(value)
+        _normalize_foreign_lc_reference(value)
         for value in snapshot.foreign_lc_numbers
-        if _normalize_special_text(value)
+        if _normalize_foreign_lc_reference(value)
     }
     if not workbook_master_values or not dashboard_foreign_values or workbook_master_values.isdisjoint(dashboard_foreign_values):
         mismatch_messages.append("Related Foreign LC/Contract Information did not overlap workbook Master L/C No. values.")
@@ -1476,6 +1476,14 @@ def _normalize_special_text(value: str) -> str:
     normalized = normalized.replace("-", " ")
     normalized = _SPECIAL_RE.sub(" ", normalized)
     return _WHITESPACE_RE.sub(" ", normalized).strip()
+
+
+def _normalize_foreign_lc_reference(value: str) -> str:
+    normalized = _normalize_special_text(value)
+    if not normalized:
+        return ""
+    tokens = [token for token in normalized.split() if token != "AND"]
+    return " ".join(tokens)
 
 
 def _normalize_buyer_comparison_text(value: str) -> str:
