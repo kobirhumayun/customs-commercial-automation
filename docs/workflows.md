@@ -852,7 +852,9 @@ Rows where:
 ### Verification result values
 - `OK` when:
   - `Beneficiary's Name` equals `PIONEER DENIM LIMITED` after normalization
-  - normalized ERP split buyer name exists in both `IRC Details` and `ERC Details`
+  - ERP buyer-name verification satisfies one of:
+    - both `IRC Details` and `ERC Details` are populated and both contain the normalized ERP split buyer name
+    - exactly one of `IRC Details` or `ERC Details` is populated and that populated section contains the normalized ERP split buyer name
   - dashboard `LC Date` matches ERP `LC DT.` by calendar date
   - dashboard `Last Date of Shipment` is the same as or after ERP `Ship. DT.` and no more than `250` days later
   - ERP `Expiry DT.` is between `5` and `90` days after ERP `Ship. DT.`, inclusive
@@ -869,6 +871,9 @@ Rows where:
 - if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 - buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
+- within those buyer checks, `ltd` and `limited` are interchangeable equivalents regardless of word position
+- if both `IRC Details` and `ERC Details` contain data, one passing and the other failing rejects the family
+- if both `IRC Details` and `ERC Details` are empty, buyer verification fails
 - otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
 
 ### No-data result handling

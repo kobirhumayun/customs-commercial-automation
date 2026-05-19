@@ -714,6 +714,240 @@ class BBDashboardVerificationTests(unittest.TestCase):
             ],
         )
 
+    def test_compare_dashboard_snapshot_accepts_ltd_and_limited_as_equivalent(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-2a",
+            lc_sc_no="LC-002A",
+            lc_sc_key="LC 002A",
+            row_indexes=[121],
+            sl_no_values=["102A"],
+            master_lc_values=["MLC-002A"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=121,
+                    sl_no="102A",
+                    lc_sc_no="LC-002A",
+                    lc_sc_key="LC 002A",
+                    master_lc_values=["MLC-002A"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-002A",
+            lc_sc_key="LC 002A",
+            buyer_name="VINTAGE DENIM APPARELS LIMITED",
+            lc_date="22-Apr-26",
+            ship_date="15-Jun-26",
+            expiry_date="30-Jun-26",
+            current_lc_value=Decimal("98315.5"),
+            lc_qty=Decimal("33170"),
+            net_weight=Decimal("21054.11"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Vintage Denim Apparels Ltd., Block-B, Tongi I/A, Gazipur",
+            erc_details="Vintage Denim Apparels Ltd., Plot-10, Block-B, Gazipur",
+            lc_date="22-Apr-2026",
+            last_date_of_shipment="15-Jun-2026",
+            lc_expiry_date="30-Jun-2026",
+            lc_value="98315.5",
+            foreign_lc_numbers=["MLC-002A"],
+            commodity_quantities=["33170"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+
+    def test_compare_dashboard_snapshot_accepts_when_irc_passes_and_erc_is_empty(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-2b",
+            lc_sc_no="LC-002B",
+            lc_sc_key="LC 002B",
+            row_indexes=[122],
+            sl_no_values=["102B"],
+            master_lc_values=["MLC-002B"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=122,
+                    sl_no="102B",
+                    lc_sc_no="LC-002B",
+                    lc_sc_key="LC 002B",
+                    master_lc_values=["MLC-002B"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-002B",
+            lc_sc_key="LC 002B",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="22-Apr-26",
+            ship_date="15-Jun-26",
+            expiry_date="30-Jun-26",
+            current_lc_value=Decimal("98315.5"),
+            lc_qty=Decimal("33170"),
+            net_weight=Decimal("21054.11"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Limited, Plot#532, Tonga Bari, Ashulia",
+            erc_details="",
+            lc_date="22-Apr-2026",
+            last_date_of_shipment="15-Jun-2026",
+            lc_expiry_date="30-Jun-2026",
+            lc_value="98315.5",
+            foreign_lc_numbers=["MLC-002B"],
+            commodity_quantities=["33170"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK")
+
+    def test_compare_dashboard_snapshot_rejects_when_one_populated_section_passes_and_other_fails(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-2c",
+            lc_sc_no="LC-002C",
+            lc_sc_key="LC 002C",
+            row_indexes=[123],
+            sl_no_values=["102C"],
+            master_lc_values=["MLC-002C"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=123,
+                    sl_no="102C",
+                    lc_sc_no="LC-002C",
+                    lc_sc_key="LC 002C",
+                    master_lc_values=["MLC-002C"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-002C",
+            lc_sc_key="LC 002C",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="22-Apr-26",
+            ship_date="15-Jun-26",
+            expiry_date="30-Jun-26",
+            current_lc_value=Decimal("98315.5"),
+            lc_qty=Decimal("33170"),
+            net_weight=Decimal("21054.11"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="Natural Denims Limited, Plot#532, Tonga Bari, Ashulia",
+            erc_details="Different Buyer Name, Gazipur",
+            lc_date="22-Apr-2026",
+            last_date_of_shipment="15-Jun-2026",
+            lc_expiry_date="30-Jun-2026",
+            lc_value="98315.5",
+            foreign_lc_numbers=["MLC-002C"],
+            commodity_quantities=["33170"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(
+            comparison["decision_reasons"],
+            ["ERC Details did not contain the ERP buyer name."],
+        )
+
+    def test_compare_dashboard_snapshot_rejects_when_both_buyer_sections_are_empty(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-2d",
+            lc_sc_no="LC-002D",
+            lc_sc_key="LC 002D",
+            row_indexes=[124],
+            sl_no_values=["102D"],
+            master_lc_values=["MLC-002D"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=124,
+                    sl_no="102D",
+                    lc_sc_no="LC-002D",
+                    lc_sc_key="LC 002D",
+                    master_lc_values=["MLC-002D"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="LC-002D",
+            lc_sc_key="LC 002D",
+            buyer_name="NATURAL DENIMS LTD",
+            lc_date="22-Apr-26",
+            ship_date="15-Jun-26",
+            expiry_date="30-Jun-26",
+            current_lc_value=Decimal("98315.5"),
+            lc_qty=Decimal("33170"),
+            net_weight=Decimal("21054.11"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="",
+            erc_details="",
+            lc_date="22-Apr-2026",
+            last_date_of_shipment="15-Jun-2026",
+            lc_expiry_date="30-Jun-2026",
+            lc_value="98315.5",
+            foreign_lc_numbers=["MLC-002D"],
+            commodity_quantities=["33170"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(
+            comparison["decision_reasons"],
+            ["Both IRC Details and ERC Details were empty, so the ERP buyer name could not be verified."],
+        )
+
     def test_compare_dashboard_snapshot_accepts_later_dashboard_shipment_and_expiry_dates(self) -> None:
         family = DashboardCandidateFamily(
             family_id="mail-3",

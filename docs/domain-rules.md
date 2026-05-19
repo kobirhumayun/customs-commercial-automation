@@ -395,8 +395,12 @@ Dashboard fetch rules:
 
 Comparison rules:
 - `Beneficiary's Name` must equal `PIONEER DENIM LIMITED` after normalization
-- normalized ERP split buyer name must appear in both `IRC Details` and `ERC Details`
+- ERP buyer-name verification passes when both `IRC Details` and `ERC Details` are populated and both contain the normalized ERP split buyer name
+- ERP buyer-name verification also passes when exactly one of `IRC Details` or `ERC Details` is populated and that populated section contains the normalized ERP split buyer name
+- if both `IRC Details` and `ERC Details` are populated, one passing and one failing rejects the family
+- if both `IRC Details` and `ERC Details` are empty, buyer verification fails
 - buyer containment normalization may adjust case, whitespace, and special characters
+- within buyer containment normalization, `ltd` and `limited` are interchangeable equivalents regardless of position
 - dashboard `LC Date` must match ERP `LC DT.` by calendar date
 - dashboard `Last Date of Shipment` must be on or after ERP `Ship. DT.` and no more than `250` days later
 - ERP `Expiry DT.` must be between `5` and `90` days after ERP `Ship. DT.`, inclusive

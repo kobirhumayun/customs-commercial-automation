@@ -40,6 +40,7 @@ _FIRST_LINE_PREFIXES = ("EXP", "IP")
 _PIONEER_BENEFICIARY = "PIONEER DENIM LIMITED"
 _WHITESPACE_RE = re.compile(r"\s+")
 _SPECIAL_RE = re.compile(r"[^A-Z0-9]+")
+_LTD_OR_LIMITED_RE = re.compile(r"\b(?:LTD|LIMITED)\b")
 _DATE_NUMBER_FORMAT = "dd/mm/yyyy"
 _DEFAULT_DECIMAL_TOLERANCE = Decimal("0.01")
 _NET_WEIGHT_TOLERANCE = Decimal("0.8")
@@ -802,11 +803,13 @@ def _compare_dashboard_snapshot(
             f"Beneficiary mismatch: dashboard '{snapshot.beneficiary_name}' != '{_PIONEER_BENEFICIARY}'."
         )
 
-    normalized_buyer = _normalize_special_text(aggregate.buyer_name)
-    if normalized_buyer not in _normalize_special_text(snapshot.irc_details):
-        mismatch_messages.append("IRC Details did not contain the ERP buyer name.")
-    if normalized_buyer not in _normalize_special_text(snapshot.erc_details):
-        mismatch_messages.append("ERC Details did not contain the ERP buyer name.")
+    mismatch_messages.extend(
+        _compare_buyer_details(
+            buyer_name=aggregate.buyer_name,
+            irc_details=snapshot.irc_details,
+            erc_details=snapshot.erc_details,
+        )
+    )
 
     normalized_snapshot_lc_date = _normalize_date(snapshot.lc_date)
     normalized_snapshot_ship_date = _normalize_date(snapshot.last_date_of_shipment)
@@ -1473,6 +1476,44 @@ def _normalize_special_text(value: str) -> str:
     normalized = normalized.replace("-", " ")
     normalized = _SPECIAL_RE.sub(" ", normalized)
     return _WHITESPACE_RE.sub(" ", normalized).strip()
+
+
+def _normalize_buyer_comparison_text(value: str) -> str:
+    normalized = _normalize_special_text(value)
+    if not normalized:
+        return ""
+    normalized = _LTD_OR_LIMITED_RE.sub("LTD", normalized)
+    return _WHITESPACE_RE.sub(" ", normalized).strip()
+
+
+def _compare_buyer_details(
+    *,
+    buyer_name: str,
+    irc_details: str,
+    erc_details: str,
+) -> list[str]:
+    normalized_buyer = _normalize_buyer_comparison_text(buyer_name)
+    normalized_irc = _normalize_buyer_comparison_text(irc_details)
+    normalized_erc = _normalize_buyer_comparison_text(erc_details)
+
+    irc_has_data = bool(normalized_irc)
+    erc_has_data = bool(normalized_erc)
+    irc_matches = irc_has_data and normalized_buyer in normalized_irc
+    erc_matches = erc_has_data and normalized_buyer in normalized_erc
+
+    if irc_has_data and erc_has_data:
+        messages: list[str] = []
+        if not irc_matches:
+            messages.append("IRC Details did not contain the ERP buyer name.")
+        if not erc_matches:
+            messages.append("ERC Details did not contain the ERP buyer name.")
+        return messages
+
+    if irc_has_data:
+        return [] if irc_matches else ["IRC Details did not contain the ERP buyer name."]
+    if erc_has_data:
+        return [] if erc_matches else ["ERC Details did not contain the ERP buyer name."]
+    return ["Both IRC Details and ERC Details were empty, so the ERP buyer name could not be verified."]
 
 
 def _normalize_date(value: str) -> str | None:
