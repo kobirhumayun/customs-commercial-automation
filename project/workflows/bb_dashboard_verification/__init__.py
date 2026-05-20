@@ -926,22 +926,22 @@ def _compare_value_and_quantity(
     value_relation = _decimal_relation(dashboard_lc_value, aggregate.current_lc_value)
     quantity_relation = _decimal_relation(quantity_sum, aggregate.lc_qty)
 
+    lower_reasons: list[str] = []
     if value_relation == "lower":
-        return {
-            "status": "",
-            "decision_reasons": [
-                "LC Value mismatch: dashboard "
-                f"'{_decimal_to_string(dashboard_lc_value)}' was lower than ERP "
-                f"'{_decimal_to_string(aggregate.current_lc_value)}'."
-            ],
-        }
+        lower_reasons.append(
+            "LC Value mismatch: dashboard "
+            f"'{_decimal_to_string(dashboard_lc_value)}' was lower than ERP "
+            f"'{_decimal_to_string(aggregate.current_lc_value)}'."
+        )
     if quantity_relation == "lower":
+        lower_reasons.append(
+            "Quantity mismatch: dashboard total "
+            f"'{_decimal_to_string(quantity_sum)}' was lower than ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'."
+        )
+    if lower_reasons:
         return {
             "status": "",
-            "decision_reasons": [
-                "Quantity mismatch: dashboard total "
-                f"'{_decimal_to_string(quantity_sum)}' was lower than ERP LC Qty '{_decimal_to_string(aggregate.lc_qty)}'."
-            ],
+            "decision_reasons": lower_reasons,
         }
     if value_relation == "higher" and quantity_relation == "equal":
         return {
