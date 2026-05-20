@@ -3949,10 +3949,10 @@ def _load_dashboard_provider(
         login_url=str(
             config.values.get(
                 "bb_dashboard_login_url",
-                "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::",
+                "https://exp.bb.org.bd/ords/oims/r/import/75",
             )
         ).strip()
-        or "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::",
+        or "https://exp.bb.org.bd/ords/oims/r/import/75",
         username=str(config.values.get("bb_dashboard_username", "")).strip() or None,
         password=str(config.values.get("bb_dashboard_password", "")).strip() or None,
         username_selector=str(config.values.get("bb_dashboard_username_selector", "")).strip() or None,

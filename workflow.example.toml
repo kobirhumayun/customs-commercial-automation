@@ -36,7 +36,7 @@ playwright_browser_channel = "msedge"
 # The workflow also supports deterministic fixtures through:
 #   validate-run bb_dashboard_verification --dashboard-json <manifest.json>
 #
-# bb_dashboard_login_url = "https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::"
+# bb_dashboard_login_url = "https://exp.bb.org.bd/ords/oims/r/import/75"
 # bb_dashboard_username = "REPLACE_WITH_USERNAME"
 # bb_dashboard_password = "REPLACE_WITH_PASSWORD"
 # bb_dashboard_username_selector = "#P101_USERNAME"

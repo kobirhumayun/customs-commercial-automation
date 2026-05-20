@@ -834,7 +834,7 @@ Rows where:
   - `Ship. Remarks` exactly as exported
 
 ### Dashboard fetch contract
-- Login starts at `https://exp.bb.org.bd/ords/f?p=116:75:865402687518::NO:::` using configured credentials.
+- Login starts at `https://exp.bb.org.bd/ords/oims/r/import/75` using configured credentials.
 - After successful login, the workflow must capture the redirected authenticated URL.
 - Each LC-family fetch must open a fresh browser tab from that redirected authenticated URL and close the tab after the fetch completes.
 - The workflow must not reuse the same active dashboard tab for multiple family lookups because uncleared fields may produce incorrect results.
