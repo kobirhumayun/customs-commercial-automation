@@ -60,8 +60,8 @@ class ERPProviderTests(unittest.TestCase):
                     self.page.fills.append((self.selector, value))
                     self.value = value
 
-                def click(self) -> None:
-                    self.page.clicks.append(self.selector)
+                def click(self, **kwargs) -> None:
+                    self.page.clicks.append((self.selector, kwargs))
 
                 def wait_for(self, state: str, timeout: int) -> None:
                     self.page.waits.append((self.selector, state, timeout))
@@ -73,7 +73,7 @@ class ERPProviderTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.url = "https://erp.local/final"
                     self.fills: list[tuple[str, str]] = []
-                    self.clicks: list[str] = []
+                    self.clicks: list[tuple[str, dict[str, object]]] = []
                     self.waits: list[tuple[str, str, int]] = []
                     self.locators: dict[str, FakeLocator] = {}
 
@@ -162,6 +162,159 @@ class ERPProviderTests(unittest.TestCase):
             self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
             self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
             self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
+
+    def test_inspect_playwright_report_download_retries_force_click_when_pointer_events_intercept(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "erp-debug"
+            captured_pages: list[object] = []
+
+            class FakeDownload:
+                suggested_filename = "report.csv"
+
+                def save_as(self, path: str) -> None:
+                    Path(path).write_text("downloaded", encoding="utf-8")
+
+            class FakeDownloadContext:
+                def __init__(self) -> None:
+                    self.value = FakeDownload()
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            class FakeLocator:
+                def __init__(self, page, selector: str) -> None:
+                    self.page = page
+                    self.selector = selector
+                    self.value = None
+                    self.click_attempts = 0
+
+                @property
+                def first(self):
+                    return self
+
+                def count(self) -> int:
+                    return 1
+
+                def fill(self, value: str) -> None:
+                    self.page.fills.append((self.selector, value))
+                    self.value = value
+
+                def click(self, **kwargs) -> None:
+                    self.click_attempts += 1
+                    self.page.clicks.append((self.selector, kwargs))
+                    if (
+                        self.selector == "#downloadDropdown"
+                        and self.click_attempts == 1
+                        and not kwargs.get("force", False)
+                    ):
+                        raise Exception("Locator.click: element intercepts pointer events")
+
+                def wait_for(self, state: str, timeout: int) -> None:
+                    self.page.waits.append((self.selector, state, timeout))
+
+                def input_value(self) -> str:
+                    return self.value or ""
+
+            class FakePage:
+                def __init__(self) -> None:
+                    self.url = "https://erp.local/final"
+                    self.fills: list[tuple[str, str]] = []
+                    self.clicks: list[tuple[str, dict[str, object]]] = []
+                    self.waits: list[tuple[str, str, int]] = []
+                    self.locators: dict[str, FakeLocator] = {}
+
+                def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                    self.goto_call = (url, wait_until, timeout)
+
+                def wait_for_load_state(self, state: str, timeout: int) -> None:
+                    self.load_state_call = (state, timeout)
+
+                def locator(self, selector: str):
+                    if selector not in self.locators:
+                        self.locators[selector] = FakeLocator(self, selector)
+                    return self.locators[selector]
+
+                def expect_download(self, timeout: int):
+                    self.download_timeout = timeout
+                    return FakeDownloadContext()
+
+                def title(self) -> str:
+                    return "ERP Report"
+
+                def content(self) -> str:
+                    return "<html>report</html>"
+
+                def screenshot(self, path: str, full_page: bool) -> None:
+                    Path(path).write_bytes(b"png")
+
+            class FakeContext:
+                def __init__(self) -> None:
+                    self.page = FakePage()
+                    captured_pages.append(self.page)
+
+                def new_page(self):
+                    return self.page
+
+                def close(self) -> None:
+                    return None
+
+            class FakeBrowser:
+                def new_context(self, **_kwargs):
+                    return FakeContext()
+
+                def close(self) -> None:
+                    return None
+
+            class FakeChromium:
+                def launch(self, **_kwargs):
+                    return FakeBrowser()
+
+            class FakePlaywright:
+                chromium = FakeChromium()
+
+            class FakeSyncPlaywright:
+                def __call__(self):
+                    return self
+
+                def __enter__(self):
+                    return FakePlaywright()
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            with patch("project.erp.providers._load_playwright_sync_api", return_value=FakeSyncPlaywright()):
+                payload = inspect_playwright_report_download(
+                    base_url="https://erp.local",
+                    report_relative_url="/report",
+                    browser_channel="msedge",
+                    storage_state_path=None,
+                    timeout_ms=30_000,
+                    headless=False,
+                    output_dir=output_dir,
+                    field_values=[("#fromDate", "2026-03-01"), ("#toDate", "2026-03-31")],
+                    submit_selector="#show",
+                    post_submit_wait_selector="#downloadDropdown",
+                    download_menu_selector="#downloadDropdown",
+                    download_format_selector="text=CSV",
+                )
+
+            self.assertEqual(payload["status"], "ready")
+            self.assertEqual(len(captured_pages), 1)
+            download_dropdown_clicks = [
+                kwargs
+                for selector, kwargs in captured_pages[0].clicks
+                if selector == "#downloadDropdown"
+            ]
+            self.assertEqual(
+                download_dropdown_clicks,
+                [
+                    {"timeout": 30000},
+                    {"timeout": 30000, "force": True},
+                ],
+            )
 
     def test_playwright_provider_defaults_to_live_documents_report_path(self) -> None:
         tables = [

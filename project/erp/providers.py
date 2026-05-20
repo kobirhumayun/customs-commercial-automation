@@ -243,7 +243,7 @@ def inspect_playwright_report_download(
             for selector, value in field_values:
                 locator = page.locator(selector)
                 locator.wait_for(state="visible", timeout=timeout_ms)
-                locator.click()
+                _click_locator(locator, timeout_ms=timeout_ms)
                 locator.fill(value)
                 try:
                     locator.press("Tab")
@@ -252,7 +252,7 @@ def inspect_playwright_report_download(
             payload["field_readbacks"] = _collect_field_readbacks(page, field_values)
 
             if submit_selector:
-                page.locator(submit_selector).click()
+                _click_locator(page.locator(submit_selector), timeout_ms=timeout_ms)
                 if post_submit_wait_selector:
                     page.locator(post_submit_wait_selector).wait_for(
                         state="visible",
@@ -262,11 +262,11 @@ def inspect_playwright_report_download(
                     _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
 
             if download_menu_selector:
-                page.locator(download_menu_selector).click()
+                _click_locator(page.locator(download_menu_selector), timeout_ms=timeout_ms)
 
             if download_format_selector:
                 with page.expect_download(timeout=timeout_ms) as download_info:
-                    page.locator(download_format_selector).click()
+                    _click_locator(page.locator(download_format_selector), timeout_ms=timeout_ms)
                 download = download_info.value
                 suggested_filename = _sanitize_download_filename(download.suggested_filename)
                 downloaded_path = output_dir / suggested_filename
@@ -305,6 +305,28 @@ def inspect_playwright_report_download(
                 browser.close()
             except Exception:
                 pass
+
+
+def _click_locator(locator, *, timeout_ms: int) -> None:
+    target = getattr(locator, "first", locator)
+    try:
+        target.click(timeout=timeout_ms)
+        return
+    except TypeError:
+        target.click()
+        return
+    except Exception as exc:
+        if not _click_error_supports_force_retry(exc):
+            raise
+    try:
+        target.click(timeout=timeout_ms, force=True)
+    except TypeError:
+        target.click()
+
+
+def _click_error_supports_force_retry(error: Exception) -> bool:
+    normalized = str(error).casefold()
+    return "intercepts pointer events" in normalized or "element click intercepted" in normalized
 
 
 def _index_rows(*, file_numbers: list[str], rows: list[ERPRegisterRow]) -> dict[str, list[ERPRegisterRow]]:
