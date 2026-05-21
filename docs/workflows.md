@@ -628,7 +628,7 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - structured Base UD PDFs are identified by `UD Authenticating Authority` on page 1; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority` on page 1
 - structured UD/AM number/date extraction must locate the page-1 office-use-only row strictly by label: Base UD uses `UD No (For office use only)` and UD Amendment uses `Amendment no. (For office use only)`; `For office use only` is mandatory, no alternate row-label fallback is allowed, and both the UD/AM number and document date must come from that same matched row
 - if the extracted office-use-only UD/AM number does not align with the BGMEA `BGMEA/<office>/<UD-or-AM>/...` pattern, the mail must hard-block; attachment filenames are not fallback workbook values
-- structured UD LC/SC table extraction must match rows by exact ERP `Ship. Remarks` when present/found, otherwise ERP `LC No.`; ERP `LC No.` matching is exact first and may fall back only to stripping leading zeros from the left side of the ERP/table LC strings; leading/trailing spaces around compared values may be trimmed, but internal spaces and all other characters must remain unchanged; ERP values are sourced from the email-body file number lookup
+- structured UD LC/SC table extraction must match rows by ERP `Ship. Remarks` when present/found, otherwise ERP `LC No.`; both ERP `Ship. Remarks` and ERP `LC No.` matching are exact first and may fall back only to stripping leading zeros from the left side of the ERP/table identifier strings; leading/trailing spaces around compared values may be trimmed, but internal spaces and all other characters must remain unchanged; ERP values are sourced from the email-body file number lookup
 - for structured UD Amendments only, the extracted LC value comes from the `Increased/Decreased` column unless that value is numeric zero; when it is zero, use the row's `Value` column because the LC is being included in the amendment for the first time
 - the extracted UD LC/SC table date must match the ERP LC/SC date before workbook writes are allowed
 - the extracted UD LC/SC table value is mandatory and drives target workbook row selection before quantity validation
@@ -810,13 +810,87 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Candidate filters
 Rows where:
 - `UP No.` is blank
-- UD value exists
-- dashboard field is blank, not `OK`, or not `OK (Kgs)`
+- `UD No. & IP No.` is non-blank
+- only the first non-empty line of `UD No. & IP No.` is considered for eligibility
+- rows are excluded when that first non-empty line begins with `EXP`
+- rows are excluded when that first non-empty line begins with `IP`
+- `Bangladesh Bank Dashboard` is blank or contains a value other than `OK` or `OK (KGS)`
+
+### Family deduping and write scope
+- Candidate deduping is by workbook `L/C & S/C No.` only.
+- Dashboard fetch/comparison is performed once per deduped LC family.
+- The final family result is written back only to the filtered rows in that family.
+- Rows in the same LC family that were not eligible under the candidate filter are not rewritten by this workflow.
+
+### Source-of-truth inputs
+- Workbook provides:
+  - `L/C & S/C No.`
+  - `Master L/C No.`
+  - grouped `SL.No.` values for reporting
+- ERP provides:
+  - buyer name using the same buyer split logic as `export_lc_sc`
+  - aggregated `Current LC Value`, `LC Qty`, and `Net Weight` across the LC family
+  - parsed `LC DT.`, `Ship. DT.`, and `Expiry DT.`
+  - `Ship. Remarks` exactly as exported
+
+### Dashboard fetch contract
+- Login starts at `https://exp.bb.org.bd/ords/oims/r/import/75` using configured credentials.
+- After successful login, the workflow must capture the redirected authenticated URL and establish one authenticated dashboard page for the run.
+- Each LC-family fetch must begin only after the workflow deterministically resets that authenticated page back to the fresh dashboard search state and confirms the search input is visible.
+- The workflow may reuse the authenticated page across family lookups only through that reset flow; submitting a new lookup on a dirty page is forbidden because uncleared fields may produce incorrect results.
+- Search uses the dashboard `Search Local LC` field plus the `Search` button.
+- Search key normalization before submission is limited to trim + whitespace collapse.
+- If ERP `Ship. Remarks` is available, search order is:
+  1. normalized `Ship. Remarks`
+  2. zero-inserted normalized `Ship. Remarks`
+  3. stop; do not fall back to workbook LC when `Ship. Remarks` originally existed
+- If ERP `Ship. Remarks` is blank/unavailable, search order is:
+  1. normalized workbook `L/C & S/C No.`
+  2. zero-inserted normalized workbook `L/C & S/C No.`
+- Zero insertion means inserting `0` immediately before the last 4 characters of the normalized search key.
 
 ### Verification result values
-- `OK` when quantity matches LC Qty and remaining fields are consistent
-- `OK (Kgs)` when quantity mismatches LC Qty but matches Net Weight and remaining fields are consistent
-- otherwise write a combined descriptive discrepancy string into `Bangladesh Bank Dashboard`
+- `OK` when:
+  - `Beneficiary's Name` equals `PIONEER DENIM LIMITED` after normalization
+  - ERP buyer-name verification satisfies one of:
+    - both `IRC Details` and `ERC Details` are populated and both contain the normalized ERP split buyer name
+    - exactly one of `IRC Details` or `ERC Details` is populated and that populated section contains the normalized ERP split buyer name
+  - dashboard `LC Date` matches ERP `LC DT.` by calendar date
+  - dashboard `Last Date of Shipment` is the same as or after ERP `Ship. DT.` and no more than `250` days later
+  - ERP `Expiry DT.` is between `5` and `90` days after ERP `Ship. DT.`, inclusive
+  - dashboard `LC Expiry Date` is the same as or after ERP `Expiry DT.` and also between `5` and `90` days after the dashboard `Last Date of Shipment`, inclusive
+  - dashboard `LC Value` is not lower than aggregated ERP `Current LC Value`
+  - at least one normalized `Related Foreign LC/Contract Information -> Foreign LC No` value is common with the normalized workbook `Master L/C No.` value list
+  - value/quantity compliance satisfies one of:
+    - dashboard `LC Value` exactly matches ERP `Current LC Value` and the summed dashboard quantity exactly matches aggregated ERP `LC Qty`
+    - dashboard `LC Value` exceeds ERP by at least `100`, dashboard quantity also exceeds ERP `LC Qty`, and dashboard quantity excess is between `20%` and `80%` of the dashboard value excess, inclusive
+- workbook `Master L/C No.` may contain one or more line-break-separated values
+- dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
+- foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing
+- within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
+- `OK (KGS)` when all non-quantity checks above pass, dashboard `LC Value` exactly matches ERP `Current LC Value`, and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
+- if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately
+- numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
+- buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
+- within those buyer checks, `ltd` and `limited` are interchangeable equivalents regardless of word position
+- within those buyer checks, the trailing `s` is removed from every normalized word before comparison
+- within those buyer checks, all whitespace is removed before containment comparison
+- if both `IRC Details` and `ERC Details` contain data, one passing and the other failing rejects the family
+- if both `IRC Details` and `ERC Details` are empty, buyer verification fails
+- otherwise keep verbose discrepancy detail in `Decision Reasons`, but write a compact comma-separated topic label ending in `mismatch` into `Bangladesh Bank Dashboard` and report `Final Workbook Value` for comparison-based mismatch families; for example `Value, Quantity mismatch`
+
+### No-data result handling
+- If the dashboard search returns no result, write a clear no-result message.
+- If the dashboard search resolves to multiple results, write a clear multiple-results message.
+- If the dashboard page resolves but required dashboard fields are missing or incomplete, write a clear incomplete-data message.
+- Message wording should be specific to the observed failure mode.
+
+### Reporting
+- This workflow must emit JSON and HTML verification reports even though it has no print phase.
+- The HTML report must open automatically at the end of the run, regardless of whether families matched or failed.
+- Report rows are family-oriented: one report row per LC family with grouped workbook `SL.No.` values for the filtered rows receiving the family result.
+- Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family; the ERP columns shown in the family table include `LC Value`, `LC Qty`, and calculated `Net Weight`.
+- The current implementation also stages ERP `Ship. DT.` and `Expiry DT.` writeback on dashboard warning/failure families produced after lookup/comparison, not just on `OK` / `OK (KGS)` families; upstream ERP/input hard-block families still skip that date writeback.
 
 ## Printing
 - only newly saved PDFs are printed

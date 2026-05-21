@@ -50,6 +50,7 @@ Every discrepancy payload should include:
 | `print_annotation_sl_no_unresolved` | `hard_block` | shared | One or more selected checklist target rows did not yield a readable workbook `SL.No.` value. |
 | `print_annotation_checklist_missing_or_invalid` | `hard_block` | shared | The mandatory pre-print annotation checklist artifact was missing or did not match the active print plan. |
 | `print_annotation_browser_open_failed` | `warning` | shared | The print-annotation checklist HTML was generated successfully, but the system could not open it automatically in the default browser. |
+| `dashboard_report_browser_open_failed` | `warning` | shared | The dashboard verification HTML report was generated successfully, but the system could not open it automatically in the default browser. |
 | `mail_move_gate_unsatisfied` | `hard_block` | shared | Mail moves were attempted before required upstream phases reached terminal success. |
 | `mail_move_marker_mismatch` | `hard_block` | shared | A persisted mail-move completion marker conflicted with the planned move identity. |
 | `mail_source_location_mismatch` | `hard_block` | shared | A planned mail was no longer in the expected source folder and had no valid completion marker. |
@@ -107,6 +108,12 @@ Every discrepancy payload should include:
 | `ip_exp_family_row_missing` | `hard_block` | ud_ip_exp | The verified ERP LC/SC family did not resolve to any existing workbook row for family-wide IP/EXP staging. |
 | `ip_exp_target_row_conflict` | `hard_block` | ud_ip_exp | One or more family-wide IP/EXP target rows already contain a different non-blank shared/date value, so phase 1 staging cannot append, merge, or replace them. |
 | `ip_exp_policy_unresolved` | `hard_block` | ud_ip_exp | Historical pre-policy code retained for backward compatibility with older run artifacts created before the deterministic phase-1 IP/EXP path was documented and implemented. |
+
+### Bangladesh Bank dashboard verification
+| Code | Severity | Scope | Description |
+|---|---|---|---|
+| `bb_dashboard_family_input_invalid` | `hard_block` | bb_dashboard_verification | Required workbook or ERP inputs for a candidate LC family were missing, unreadable, or not deterministically consistent. |
+| `bb_dashboard_fetch_runtime_error` | `hard_block` | bb_dashboard_verification | The live/dashboard-provider fetch failed before a deterministic family result could be formed. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

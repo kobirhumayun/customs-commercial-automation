@@ -32,6 +32,33 @@ playwright_browser_channel = "msedge"
 # erp_report_download_menu_selector = "#downloadDropdown"
 # erp_report_download_format_selector = "text=CSV"
 
+# Optional Bangladesh Bank dashboard live settings for `bb_dashboard_verification`.
+# The workflow also supports deterministic fixtures through:
+#   validate-run bb_dashboard_verification --dashboard-json <manifest.json>
+#
+# bb_dashboard_login_url = "https://exp.bb.org.bd/ords/oims/r/import/75"
+# bb_dashboard_username = "REPLACE_WITH_USERNAME"
+# bb_dashboard_password = "REPLACE_WITH_PASSWORD"
+# bb_dashboard_username_selector = "#P101_USERNAME"
+# bb_dashboard_password_selector = "#P101_PASSWORD"
+# bb_dashboard_submit_selector = "a.t12Button:text-is('Login')"
+# bb_dashboard_post_login_wait_selector = "#P75_SEARCH_LC"
+# bb_dashboard_search_input_selector = "#P75_SEARCH_LC"
+# bb_dashboard_search_button_selector = "a.t12Button:text-is('Search')"
+# bb_dashboard_detail_ready_selector = "#P75_BENEFICIARY_NAME"
+# bb_dashboard_no_result_selector = "text=Error processing computation."
+# bb_dashboard_multiple_results_selector = "REPLACE_IF_REAL_MULTIPLE_RESULT_MARKER_IS_CONFIRMED"
+# bb_dashboard_beneficiary_selector = "#P75_BENEFICIARY_NAME"
+# bb_dashboard_irc_selector = "#P75_IMPORTER"
+# bb_dashboard_erc_selector = "#P75_EXPORTER"
+# bb_dashboard_lc_date_selector = "[id=\"P75_LC_DATE|input\"]"
+# bb_dashboard_last_shipment_selector = "[id=\"P75_LAST_SHIP_DATE|input\"]"
+# bb_dashboard_expiry_date_selector = "[id=\"P75_LC_EXPIRY_DATE|input\"]"
+# bb_dashboard_lc_value_selector = "#P75_LC_VALUE"
+# bb_dashboard_foreign_lc_selector = "xpath=//table[@id='report_R483371920050373531']//table[contains(@class,'t12standardalternatingrowcolors')]//tr[td]/td[2]"
+# bb_dashboard_quantity_selector = "xpath=//table[@id='report_R483369818911373522']//table[contains(@class,'t12standardalternatingrowcolors')]//tr[td]/td[5]"
+# bb_dashboard_timeout_seconds = 120
+
 # Write-capable workflow settings.
 # Use the exact real workbook filename here.
 # Manual exact-name configuration is the normal production pattern.

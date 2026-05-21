@@ -36,6 +36,7 @@ ERP_EXPORT_HEADER_ALIASES = {
     "ship_date": ("SHIP DT", "SHIP DATE"),
     "expiry_date": ("EXPIRY DT", "EXPIRY DATE"),
     "lc_qty": ("LC QTY", "QUANTITY"),
+    "net_weight": ("NET WEIGHT",),
     "lc_unit": ("LC UNIT", "UNIT"),
     "amd_no": ("AMD NO", "AMENDMENT NO"),
     "amd_date": ("AMD DT", "AMD DATE", "AMENDMENT DATE"),
@@ -50,11 +51,17 @@ class ERPRowProvider(Protocol):
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
         """Return ERP matches keyed by canonical file number."""
 
+    def load_rows(self) -> list[ERPRegisterRow]:
+        """Return all canonical ERP rows available to the provider."""
+
 
 @dataclass(slots=True, frozen=True)
 class EmptyERPRowProvider:
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
         return {file_number: [] for file_number in file_numbers}
+
+    def load_rows(self) -> list[ERPRegisterRow]:
+        return []
 
 
 @dataclass(slots=True, frozen=True)
@@ -62,8 +69,10 @@ class JsonManifestERPRowProvider:
     manifest_path: Path
 
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
-        manifest_rows = _load_manifest_rows(self.manifest_path)
-        return _index_rows(file_numbers=file_numbers, rows=manifest_rows)
+        return _index_rows(file_numbers=file_numbers, rows=self.load_rows())
+
+    def load_rows(self) -> list[ERPRegisterRow]:
+        return _load_manifest_rows(self.manifest_path)
 
 
 @dataclass(slots=True, frozen=True)
@@ -72,8 +81,10 @@ class DelimitedERPExportRowProvider:
     delimiter: str | None = None
 
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
-        export_rows = _load_delimited_export_rows(self.export_path, delimiter=self.delimiter)
-        return _index_rows(file_numbers=file_numbers, rows=export_rows)
+        return _index_rows(file_numbers=file_numbers, rows=self.load_rows())
+
+    def load_rows(self) -> list[ERPRegisterRow]:
+        return _load_delimited_export_rows(self.export_path, delimiter=self.delimiter)
 
 
 @dataclass(slots=True, frozen=True)
@@ -95,6 +106,9 @@ class PlaywrightERPRowProvider:
     def lookup_rows(self, *, file_numbers: list[str]) -> dict[str, list[ERPRegisterRow]]:
         rows = self._get_cached_rows()
         return _index_rows(file_numbers=file_numbers, rows=list(rows))
+
+    def load_rows(self) -> list[ERPRegisterRow]:
+        return list(self._get_cached_rows())
 
     def _get_cached_rows(self) -> tuple[ERPRegisterRow, ...]:
         if self._cached_rows is not None:
@@ -229,7 +243,7 @@ def inspect_playwright_report_download(
             for selector, value in field_values:
                 locator = page.locator(selector)
                 locator.wait_for(state="visible", timeout=timeout_ms)
-                locator.click()
+                _click_locator(locator, timeout_ms=timeout_ms)
                 locator.fill(value)
                 try:
                     locator.press("Tab")
@@ -238,7 +252,7 @@ def inspect_playwright_report_download(
             payload["field_readbacks"] = _collect_field_readbacks(page, field_values)
 
             if submit_selector:
-                page.locator(submit_selector).click()
+                _click_locator(page.locator(submit_selector), timeout_ms=timeout_ms)
                 if post_submit_wait_selector:
                     page.locator(post_submit_wait_selector).wait_for(
                         state="visible",
@@ -248,11 +262,11 @@ def inspect_playwright_report_download(
                     _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
 
             if download_menu_selector:
-                page.locator(download_menu_selector).click()
+                _click_locator(page.locator(download_menu_selector), timeout_ms=timeout_ms)
 
             if download_format_selector:
                 with page.expect_download(timeout=timeout_ms) as download_info:
-                    page.locator(download_format_selector).click()
+                    _click_locator(page.locator(download_format_selector), timeout_ms=timeout_ms)
                 download = download_info.value
                 suggested_filename = _sanitize_download_filename(download.suggested_filename)
                 downloaded_path = output_dir / suggested_filename
@@ -291,6 +305,28 @@ def inspect_playwright_report_download(
                 browser.close()
             except Exception:
                 pass
+
+
+def _click_locator(locator, *, timeout_ms: int) -> None:
+    target = getattr(locator, "first", locator)
+    try:
+        target.click(timeout=timeout_ms)
+        return
+    except TypeError:
+        target.click()
+        return
+    except Exception as exc:
+        if not _click_error_supports_force_retry(exc):
+            raise
+    try:
+        target.click(timeout=timeout_ms, force=True)
+    except TypeError:
+        target.click()
+
+
+def _click_error_supports_force_retry(error: Exception) -> bool:
+    normalized = str(error).casefold()
+    return "intercepts pointer events" in normalized or "element click intercepted" in normalized
 
 
 def _index_rows(*, file_numbers: list[str], rows: list[ERPRegisterRow]) -> dict[str, list[ERPRegisterRow]]:
@@ -521,6 +557,7 @@ def _build_erp_row(item: dict[str, object], *, source_row_index: int, row_label:
         ship_date=_optional_string(item.get("ship_date")),
         expiry_date=_optional_string(item.get("expiry_date")),
         lc_qty=_optional_string(item.get("lc_qty")),
+        net_weight=_optional_string(item.get("net_weight")),
         lc_unit=_optional_string(item.get("lc_unit")),
         amd_no=_optional_string(item.get("amd_no")),
         amd_date=_optional_string(item.get("amd_date")),

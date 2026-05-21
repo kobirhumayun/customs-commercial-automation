@@ -142,6 +142,7 @@ function Finish-Script {
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $documentRoot = $DocumentRootBase
+$isBBDashboardWorkflow = $Workflow -eq "bb_dashboard_verification"
 New-Item -ItemType Directory -Force -Path $documentRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $LauncherLogRoot | Out-Null
 $script:LauncherLogPath = Join-Path $LauncherLogRoot ("{0}.{1}.log" -f $Workflow, $timestamp)
@@ -169,16 +170,22 @@ try {
     }
 
     Write-Section "Validate Run"
-    $validate = Invoke-ProjectJsonCommand -Arguments @(
+    $validateArguments = @(
         "run", "python", "-m", "project",
         "validate-run", $Workflow,
         "--config", $Config,
-        "--live-outlook-snapshot",
         "--live-erp",
         "--live-workbook",
-        "--document-root", $documentRoot,
         "--apply-live-writes"
     )
+    if ($isBBDashboardWorkflow) {
+        $validateArguments += "--live-dashboard"
+    } else {
+        $validateArguments += "--live-outlook-snapshot"
+        $validateArguments += "--document-root"
+        $validateArguments += $documentRoot
+    }
+    $validate = Invoke-ProjectJsonCommand -Arguments $validateArguments
     $runId = [string]$validate.Json.run_id
     $writePhaseStatus = [string]$validate.Json.write_phase_status
     $hardBlockCount = [int]$validate.Json.summary.hard_block
@@ -209,6 +216,22 @@ try {
     if ($hardBlockCount -gt 0) {
         Write-Host "Validation produced $hardBlockCount hard block(s), but eligible mails will continue through the live cycle." -ForegroundColor Yellow
         Write-Host "Blocked mails will stay out of downstream print/mail-move handling for this run." -ForegroundColor Yellow
+    }
+
+    if ($isBBDashboardWorkflow) {
+        Write-Section "Final Status"
+        $status = Invoke-ProjectJsonCommand -Arguments @(
+            "run", "python", "-m", "project",
+            "report-run-status", $Workflow,
+            "--config", $Config,
+            "--run-id", $runId
+        )
+
+        Write-Host ""
+        Write-Host "Live cycle completed." -ForegroundColor Green
+        Write-Host "Run ID: $runId" -ForegroundColor Green
+        Write-Host "Write: $($status.Json.manual_verification.write_phase_status)" -ForegroundColor Green
+        Finish-Script 0
     }
 
     if ($stagedWriteOperationCount -eq 0) {

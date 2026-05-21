@@ -240,7 +240,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Explicit `UD-LC-<suffix>` or `UD-SC-<suffix>` filename evidence is a guardrail only: it must agree with the ERP-derived LC/SC suffix, and it must never replace email-body file-number plus ERP family resolution.
 - Structured Base UD PDFs are identified by `UD Authenticating Authority`; structured UD Amendment PDFs are identified by `Amendment Authenticating Authority`.
 - Structured UD extraction must locate the page-1 UD/AM identifier row strictly by the office-use-only label: Base UD uses `UD No (For office use only)` and UD Amendment uses `Amendment no. (For office use only)`. The `For office use only` text is mandatory, no alternate row-label fallback is allowed, and the UD/AM number plus document date must both come from that same matched row. If the extracted row value does not align with the BGMEA UD/AM pattern, the mail hard-blocks.
-- Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. `Ship. Remarks` matching remains exact. ERP `LC No.` matching is exact first; if exact matching fails, only leading zeros on the left side may be stripped from the ERP/table LC strings for comparison. Leading and trailing spaces around compared values may be trimmed, but internal spaces must remain unchanged. No punctuation, separators, internal zeros, or other characters may be modified. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
+- Structured UD extraction uses ERP `Ship. Remarks` first, then ERP `LC No.`, to locate the UD/AM LC table row. ERP `Ship. Remarks` and ERP `LC No.` matching are exact first; if exact matching fails, only leading zeros on the left side may be stripped from the ERP/table identifier strings for comparison. Leading and trailing spaces around compared values may be trimmed, but internal spaces must remain unchanged. No punctuation, separators, internal zeros, or other characters may be modified. The matched row supplies LC/SC date and value, while ERP LC/SC remains the family value used for storage and workbook matching.
 - For structured UD Amendments only, the LC table value normally comes from the `Increased/Decreased` column. If that extracted amendment value is numeric zero, the LC is treated as newly included in the amendment and the workflow uses the row's `Value` column instead. Base UD value extraction continues to use the documented base-UD value column.
 - Before staging a structured UD write, the workflow first checks for an already-recorded workbook group carrying the same UD/AM value in `UD No. & IP No.` plus the same `UD & IP Date`; if those rows also satisfy the same value and quantity checks, the mail becomes a duplicate-only no-op with no workbook write or print obligation.
 - Structured UD validation requires the extracted LC/SC date to match ERP `LC DT.`, then filters workbook rows to the ERP family and identifies exact workbook `Amount` column 6 groups that match the extracted UD/AM value within tolerance. Quantity never drives initial row identification.
@@ -263,11 +263,21 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
 
 ### Bangladesh Bank dashboard verification CLI
-- Reads candidate rows where `UP No.` is blank, UD exists, and dashboard status is blank or not already compliant.
-- Aggregates ERP amendments for LC value, quantity, and net weight.
-- Uses Playwright login to inspect dashboard values.
-- Writes verification-only results: `OK`, `OK (Kgs)`, or a combined discrepancy string.
-- Does not populate any additional fields.
+- Reads candidate rows where `UP No.` is blank, `UD No. & IP No.` exists, the first non-empty line does not begin with `EXP` or `IP`, and `Bangladesh Bank Dashboard` is blank or not already compliant.
+- Dedupes candidate work by workbook `L/C & S/C No.` so dashboard fetch/comparison runs once per LC family.
+- Uses workbook `L/C & S/C No.` and workbook `Master L/C No.` plus ERP-derived family aggregates and dates as the verification inputs.
+- Aggregates ERP amendments for `Current LC Value`, `LC Qty`, and `Net Weight`, and uses the same ERP buyer split logic as `export_lc_sc`.
+- Uses Playwright login to inspect dashboard values through a captured authenticated redirected URL.
+- Opens a fresh dashboard tab for each LC-family fetch and closes that tab after data capture so search fields are cleared between lookups.
+- Uses ERP `Ship. Remarks` as the primary dashboard search key when available; otherwise uses workbook `L/C & S/C No.`.
+- For each search key path, retries once with `0` inserted immediately before the last 4 characters of the normalized key if the initial fetch returns no data.
+- Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides, with `and` and `&` treated as equivalent anywhere in those values.
+- Sums all dashboard `Local LC Commodity Detail -> QUANTITY` rows before comparing against aggregated ERP `LC Qty` and, if needed, aggregated ERP `Net Weight`.
+- Validates dashboard shipment/expiry timing using the approved BB windows: shipment must be on/after ERP shipment and within `250` days, and expiry must be on/after ERP expiry plus between `5` and `90` days after shipment.
+- Applies the approved dashboard excess rule only when `LC Value` and `LC Qty` are both higher than ERP, dashboard `LC Value` excess is at least `100`, and dashboard quantity excess is between `20%` and `80%` of that value excess.
+- Writes `Bangladesh Bank Dashboard` results as `OK`, `OK (KGS)`, or a combined discrepancy string/message specific to the observed mismatch/no-data condition.
+- The current implementation also stages ERP `Ship. DT.` and `Expiry DT.` writeback for dashboard warning/failure families produced after lookup/comparison; upstream ERP/input hard-block families still skip that date writeback.
+- Emits JSON and HTML verification reports with family-oriented comparison evidence and grouped workbook `SL.No.` values, and automatically opens the HTML report at the end of the run.
 
 ### Printing CLI/service
 - Triggered automatically after the batch workbook-write phase succeeds for at least one mail in a write-capable workflow.

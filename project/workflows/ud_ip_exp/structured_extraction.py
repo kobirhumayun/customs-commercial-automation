@@ -284,7 +284,7 @@ def _lc_value_cell(
 def _identifier_match_strategy(*, expected: str, actual: str, identifier_source: str) -> str | None:
     if expected == actual:
         return "exact"
-    if identifier_source != "lc_sc_number":
+    if identifier_source not in {"lc_sc_number", "ship_remarks"}:
         return None
     if not expected or not actual:
         return None

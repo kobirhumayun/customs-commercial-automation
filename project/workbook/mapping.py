@@ -81,6 +81,25 @@ UD_IP_EXP_STORAGE_HEADER_SPECS = (
     HeaderMappingSpec("lc_issue_date", "LC Issue Date"),
 )
 
+BB_DASHBOARD_HEADER_SPECS = (
+    HeaderMappingSpec("sl_no", "SL.No."),
+    HeaderMappingSpec(
+        "lc_sc_no",
+        "L/C & S/C No.",
+        ("L/C No.", "LC/SC No.", "LC No."),
+    ),
+    HeaderMappingSpec("shipment_date", "Shipment Date"),
+    HeaderMappingSpec("expiry_date", "Expiry Date"),
+    HeaderMappingSpec("master_lc_no", "Master L/C No."),
+    HeaderMappingSpec("ud_ip_shared", "UD No. & IP No."),
+    HeaderMappingSpec("up_no", "UP No.", ("UP",)),
+    HeaderMappingSpec(
+        "dashboard_status",
+        "Bangladesh Bank Dashboard",
+        ("Bangladesh Bank Dashboard Status",),
+    ),
+)
+
 
 def resolve_header_mapping(
     snapshot: WorkbookSnapshot,
@@ -129,6 +148,10 @@ def resolve_ud_ip_exp_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, in
 
 def resolve_ud_ip_exp_storage_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, int] | None:
     return resolve_header_mapping(snapshot, UD_IP_EXP_STORAGE_HEADER_SPECS)
+
+
+def resolve_bb_dashboard_header_mapping(snapshot: WorkbookSnapshot) -> dict[str, int] | None:
+    return resolve_header_mapping(snapshot, BB_DASHBOARD_HEADER_SPECS)
 
 
 def _resolve_present_header_mapping(
