@@ -220,13 +220,6 @@ class PlaywrightDashboardLookupProvider:
                     if _snapshot_is_empty(snapshot):
                         attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                         continue
-                    attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="resolved"))
-                    return DashboardLookupResult(
-                        outcome="resolved",
-                        attempts=attempts,
-                        matched_search_key=search_key,
-                        snapshot=snapshot,
-                    )
                     attempts.append(
                         DashboardLookupAttempt(
                             search_key=search_key,

@@ -228,6 +228,73 @@ class BBDashboardVerificationTests(unittest.TestCase):
             "No ERP rows were available for workbook family LC-003.",
         )
 
+    def test_validate_run_missing_sl_no_hard_blocks_without_staging_date_writeback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path, _workbook_manifest_path, _erp_manifest_path, dashboard_manifest_path = _write_dashboard_fixture_bundle(root)
+
+            descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=[],
+            )
+            workbook_snapshot = WorkbookSnapshot(
+                sheet_name="Sheet1",
+                headers=[
+                    WorkbookHeader(column_index=1, text="SL.No."),
+                    WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                    WorkbookHeader(column_index=3, text="Shipment Date"),
+                    WorkbookHeader(column_index=4, text="Expiry Date"),
+                    WorkbookHeader(column_index=5, text="Master L/C No."),
+                    WorkbookHeader(column_index=6, text="UD No. & IP No."),
+                    WorkbookHeader(column_index=7, text="UP No."),
+                    WorkbookHeader(column_index=8, text="Bangladesh Bank Dashboard"),
+                ],
+                rows=[
+                    WorkbookRow(
+                        row_index=11,
+                        values={
+                            1: "",
+                            2: "LC-MISSING-SL",
+                            3: "",
+                            4: "",
+                            5: "MLC-001",
+                            6: "BGMEA/DHK/UD/2026/100/001",
+                            7: "",
+                            8: "",
+                        },
+                    )
+                ],
+            )
+
+            workflow_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=[],
+                dashboard_provider=JsonManifestDashboardLookupProvider(dashboard_manifest_path),
+            )
+
+        self.assertEqual(workflow_result.validation_result.run_report.summary, {"pass": 0, "warning": 0, "hard_block": 1})
+        self.assertEqual(len(workflow_result.validation_result.discrepancy_reports), 1)
+        self.assertEqual(
+            workflow_result.validation_result.discrepancy_reports[0].message,
+            "One or more filtered workbook rows in family LC-MISSING-SL are missing SL.No. values.",
+        )
+        outcome = workflow_result.validation_result.mail_outcomes[0]
+        self.assertEqual(outcome.final_decision, FinalDecision.HARD_BLOCK)
+        self.assertEqual(
+            [operation["column_key"] for operation in outcome.staged_write_operations],
+            ["dashboard_status"],
+        )
+        self.assertEqual(
+            outcome.staged_write_operations[0]["expected_post_write_value"],
+            "One or more filtered workbook rows in family LC-MISSING-SL are missing SL.No. values.",
+        )
+
     def test_validate_run_normalizes_snapshot_numeric_sl_no_to_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -597,6 +664,76 @@ class BBDashboardVerificationTests(unittest.TestCase):
         )
         self.assertEqual(provider._page.locator_calls, ["#P75_SEARCH_LC"])
         self.assertFalse(provider._page_dirty)
+
+    def test_playwright_provider_returns_incomplete_data_when_detail_view_never_becomes_ready(self) -> None:
+        class FakeLocator:
+            def wait_for(self, **kwargs) -> None:
+                return None
+
+            def click(self) -> None:
+                return None
+
+            def fill(self, _value: str) -> None:
+                return None
+
+        class FakePage:
+            def locator(self, _selector: str) -> FakeLocator:
+                return FakeLocator()
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector="#detail-ready",
+            no_result_selector="#no-result",
+            multiple_results_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        provider._page = FakePage()
+        provider._page_dirty = False
+
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_authenticated_page") as ensure_page_mock:
+            ensure_page_mock.return_value = None
+            with patch("project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_network_idle") as idle_mock:
+                idle_mock.return_value = None
+                with patch("project.workflows.bb_dashboard_verification.providers._selector_visible") as selector_visible_mock:
+                    selector_visible_mock.side_effect = [False, False, False]
+                    with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
+                        read_snapshot_mock.return_value = DashboardFamilySnapshot(
+                            beneficiary_name="PIONEER DENIM LIMITED",
+                            irc_details="IRC 1",
+                            erc_details="ERC 1",
+                            lc_date="2026-04-22",
+                            last_date_of_shipment="2026-06-15",
+                            lc_expiry_date="2026-06-30",
+                            lc_value="98315.5",
+                            foreign_lc_numbers=["FLC-001"],
+                            commodity_quantities=["33170"],
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+                        )
+                        result = provider.lookup_family(search_keys=["1741260401172"])
+
+        self.assertEqual(result.outcome, "incomplete_data")
+        self.assertEqual(result.matched_search_key, "1741260401172")
+        self.assertIsNotNone(result.snapshot)
+        self.assertEqual(
+            result.message,
+            "Dashboard detail view did not become ready for '1741260401172'.",
+        )
 
     def test_compare_dashboard_snapshot_normalizes_dates_before_comparison(self) -> None:
         family = DashboardCandidateFamily(

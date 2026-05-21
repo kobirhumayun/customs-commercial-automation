@@ -835,9 +835,9 @@ Rows where:
 
 ### Dashboard fetch contract
 - Login starts at `https://exp.bb.org.bd/ords/oims/r/import/75` using configured credentials.
-- After successful login, the workflow must capture the redirected authenticated URL.
-- Each LC-family fetch must open a fresh browser tab from that redirected authenticated URL and close the tab after the fetch completes.
-- The workflow must not reuse the same active dashboard tab for multiple family lookups because uncleared fields may produce incorrect results.
+- After successful login, the workflow must capture the redirected authenticated URL and establish one authenticated dashboard page for the run.
+- Each LC-family fetch must begin only after the workflow deterministically resets that authenticated page back to the fresh dashboard search state and confirms the search input is visible.
+- The workflow may reuse the authenticated page across family lookups only through that reset flow; submitting a new lookup on a dirty page is forbidden because uncleared fields may produce incorrect results.
 - Search uses the dashboard `Search Local LC` field plus the `Search` button.
 - Search key normalization before submission is limited to trim + whitespace collapse.
 - If ERP `Ship. Remarks` is available, search order is:

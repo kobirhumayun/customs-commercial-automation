@@ -184,9 +184,9 @@ def validate_bb_dashboard_verification_run(
                 family=family,
                 sheet_name=workbook_snapshot.sheet_name,
                 final_status=discrepancy.message,
-                writes_dates=True,
-                ship_date=aggregate.ship_date,
-                expiry_date=aggregate.expiry_date,
+                writes_dates=False,
+                ship_date="",
+                expiry_date="",
             )
             staged_write_plan.extend(family_operations)
             mail_outcomes.append(
