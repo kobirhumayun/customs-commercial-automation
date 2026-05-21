@@ -1493,7 +1493,13 @@ def _normalize_buyer_comparison_text(value: str) -> str:
     if not normalized:
         return ""
     normalized = _LTD_OR_LIMITED_RE.sub("LTD", normalized)
-    return _WHITESPACE_RE.sub(" ", normalized).strip()
+    tokens = []
+    for token in normalized.split():
+        if token.endswith("S"):
+            token = token[:-1]
+        if token:
+            tokens.append(token)
+    return "".join(tokens)
 
 
 def _compare_buyer_details(

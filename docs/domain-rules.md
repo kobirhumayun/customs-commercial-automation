@@ -404,6 +404,8 @@ Comparison rules:
 - if both `IRC Details` and `ERC Details` are empty, buyer verification fails
 - buyer containment normalization may adjust case, whitespace, and special characters
 - within buyer containment normalization, `ltd` and `limited` are interchangeable equivalents regardless of position
+- within buyer containment normalization, remove the trailing `s` from every normalized word before comparison
+- within buyer containment normalization, remove all whitespace before containment comparison
 - dashboard `LC Date` must match ERP `LC DT.` by calendar date
 - dashboard `Last Date of Shipment` must be on or after ERP `Ship. DT.` and no more than `250` days later
 - ERP `Expiry DT.` must be between `5` and `90` days after ERP `Ship. DT.`, inclusive

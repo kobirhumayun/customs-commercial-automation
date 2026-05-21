@@ -27,6 +27,7 @@ from project.workflows.bb_dashboard_verification import (
     DashboardCandidateRow,
     ERPFamilyAggregate,
     _build_report_html,
+    _compare_buyer_details,
     _compare_dashboard_snapshot,
     _resolve_sl_no_values_by_row,
     validate_bb_dashboard_verification_run,
@@ -776,6 +777,26 @@ class BBDashboardVerificationTests(unittest.TestCase):
         )
 
         self.assertEqual(comparison["status"], "OK")
+
+    def test_compare_buyer_details_strips_trailing_s_from_each_word_before_comparison(self) -> None:
+        self.assertEqual(
+            _compare_buyer_details(
+                buyer_name="NATURAL DENIMS LTD",
+                irc_details="Natural Denim Limited, Plot#532, Tonga Bari, Ashulia",
+                erc_details="Natural Denims Ltd., Plot-10, Block-B, Gazipur",
+            ),
+            [],
+        )
+
+    def test_compare_buyer_details_removes_whitespace_before_containment_comparison(self) -> None:
+        self.assertEqual(
+            _compare_buyer_details(
+                buyer_name="BUYERS NAMES LTD",
+                irc_details="BuyerName Limited, Gazipur",
+                erc_details="Buyers   Names Ltd., Plot-10, Block-B, Gazipur",
+            ),
+            [],
+        )
 
     def test_compare_dashboard_snapshot_reports_both_value_and_quantity_when_both_are_lower(self) -> None:
         family = DashboardCandidateFamily(

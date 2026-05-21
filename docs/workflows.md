@@ -873,6 +873,8 @@ Rows where:
 - numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
 - buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
 - within those buyer checks, `ltd` and `limited` are interchangeable equivalents regardless of word position
+- within those buyer checks, the trailing `s` is removed from every normalized word before comparison
+- within those buyer checks, all whitespace is removed before containment comparison
 - if both `IRC Details` and `ERC Details` contain data, one passing and the other failing rejects the family
 - if both `IRC Details` and `ERC Details` are empty, buyer verification fails
 - otherwise keep verbose discrepancy detail in `Decision Reasons`, but write a compact comma-separated topic label ending in `mismatch` into `Bangladesh Bank Dashboard` and report `Final Workbook Value` for comparison-based mismatch families; for example `Value, Quantity mismatch`
