@@ -66,6 +66,7 @@ class EmptyDashboardLookupProvider:
 @dataclass(slots=True, frozen=True)
 class JsonManifestDashboardLookupProvider:
     manifest_path: Path
+    _cached_records: dict[str, dict[str, object]] | None = None
 
     def lookup_family(self, *, search_keys: list[str]) -> DashboardLookupResult:
         records = self._load_manifest()
@@ -118,6 +119,9 @@ class JsonManifestDashboardLookupProvider:
         return None
 
     def _load_manifest(self) -> dict[str, dict[str, object]]:
+        if self._cached_records is not None:
+            return self._cached_records
+
         with self.manifest_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if not isinstance(payload, list):
@@ -129,6 +133,7 @@ class JsonManifestDashboardLookupProvider:
                 raise ValueError(f"Dashboard lookup manifest row {index} must be an object")
             search_key = normalize_dashboard_search_key(_require_string(item, "search_key", index))
             records[search_key] = item
+        object.__setattr__(self, "_cached_records", records)
         return records
 
 

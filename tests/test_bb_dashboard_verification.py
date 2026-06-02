@@ -34,6 +34,7 @@ from project.workflows.bb_dashboard_verification import (
 )
 from project.workflows.bb_dashboard_verification.providers import (
     DashboardFamilySnapshot,
+    DashboardLookupResult,
     JsonManifestDashboardLookupProvider,
     PlaywrightDashboardLookupProvider,
     _read_text,
@@ -367,6 +368,126 @@ class BBDashboardVerificationTests(unittest.TestCase):
             )
 
         self.assertEqual(resolved, {11: "21A"})
+
+    def test_resolve_sl_no_values_by_row_batches_live_workbook_reads(self) -> None:
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[WorkbookHeader(column_index=1, text="SL.No.")],
+            rows=[
+                WorkbookRow(row_index=11, values={1: "101.0"}, number_formats={}),
+                WorkbookRow(row_index=13, values={1: "103.0"}, number_formats={}),
+            ],
+        )
+
+        class FakeRange:
+            def __init__(self, values) -> None:
+                self.value = values
+
+        class FakeSheet:
+            def __init__(self) -> None:
+                self.range_calls: list[object] = []
+
+            def range(self, *coordinates):
+                self.range_calls.append(coordinates)
+                if len(coordinates) == 2:
+                    return FakeRange([["21A"], ["22A"], ["23A"]])
+                raise AssertionError("Expected the batched range read path to be used.")
+
+        class FakeBook:
+            def __init__(self) -> None:
+                self.sheets = [FakeSheet()]
+
+            def close(self) -> None:
+                return None
+
+        class FakeBooks:
+            def __init__(self) -> None:
+                self.book = FakeBook()
+
+            def open(self, *_args, **_kwargs):
+                return self.book
+
+        class FakeApp:
+            last_instance = None
+
+            def __init__(self, **_kwargs) -> None:
+                self.books = FakeBooks()
+                FakeApp.last_instance = self
+
+            def quit(self) -> None:
+                return None
+
+        fake_xlwings = type("FakeXLWings", (), {"App": FakeApp})
+
+        with patch.dict(sys.modules, {"xlwings": fake_xlwings}):
+            resolved = _resolve_sl_no_values_by_row(
+                workbook_snapshot=workbook_snapshot,
+                sl_no_column_index=1,
+                live_workbook_path=Path("D:/customs-automation/2026-master.xlsx"),
+            )
+
+        fake_sheet = FakeApp.last_instance.books.book.sheets[0]
+        self.assertEqual(resolved, {11: "21A", 13: "23A"})
+        self.assertEqual(fake_sheet.range_calls, [((11, 1), (13, 1))])
+
+    def test_validate_run_exception_report_does_not_reuse_prior_family_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path, workbook_manifest_path, erp_manifest_path, _dashboard_manifest_path = _write_dashboard_fixture_bundle(root)
+
+            descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=[],
+            )
+            workbook_snapshot = JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot()
+            erp_rows = JsonManifestERPRowProvider(erp_manifest_path).load_rows()
+
+            class FailingLookupProvider:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                def lookup_family(self, *, search_keys: list[str]) -> DashboardLookupResult:
+                    self.calls += 1
+                    if self.calls == 1:
+                        return DashboardLookupResult(
+                            outcome="resolved",
+                            attempts=[],
+                            matched_search_key=search_keys[0] if search_keys else None,
+                            snapshot=DashboardFamilySnapshot(
+                                beneficiary_name="PIONEER DENIM LIMITED",
+                                irc_details="ANANTA GARMENTS LTD",
+                                erc_details="ANANTA GARMENTS LTD",
+                                lc_date="2026-01-10",
+                                last_date_of_shipment="2026-02-10",
+                                lc_expiry_date="2026-03-10",
+                                lc_value="100",
+                                foreign_lc_numbers=["MLC-002"],
+                                commodity_quantities=["40"],
+                            ),
+                        )
+                    raise RuntimeError("dashboard session reset failed")
+
+                def close(self) -> None:
+                    return None
+
+            workflow_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=erp_rows,
+                dashboard_provider=FailingLookupProvider(),
+            )
+
+        second_family = workflow_result.report_payload["families"][1]
+        self.assertEqual(
+            second_family["final_workbook_value"],
+            "Dashboard fetch failed for family LC-002.",
+        )
+        self.assertEqual(second_family["search_attempts"], [])
 
     def test_report_html_renders_dashboard_columns_with_quantity_sum_and_foreign_lc_breaks(self) -> None:
         report_html = _build_report_html(
