@@ -88,7 +88,7 @@ class JsonManifestDashboardLookupProvider:
             if outcome == "no_result":
                 attempts.append(DashboardLookupAttempt(search_key=search_key, outcome=outcome, message=message))
                 continue
-            if outcome in {"multiple_results", "incomplete_data", "fetch_error"}:
+            if outcome in {"incomplete_data", "fetch_error"}:
                 attempts.append(DashboardLookupAttempt(search_key=search_key, outcome=outcome, message=message))
                 return DashboardLookupResult(
                     outcome=outcome,
@@ -150,7 +150,6 @@ class PlaywrightDashboardLookupProvider:
     search_button_selector: str
     detail_ready_selector: str | None
     no_result_selector: str | None
-    multiple_results_selector: str | None
     beneficiary_selector: str
     irc_selector: str
     erc_selector: str
@@ -199,15 +198,6 @@ class PlaywrightDashboardLookupProvider:
                 ):
                     attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                     continue
-
-                if self.multiple_results_selector and _selector_visible(page, self.multiple_results_selector):
-                    attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="multiple_results"))
-                    return DashboardLookupResult(
-                        outcome="multiple_results",
-                        attempts=attempts,
-                        matched_search_key=search_key,
-                        message=f"Multiple dashboard results were returned for '{search_key}'.",
-                    )
 
                 if self.detail_ready_selector and not _selector_visible(
                     page,

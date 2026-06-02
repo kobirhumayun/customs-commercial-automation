@@ -816,10 +816,6 @@ def _evaluate_lookup_result(
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = f"No dashboard result was found for '{search_key}'."
         return FinalDecision.WARNING, message, [message], None, True
-    if lookup_result.outcome == "multiple_results":
-        search_key = lookup_result.matched_search_key or family.lc_sc_no
-        message = f"Multiple dashboard results were returned for '{search_key}'."
-        return FinalDecision.WARNING, message, [message], None, True
     if lookup_result.outcome == "incomplete_data" or lookup_result.snapshot is None:
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = lookup_result.message or f"Dashboard data was incomplete for '{search_key}'."

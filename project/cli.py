@@ -3963,8 +3963,6 @@ def _load_dashboard_provider(
         search_button_selector=str(config.values.get("bb_dashboard_search_button_selector", "")).strip(),
         detail_ready_selector=str(config.values.get("bb_dashboard_detail_ready_selector", "")).strip() or None,
         no_result_selector=str(config.values.get("bb_dashboard_no_result_selector", "")).strip() or None,
-        multiple_results_selector=str(config.values.get("bb_dashboard_multiple_results_selector", "")).strip()
-        or None,
         beneficiary_selector=str(config.values.get("bb_dashboard_beneficiary_selector", "")).strip(),
         irc_selector=str(config.values.get("bb_dashboard_irc_selector", "")).strip(),
         erc_selector=str(config.values.get("bb_dashboard_erc_selector", "")).strip(),
