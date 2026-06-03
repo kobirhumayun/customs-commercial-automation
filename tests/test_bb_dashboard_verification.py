@@ -728,11 +728,31 @@ class BBDashboardVerificationTests(unittest.TestCase):
             def wait_for(self, *, state: str, timeout: int) -> None:
                 self.wait_calls.append((state, timeout))
 
+            @property
+            def first(self):
+                return self
+
+            def evaluate(self, _script: str):
+                return "INPUT"
+
+            def input_value(self) -> str:
+                return ""
+
+            def text_content(self) -> str:
+                return ""
+
+            def count(self) -> int:
+                return 1
+
+            def all_inner_texts(self) -> list[str]:
+                return []
+
         class FakePage:
             def __init__(self) -> None:
                 self.clicks: list[str] = []
                 self.waited_urls: list[str] = []
                 self.locator_calls: list[str] = []
+                self.url = "https://exp.bb.org.bd/ords/oims/r/import/75?clear=75&session=1"
 
             def get_by_text(self, text: str, exact: bool = False) -> FakeLink:
                 return FakeLink(page=self, text=text)
@@ -781,10 +801,97 @@ class BBDashboardVerificationTests(unittest.TestCase):
             provider._page.waited_urls,
             ["**/350?session=*", "**/75?clear=75**"],
         )
-        self.assertEqual(provider._page.locator_calls, ["#P75_SEARCH_LC"])
+        self.assertEqual(provider._page.locator_calls[0], "#P75_SEARCH_LC")
+        self.assertIn("#P75_BENEFICIARY_NAME", provider._page.locator_calls)
         self.assertFalse(provider._page_dirty)
 
-    def test_playwright_provider_returns_incomplete_data_when_detail_view_never_becomes_ready(self) -> None:
+    def test_playwright_provider_reset_flow_hard_blocks_if_blank_search_page_was_not_restored(self) -> None:
+        class FakeLink:
+            def __init__(self, *, page, text: str) -> None:
+                self._page = page
+                self._text = text
+
+            def click(self) -> None:
+                self._page.clicks.append(self._text)
+
+        class FakeLocator:
+            def __init__(self, selector: str) -> None:
+                self.selector = selector
+
+            def wait_for(self, *, state: str, timeout: int) -> None:
+                return None
+
+            @property
+            def first(self):
+                return self
+
+            def evaluate(self, _script: str):
+                if self.selector == "#P75_SEARCH_LC":
+                    return "INPUT"
+                return "TEXTAREA"
+
+            def input_value(self) -> str:
+                if self.selector == "#P75_SEARCH_LC":
+                    return "3054260400812"
+                return "stale-value"
+
+            def text_content(self) -> str:
+                return ""
+
+            def count(self) -> int:
+                return 1
+
+            def all_inner_texts(self) -> list[str]:
+                return []
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.clicks: list[str] = []
+                self.waited_urls: list[str] = []
+                self.locator_calls: list[str] = []
+                self.url = "https://exp.bb.org.bd/ords/oims/r/import/75?clear=75&session=1"
+
+            def get_by_text(self, text: str, exact: bool = False) -> FakeLink:
+                return FakeLink(page=self, text=text)
+
+            def wait_for_url(self, pattern: str, timeout: int) -> None:
+                self.waited_urls.append(pattern)
+
+            def locator(self, selector: str) -> FakeLocator:
+                self.locator_calls.append(selector)
+                return FakeLocator(selector)
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector=None,
+            no_result_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        provider._page = FakePage()
+        provider._page_dirty = True
+
+        with patch("project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_network_idle") as idle_mock:
+            idle_mock.return_value = None
+            with self.assertRaisesRegex(ValueError, "blank search page"):
+                provider._reset_to_fresh_search_page()
+
+    def test_playwright_provider_treats_non_empty_snapshot_as_resolved_when_detail_view_selector_flakes(self) -> None:
         class FakeLocator:
             def wait_for(self, **kwargs) -> None:
                 return None
@@ -845,13 +952,77 @@ class BBDashboardVerificationTests(unittest.TestCase):
                         )
                         result = provider.lookup_family(search_keys=["1741260401172"])
 
-        self.assertEqual(result.outcome, "incomplete_data")
+        self.assertEqual(result.outcome, "resolved")
         self.assertEqual(result.matched_search_key, "1741260401172")
         self.assertIsNotNone(result.snapshot)
-        self.assertEqual(
-            result.message,
-            "Dashboard detail view did not become ready for '1741260401172'.",
+        self.assertIsNone(result.message)
+        self.assertEqual(result.attempts[-1].outcome, "resolved")
+        self.assertIn("readiness selector did not become visible", result.attempts[-1].message or "")
+
+    def test_playwright_provider_returns_no_result_when_detail_view_selector_flakes_and_snapshot_is_empty(self) -> None:
+        class FakeLocator:
+            def wait_for(self, **kwargs) -> None:
+                return None
+
+            def click(self) -> None:
+                return None
+
+            def fill(self, _value: str) -> None:
+                return None
+
+        class FakePage:
+            def locator(self, _selector: str) -> FakeLocator:
+                return FakeLocator()
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector="#detail-ready",
+            no_result_selector="#no-result",
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
         )
+        provider._page = FakePage()
+        provider._page_dirty = False
+
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_authenticated_page") as ensure_page_mock:
+            ensure_page_mock.return_value = None
+            with patch("project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_network_idle") as idle_mock:
+                idle_mock.return_value = None
+                with patch("project.workflows.bb_dashboard_verification.providers._selector_visible") as selector_visible_mock:
+                    selector_visible_mock.side_effect = [False, False, False]
+                    with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
+                        read_snapshot_mock.return_value = DashboardFamilySnapshot(
+                            beneficiary_name="",
+                            irc_details="",
+                            erc_details="",
+                            lc_date="",
+                            last_date_of_shipment="",
+                            lc_expiry_date="",
+                            lc_value="",
+                            foreign_lc_numbers=[],
+                            commodity_quantities=[],
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+                        )
+                        result = provider.lookup_family(search_keys=["1741260401172"])
+
+        self.assertEqual(result.outcome, "no_result")
+        self.assertEqual(result.matched_search_key, "1741260401172")
+        self.assertIsNone(result.snapshot)
 
     def test_compare_dashboard_snapshot_normalizes_dates_before_comparison(self) -> None:
         family = DashboardCandidateFamily(

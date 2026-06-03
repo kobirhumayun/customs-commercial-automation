@@ -218,16 +218,19 @@ class PlaywrightDashboardLookupProvider:
                     attempts.append(
                         DashboardLookupAttempt(
                             search_key=search_key,
-                            outcome="incomplete_data",
-                            message=f"Dashboard detail view did not become ready for '{search_key}'.",
+                            outcome="resolved",
+                            message=(
+                                f"Dashboard detail view readiness selector did not become visible for '{search_key}', "
+                                "but a non-empty dashboard snapshot was captured."
+                            ),
                         )
                     )
                     return DashboardLookupResult(
-                        outcome="incomplete_data",
+                        outcome="resolved",
                         attempts=attempts,
                         matched_search_key=search_key,
                         snapshot=snapshot,
-                        message=f"Dashboard detail view did not become ready for '{search_key}'.",
+                        message=None,
                     )
 
                 snapshot = self._read_snapshot(page)
@@ -364,7 +367,18 @@ class PlaywrightDashboardLookupProvider:
         page.wait_for_url("**/75?clear=75**", timeout=self.timeout_ms)
         _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
         page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
+        self._assert_fresh_search_page_blank(page)
         self._page_dirty = False
+
+    def _assert_fresh_search_page_blank(self, page) -> None:
+        search_value = _read_text(page, self.search_input_selector)
+        snapshot = self._read_snapshot(page)
+        if not search_value and _snapshot_is_empty(snapshot):
+            return
+
+        raise ValueError(
+            "Dashboard reset did not return a blank search page before the next lookup."
+        )
 
     def _read_snapshot(self, page) -> DashboardFamilySnapshot:
         return DashboardFamilySnapshot(
