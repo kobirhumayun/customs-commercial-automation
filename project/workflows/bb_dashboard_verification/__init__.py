@@ -261,6 +261,7 @@ def validate_bb_dashboard_verification_run(
             ship_remarks=aggregate.ship_remarks,
             workbook_lc_sc_no=family.lc_sc_no,
         )
+        lookup_result: DashboardLookupResult | None = None
         try:
             lookup_result = dashboard_provider.lookup_family(search_keys=search_keys)
         except Exception as exc:
@@ -303,7 +304,7 @@ def validate_bb_dashboard_verification_run(
                     final_decision=FinalDecision.HARD_BLOCK,
                     final_workbook_value=discrepancy.message,
                     decision_reasons=[discrepancy.message],
-                    search_attempts=[to_jsonable(item) for item in lookup_result.attempts] if "lookup_result" in locals() else [],
+                    search_attempts=[to_jsonable(item) for item in lookup_result.attempts] if lookup_result is not None else [],
                     erp_aggregate=aggregate,
                     dashboard_snapshot=None,
                     written_shipment_date=_format_workbook_date(aggregate.ship_date),
@@ -620,15 +621,25 @@ def _resolve_live_sl_no_values_by_row(
     try:
         book = app.books.open(str(workbook_path), update_links=False, read_only=True)
         sheet = book.sheets[0]
-        resolved: dict[int, str] = {}
-        for row_index in sorted(row_indexes):
-            displayed_value = sheet.range((row_index, column_index)).api.Text
-            resolved[row_index] = _stringify_sl_no_text(displayed_value)
-        return resolved
+        return _read_live_sl_no_values(
+            sheet=sheet,
+            column_index=column_index,
+            row_indexes=sorted(row_indexes),
+        )
     finally:
         if book is not None:
             book.close()
         app.quit()
+
+
+def _read_live_sl_no_values(*, sheet, column_index: int, row_indexes: list[int]) -> dict[int, str]:
+    if not row_indexes:
+        return {}
+    resolved: dict[int, str] = {}
+    for row_index in row_indexes:
+        displayed_value = sheet.range((row_index, column_index)).api.Text
+        resolved[row_index] = _stringify_sl_no_text(displayed_value)
+    return resolved
 
 
 def _stringify_sl_no_text(value: object) -> str:
@@ -768,10 +779,6 @@ def _evaluate_lookup_result(
     if lookup_result.outcome == "no_result":
         search_key = lookup_result.matched_search_key or family.lc_sc_no
         message = f"No dashboard result was found for '{search_key}'."
-        return FinalDecision.WARNING, message, [message], None, True
-    if lookup_result.outcome == "multiple_results":
-        search_key = lookup_result.matched_search_key or family.lc_sc_no
-        message = f"Multiple dashboard results were returned for '{search_key}'."
         return FinalDecision.WARNING, message, [message], None, True
     if lookup_result.outcome == "incomplete_data" or lookup_result.snapshot is None:
         search_key = lookup_result.matched_search_key or family.lc_sc_no
