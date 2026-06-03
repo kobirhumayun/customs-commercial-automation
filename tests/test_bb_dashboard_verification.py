@@ -369,7 +369,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(resolved, {11: "21A"})
 
-    def test_resolve_sl_no_values_by_row_batches_live_workbook_reads(self) -> None:
+    def test_resolve_sl_no_values_by_row_uses_display_text_for_each_requested_live_row(self) -> None:
         workbook_snapshot = WorkbookSnapshot(
             sheet_name="Sheet1",
             headers=[WorkbookHeader(column_index=1, text="SL.No.")],
@@ -379,9 +379,9 @@ class BBDashboardVerificationTests(unittest.TestCase):
             ],
         )
 
-        class FakeRange:
-            def __init__(self, values) -> None:
-                self.value = values
+        class FakeCell:
+            def __init__(self, text: str) -> None:
+                self.api = type("Api", (), {"Text": text})()
 
         class FakeSheet:
             def __init__(self) -> None:
@@ -389,9 +389,12 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
             def range(self, *coordinates):
                 self.range_calls.append(coordinates)
-                if len(coordinates) == 2:
-                    return FakeRange([["21A"], ["22A"], ["23A"]])
-                raise AssertionError("Expected the batched range read path to be used.")
+                row_index, _column_index = coordinates[0]
+                values = {
+                    11: "21A",
+                    13: "23A",
+                }
+                return FakeCell(values[row_index])
 
         class FakeBook:
             def __init__(self) -> None:
@@ -428,7 +431,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         fake_sheet = FakeApp.last_instance.books.book.sheets[0]
         self.assertEqual(resolved, {11: "21A", 13: "23A"})
-        self.assertEqual(fake_sheet.range_calls, [((11, 1), (13, 1))])
+        self.assertEqual(fake_sheet.range_calls, [((11, 1),), ((13, 1),)])
 
     def test_validate_run_exception_report_does_not_reuse_prior_family_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

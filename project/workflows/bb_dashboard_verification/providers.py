@@ -429,6 +429,7 @@ class PlaywrightDashboardLookupProvider:
     def _reestablish_authenticated_search_page(self, page) -> None:
         page.goto(self.login_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+        self._raise_if_terminal_auth_failure(page)
         if not _selector_visible(page, self.search_input_selector):
             self._perform_login(page)
             self._raise_if_terminal_auth_failure(page)

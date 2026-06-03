@@ -635,47 +635,11 @@ def _resolve_live_sl_no_values_by_row(
 def _read_live_sl_no_values(*, sheet, column_index: int, row_indexes: list[int]) -> dict[int, str]:
     if not row_indexes:
         return {}
-
-    first_row = row_indexes[0]
-    last_row = row_indexes[-1]
-    try:
-        range_values = sheet.range((first_row, column_index), (last_row, column_index)).value
-    except Exception:
-        range_values = None
-
-    if range_values is not None:
-        normalized_values = _coerce_live_range_values(range_values)
-        if len(normalized_values) == (last_row - first_row + 1):
-            values_by_row = {
-                row_index: normalized_values[row_index - first_row]
-                for row_index in range(first_row, last_row + 1)
-            }
-            return {
-                row_index: _stringify_sl_no_text(values_by_row.get(row_index, ""))
-                for row_index in row_indexes
-            }
-
     resolved: dict[int, str] = {}
     for row_index in row_indexes:
         displayed_value = sheet.range((row_index, column_index)).api.Text
         resolved[row_index] = _stringify_sl_no_text(displayed_value)
     return resolved
-
-
-def _coerce_live_range_values(values: object) -> list[object]:
-    if isinstance(values, list):
-        flattened: list[object] = []
-        for item in values:
-            if isinstance(item, list):
-                flattened.extend(item)
-            elif isinstance(item, tuple):
-                flattened.extend(item)
-            else:
-                flattened.append(item)
-        return flattened
-    if isinstance(values, tuple):
-        return _coerce_live_range_values(list(values))
-    return [values]
 
 
 def _stringify_sl_no_text(value: object) -> str:
