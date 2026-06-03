@@ -1024,6 +1024,123 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(result.matched_search_key, "1741260401172")
         self.assertIsNone(result.snapshot)
 
+    def test_playwright_provider_recovers_once_when_lookup_redirects_to_login(self) -> None:
+        class FakeLocator:
+            def wait_for(self, **kwargs) -> None:
+                return None
+
+            def click(self) -> None:
+                return None
+
+            def fill(self, _value: str) -> None:
+                return None
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.url = "https://exp.bb.org.bd/ords/oims/r/import/login?session=1"
+
+            def locator(self, _selector: str) -> FakeLocator:
+                return FakeLocator()
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector=None,
+            no_result_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        provider._page = FakePage()
+        provider._page_dirty = False
+
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_authenticated_page") as ensure_page_mock:
+            ensure_page_mock.return_value = None
+            with patch.object(PlaywrightDashboardLookupProvider, "_recover_dashboard_session") as recover_mock:
+                def recover(*, page, retry_index: int, fallback_error_message=None) -> None:
+                    page.url = "https://exp.bb.org.bd/ords/oims/r/import/75?session=1"
+                    provider._page_dirty = False
+
+                recover_mock.side_effect = recover
+                with patch("project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_network_idle") as idle_mock:
+                    idle_mock.return_value = None
+                    with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
+                        read_snapshot_mock.return_value = DashboardFamilySnapshot(
+                            beneficiary_name="PIONEER DENIM LIMITED",
+                            irc_details="IRC 1",
+                            erc_details="ERC 1",
+                            lc_date="2026-04-22",
+                            last_date_of_shipment="2026-06-15",
+                            lc_expiry_date="2026-06-30",
+                            lc_value="98315.5",
+                            foreign_lc_numbers=["FLC-001"],
+                            commodity_quantities=["33170"],
+                            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+                        )
+                        result = provider.lookup_family(search_keys=["1741260401172"])
+
+        self.assertEqual(result.outcome, "resolved")
+        recover_mock.assert_called_once()
+
+    def test_playwright_provider_latches_terminal_session_failure(self) -> None:
+        class FakePage:
+            def __init__(self) -> None:
+                self.url = "https://exp.bb.org.bd/ords/oims/r/import/login?session=1"
+
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector=None,
+            no_result_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+        provider._page = FakePage()
+        provider._page_dirty = False
+
+        with patch.object(PlaywrightDashboardLookupProvider, "_ensure_authenticated_page") as ensure_page_mock:
+            ensure_page_mock.return_value = None
+            with patch.object(PlaywrightDashboardLookupProvider, "_recover_dashboard_session") as recover_mock:
+                recover_mock.side_effect = ValueError(
+                    "Bangladesh Bank dashboard login attempt has been blocked. Please wait and retry later."
+                )
+                first_result = provider.lookup_family(search_keys=["1741260401172"])
+
+        self.assertEqual(first_result.outcome, "fetch_error")
+        self.assertIn("blocked", first_result.message or "")
+        self.assertIn("blocked", provider._session_failure_message or "")
+
+        second_result = provider.lookup_family(search_keys=["2159260400534"])
+        self.assertEqual(second_result.outcome, "fetch_error")
+        self.assertIn("blocked", second_result.message or "")
+
     def test_compare_dashboard_snapshot_normalizes_dates_before_comparison(self) -> None:
         family = DashboardCandidateFamily(
             family_id="mail-1",
