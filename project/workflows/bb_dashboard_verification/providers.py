@@ -502,7 +502,7 @@ class PlaywrightDashboardLookupProvider:
                 latest_snapshot = current_snapshot
                 last_changed_at = now
                 continue
-            if not _snapshot_is_empty(current_snapshot) and (
+            if _snapshot_is_materialized(current_snapshot) and (
                 (now - last_changed_at) * 1000
             ) >= _SNAPSHOT_STABILITY_WINDOW_MS:
                 return current_snapshot
@@ -554,6 +554,24 @@ def _coerce_string_list(value: object) -> list[str]:
 
 def _snapshot_is_empty(snapshot: DashboardFamilySnapshot) -> bool:
     return not any(
+        [
+            snapshot.beneficiary_name,
+            snapshot.irc_details,
+            snapshot.erc_details,
+            snapshot.lc_date,
+            snapshot.last_date_of_shipment,
+            snapshot.lc_expiry_date,
+            snapshot.lc_value,
+            snapshot.foreign_lc_numbers,
+            snapshot.commodity_quantities,
+        ]
+    )
+
+
+def _snapshot_is_materialized(snapshot: DashboardFamilySnapshot) -> bool:
+    if _snapshot_is_empty(snapshot):
+        return False
+    return all(
         [
             snapshot.beneficiary_name,
             snapshot.irc_details,

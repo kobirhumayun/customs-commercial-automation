@@ -1051,15 +1051,15 @@ class BBDashboardVerificationTests(unittest.TestCase):
             quantity_selector="xpath=//quantity",
         )
 
-        wrong_snapshot = DashboardFamilySnapshot(
-            beneficiary_name="PIONEER DENIMS LTD",
+        partial_snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
             irc_details="IRC 1",
             erc_details="ERC 1",
-            lc_date="2026-05-06",
+            lc_date="",
             last_date_of_shipment="2026-06-05",
             lc_expiry_date="2026-06-20",
             lc_value="9150",
-            foreign_lc_numbers=["JULES-28/2026"],
+            foreign_lc_numbers=[],
             commodity_quantities=["3000"],
             source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
         )
@@ -1079,7 +1079,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
         with patch.object(
             PlaywrightDashboardLookupProvider,
             "_read_snapshot",
-            side_effect=[wrong_snapshot, correct_snapshot, correct_snapshot, correct_snapshot],
+            side_effect=[partial_snapshot, correct_snapshot, correct_snapshot, correct_snapshot],
         ) as read_snapshot_mock:
             with patch(
                 "project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_timeout"
@@ -1093,6 +1093,62 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(snapshot.beneficiary_name, "PIONEER DENIM LIMITED")
         self.assertEqual(read_snapshot_mock.call_count, 4)
+
+    def test_playwright_provider_returns_latest_snapshot_after_settle_timeout_when_snapshot_stays_partial(self) -> None:
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector="#P75_BENEFICIARY_NAME",
+            no_result_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+
+        partial_snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="IRC 1",
+            erc_details="ERC 1",
+            lc_date="2026-05-06",
+            last_date_of_shipment="2026-06-05",
+            lc_expiry_date="2026-06-20",
+            lc_value="9150",
+            foreign_lc_numbers=[],
+            commodity_quantities=["3000"],
+            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+        )
+
+        with patch.object(
+            PlaywrightDashboardLookupProvider,
+            "_read_snapshot",
+            return_value=partial_snapshot,
+        ) as read_snapshot_mock:
+            with patch(
+                "project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_timeout"
+            ) as wait_mock:
+                wait_mock.return_value = None
+                monotonic_values = iter([0.0, 0.0, 0.01, 0.15, 0.18, 0.19, 2.1])
+                with patch(
+                    "project.workflows.bb_dashboard_verification.providers.time.monotonic",
+                    side_effect=lambda: next(monotonic_values, 2.1),
+                ):
+                    snapshot = provider._read_settled_snapshot(page=object())
+
+        self.assertEqual(snapshot, partial_snapshot)
+        self.assertEqual(read_snapshot_mock.call_count, 3)
 
     def test_playwright_provider_recovers_once_when_lookup_redirects_to_login(self) -> None:
         class FakeLocator:
