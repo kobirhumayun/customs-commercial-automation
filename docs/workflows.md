@@ -881,7 +881,6 @@ Rows where:
 
 ### No-data result handling
 - If the dashboard search returns no result, write a clear no-result message.
-- If the dashboard search resolves to multiple results, write a clear multiple-results message.
 - If the dashboard page resolves but required dashboard fields are missing or incomplete, write a clear incomplete-data message.
 - Message wording should be specific to the observed failure mode.
 
