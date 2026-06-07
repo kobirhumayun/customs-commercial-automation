@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -12,6 +13,9 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _BACK_LINK_TEXT = "Back"
 _INLAND_BTB_SEARCH_LINK_TEXT = "Inland BTB LC/Contract Search/Edit"
 _LOGIN_PATH_FRAGMENT = "/ords/oims/r/import/login"
+_SNAPSHOT_SETTLE_TIMEOUT_MS = 2_000
+_SNAPSHOT_STABILITY_WINDOW_MS = 200
+_SNAPSHOT_POLL_INTERVAL_MS = 100
 
 
 def normalize_dashboard_search_key(value: str) -> str:
@@ -230,7 +234,7 @@ class PlaywrightDashboardLookupProvider:
                         ):
                             attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                             break
-                        snapshot = self._read_snapshot(page)
+                        snapshot = self._read_settled_snapshot(page)
                         if _snapshot_is_empty(snapshot):
                             attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                             break
@@ -252,7 +256,7 @@ class PlaywrightDashboardLookupProvider:
                             message=None,
                         )
 
-                    snapshot = self._read_snapshot(page)
+                    snapshot = self._read_settled_snapshot(page)
                     if _snapshot_is_empty(snapshot):
                         attempts.append(DashboardLookupAttempt(search_key=search_key, outcome="no_result"))
                         break
@@ -481,6 +485,30 @@ class PlaywrightDashboardLookupProvider:
             source_url=page.url,
         )
 
+    def _read_settled_snapshot(self, page) -> DashboardFamilySnapshot:
+        settle_timeout_ms = max(
+            _SNAPSHOT_STABILITY_WINDOW_MS,
+            min(self.timeout_ms, _SNAPSHOT_SETTLE_TIMEOUT_MS),
+        )
+        deadline = time.monotonic() + (settle_timeout_ms / 1000)
+        latest_snapshot = self._read_snapshot(page)
+        last_changed_at = time.monotonic()
+
+        while time.monotonic() < deadline:
+            _best_effort_wait_for_timeout(page, timeout_ms=_SNAPSHOT_POLL_INTERVAL_MS)
+            current_snapshot = self._read_snapshot(page)
+            now = time.monotonic()
+            if current_snapshot != latest_snapshot:
+                latest_snapshot = current_snapshot
+                last_changed_at = now
+                continue
+            if _snapshot_is_materialized(current_snapshot) and (
+                (now - last_changed_at) * 1000
+            ) >= _SNAPSHOT_STABILITY_WINDOW_MS:
+                return current_snapshot
+
+        return latest_snapshot
+
     def _perform_login(self, page) -> None:
         if not all(
             [
@@ -540,6 +568,24 @@ def _snapshot_is_empty(snapshot: DashboardFamilySnapshot) -> bool:
     )
 
 
+def _snapshot_is_materialized(snapshot: DashboardFamilySnapshot) -> bool:
+    if _snapshot_is_empty(snapshot):
+        return False
+    return all(
+        [
+            snapshot.beneficiary_name,
+            snapshot.irc_details,
+            snapshot.erc_details,
+            snapshot.lc_date,
+            snapshot.last_date_of_shipment,
+            snapshot.lc_expiry_date,
+            snapshot.lc_value,
+            snapshot.foreign_lc_numbers,
+            snapshot.commodity_quantities,
+        ]
+    )
+
+
 def _optional_string(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
@@ -564,6 +610,17 @@ def _best_effort_wait_for_network_idle(page, *, timeout_ms: int) -> None:
         page.wait_for_load_state("networkidle", timeout=timeout_ms)
     except Exception:
         return None
+
+
+def _best_effort_wait_for_timeout(page, *, timeout_ms: int) -> None:
+    wait_for_timeout = getattr(page, "wait_for_timeout", None)
+    if callable(wait_for_timeout):
+        try:
+            wait_for_timeout(timeout_ms)
+            return None
+        except Exception:
+            return None
+    time.sleep(max(timeout_ms, 0) / 1000)
 
 
 def _selector_visible(page, selector: str, *, timeout_ms: int = 2_000) -> bool:

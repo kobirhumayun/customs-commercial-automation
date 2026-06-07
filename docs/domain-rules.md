@@ -257,8 +257,8 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
 | `bb_dashboard_verification` | `dashboard_status` | `Bangladesh Bank Dashboard` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
-| `bb_dashboard_verification` | `shipment_date` | `Shipment Date` | `update_from_erp_on_successful_family` | row eligible by workflow filters and family final result is `OK` or `OK (KGS)`; source ERP `Ship. DT.` formatted to workbook date representation |
-| `bb_dashboard_verification` | `expiry_date` | `Expiry Date` | `update_from_erp_on_successful_family` | row eligible by workflow filters and family final result is `OK` or `OK (KGS)`; source ERP `Expiry DT.` formatted to workbook date representation |
+| `bb_dashboard_verification` | `shipment_date` | `Shipment Date` | `update_from_erp_after_lookup_comparison` | row eligible by workflow filters and the family reached dashboard lookup/comparison; applies to successful families (`OK`, `OK (KGS)`) and warning/failure families produced after lookup/comparison, but not upstream ERP/input hard-block families; source ERP `Ship. DT.` formatted to workbook date representation |
+| `bb_dashboard_verification` | `expiry_date` | `Expiry Date` | `update_from_erp_after_lookup_comparison` | row eligible by workflow filters and the family reached dashboard lookup/comparison; applies to successful families (`OK`, `OK (KGS)`) and warning/failure families produced after lookup/comparison, but not upstream ERP/input hard-block families; source ERP `Expiry DT.` formatted to workbook date representation |
 
 If a required header is missing, duplicated ambiguously, or maps to multiple candidate columns outside an explicitly declared duplicate-header exception, outcome is `hard_block` with discrepancy code `workbook_header_mapping_invalid`.
 
@@ -427,7 +427,7 @@ Result rules:
 - write `OK` when all required comparisons pass, including either exact LC value/LC qty agreement or the approved excess rule
 - write `OK (KGS)` when all non-quantity comparisons pass, dashboard `LC Value` exactly matches ERP, and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
 - otherwise keep verbose mismatch evidence in report `decision_reasons`, but write a compact comma-separated topic label ending in `mismatch` into workbook `Bangladesh Bank Dashboard` and report `final_workbook_value`; example: `Value, Quantity mismatch`
-- if the dashboard search returns no result, multiple results, or incomplete data, write a clear message specific to that occurrence type
+- if the dashboard search returns no result or incomplete data, write a clear message specific to that occurrence type
 - the current implementation also stages workbook `Shipment Date` and `Expiry Date` updates on warning/failure families produced after dashboard lookup/comparison; upstream ERP/input hard-block families still skip that date writeback
 - ERP is authoritative for those two fields whenever this workflow stages those writes
 
