@@ -678,7 +678,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             ensure_page_mock.return_value = None
             with patch.object(PlaywrightDashboardLookupProvider, "_reset_to_fresh_search_page") as reset_page_mock:
                 reset_page_mock.return_value = None
-                with patch.object(PlaywrightDashboardLookupProvider, "_read_snapshot") as read_snapshot_mock:
+                with patch.object(PlaywrightDashboardLookupProvider, "_read_settled_snapshot") as read_snapshot_mock:
                     read_snapshot_mock.side_effect = [
                         DashboardFamilySnapshot(
                             beneficiary_name="PIONEER DENIM LIMITED",
@@ -1026,6 +1026,73 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertEqual(result.outcome, "no_result")
         self.assertEqual(result.matched_search_key, "1741260401172")
         self.assertIsNone(result.snapshot)
+
+    def test_playwright_provider_waits_for_snapshot_to_settle_before_returning(self) -> None:
+        provider = PlaywrightDashboardLookupProvider(
+            login_url="https://exp.bb.org.bd/ords/f?p=116:75:",
+            username=None,
+            password=None,
+            username_selector=None,
+            password_selector=None,
+            submit_selector=None,
+            post_login_wait_selector=None,
+            search_input_selector="#P75_SEARCH_LC",
+            search_button_selector="button.t-Button",
+            detail_ready_selector="#P75_BENEFICIARY_NAME",
+            no_result_selector=None,
+            beneficiary_selector="#P75_BENEFICIARY_NAME",
+            irc_selector="#P75_IRC_DETAILS",
+            erc_selector="#P75_ERC_DETAILS",
+            lc_date_selector="#P75_LC_DATE",
+            last_date_of_shipment_selector="#P75_LAST_DATE_OF_SHIPMENT",
+            lc_expiry_date_selector="#P75_LC_EXPIRY_DATE",
+            lc_value_selector="#P75_LC_VALUE",
+            foreign_lc_selector="xpath=//foreign",
+            quantity_selector="xpath=//quantity",
+        )
+
+        wrong_snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIMS LTD",
+            irc_details="IRC 1",
+            erc_details="ERC 1",
+            lc_date="2026-05-06",
+            last_date_of_shipment="2026-06-05",
+            lc_expiry_date="2026-06-20",
+            lc_value="9150",
+            foreign_lc_numbers=["JULES-28/2026"],
+            commodity_quantities=["3000"],
+            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+        )
+        correct_snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="IRC 1",
+            erc_details="ERC 1",
+            lc_date="2026-05-06",
+            last_date_of_shipment="2026-06-05",
+            lc_expiry_date="2026-06-20",
+            lc_value="9150",
+            foreign_lc_numbers=["JULES-28/2026"],
+            commodity_quantities=["3000"],
+            source_url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1",
+        )
+
+        with patch.object(
+            PlaywrightDashboardLookupProvider,
+            "_read_snapshot",
+            side_effect=[wrong_snapshot, correct_snapshot, correct_snapshot, correct_snapshot],
+        ) as read_snapshot_mock:
+            with patch(
+                "project.workflows.bb_dashboard_verification.providers._best_effort_wait_for_timeout"
+            ) as wait_mock:
+                wait_mock.return_value = None
+                with patch(
+                    "project.workflows.bb_dashboard_verification.providers.time.monotonic",
+                    side_effect=[0.0, 0.0, 0.01, 0.10, 0.11, 0.25, 0.26, 0.35],
+                ):
+                    snapshot = provider._read_settled_snapshot(page=object())
+
+        self.assertEqual(snapshot.beneficiary_name, "PIONEER DENIM LIMITED")
+        self.assertEqual(read_snapshot_mock.call_count, 4)
 
     def test_playwright_provider_recovers_once_when_lookup_redirects_to_login(self) -> None:
         class FakeLocator:
