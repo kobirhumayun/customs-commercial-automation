@@ -10,12 +10,6 @@ from urllib.parse import unquote
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
-_BACK_LINK_TEXT = "Back"
-_INLAND_BTB_SEARCH_LINK_TEXT = "Inland BTB LC/Contract Search/Edit"
-_LOGIN_PATH_FRAGMENT = "/ords/oims/r/import/login"
-_SNAPSHOT_SETTLE_TIMEOUT_MS = 2_000
-_SNAPSHOT_STABILITY_WINDOW_MS = 200
-_SNAPSHOT_POLL_INTERVAL_MS = 100
 
 
 def normalize_dashboard_search_key(value: str) -> str:
@@ -165,10 +159,18 @@ class PlaywrightDashboardLookupProvider:
     lc_value_selector: str
     foreign_lc_selector: str
     quantity_selector: str
+    back_link_text: str
+    search_edit_link_text: str
+    login_path_fragment: str
+    reset_intermediate_url_pattern: str
+    reset_search_url_pattern: str
     browser_channel: str | None = None
     storage_state_path: Path | None = None
     timeout_ms: int = 120_000
     headless: bool = True
+    snapshot_settle_timeout_ms: int = 2_000
+    snapshot_stability_window_ms: int = 200
+    snapshot_poll_interval_ms: int = 100
     _playwright_manager: object | None = None
     _browser: object | None = None
     _context: object | None = None
@@ -393,11 +395,11 @@ class PlaywrightDashboardLookupProvider:
         if self._page_is_login_page(page):
             self._recover_dashboard_session(page=page, retry_index=0)
             return
-        page.get_by_text(_BACK_LINK_TEXT, exact=True).click()
-        page.wait_for_url("**/350?session=*", timeout=self.timeout_ms)
+        page.get_by_text(self.back_link_text, exact=True).click()
+        page.wait_for_url(self.reset_intermediate_url_pattern, timeout=self.timeout_ms)
         _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
-        page.get_by_text(_INLAND_BTB_SEARCH_LINK_TEXT, exact=True).click()
-        page.wait_for_url("**/75?clear=75**", timeout=self.timeout_ms)
+        page.get_by_text(self.search_edit_link_text, exact=True).click()
+        page.wait_for_url(self.reset_search_url_pattern, timeout=self.timeout_ms)
         _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
         page.locator(self.search_input_selector).wait_for(state="visible", timeout=self.timeout_ms)
         self._assert_fresh_search_page_blank(page)
@@ -469,7 +471,7 @@ class PlaywrightDashboardLookupProvider:
         return terminal_message
 
     def _page_is_login_page(self, page) -> bool:
-        return _LOGIN_PATH_FRAGMENT in _optional_string(getattr(page, "url", ""))
+        return self.login_path_fragment in _optional_string(getattr(page, "url", ""))
 
     def _read_snapshot(self, page) -> DashboardFamilySnapshot:
         return DashboardFamilySnapshot(
@@ -487,15 +489,15 @@ class PlaywrightDashboardLookupProvider:
 
     def _read_settled_snapshot(self, page) -> DashboardFamilySnapshot:
         settle_timeout_ms = max(
-            _SNAPSHOT_STABILITY_WINDOW_MS,
-            min(self.timeout_ms, _SNAPSHOT_SETTLE_TIMEOUT_MS),
+            self.snapshot_stability_window_ms,
+            min(self.timeout_ms, self.snapshot_settle_timeout_ms),
         )
         deadline = time.monotonic() + (settle_timeout_ms / 1000)
         latest_snapshot = self._read_snapshot(page)
         last_changed_at = time.monotonic()
 
         while time.monotonic() < deadline:
-            _best_effort_wait_for_timeout(page, timeout_ms=_SNAPSHOT_POLL_INTERVAL_MS)
+            _best_effort_wait_for_timeout(page, timeout_ms=self.snapshot_poll_interval_ms)
             current_snapshot = self._read_snapshot(page)
             now = time.monotonic()
             if current_snapshot != latest_snapshot:
@@ -504,7 +506,7 @@ class PlaywrightDashboardLookupProvider:
                 continue
             if _snapshot_is_materialized(current_snapshot) and (
                 (now - last_changed_at) * 1000
-            ) >= _SNAPSHOT_STABILITY_WINDOW_MS:
+            ) >= self.snapshot_stability_window_ms:
                 return current_snapshot
 
         return latest_snapshot
