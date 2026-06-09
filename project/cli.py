@@ -2241,7 +2241,7 @@ def _handle_execute_print(args: argparse.Namespace) -> int:
                     printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
                     printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
                     printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
-                    timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 120)))),
+                    timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 0)))),
                 )
             ),
             run_report_persistor=lambda report: write_run_metadata(artifact_paths, to_jsonable(report)),
@@ -2322,7 +2322,7 @@ def _handle_inspect_print_adapter(args: argparse.Namespace) -> int:
             printer_name=str(config.values.get("print_printer_name", "")).strip() or None,
             printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
             printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
-            timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 120)))),
+            timeout_seconds=max(1, int(str(config.values.get("print_command_timeout_seconds", 0)))),
         )
         payload["workflow_id"] = descriptor.workflow_id.value
         payload["print_enabled"] = config.print_enabled
@@ -2404,7 +2404,7 @@ def _collect_live_readiness_report(*, descriptor: WorkflowDescriptor, config, er
                 printer_driver=str(config.values.get("print_printer_driver", "")).strip() or None,
                 printer_port=str(config.values.get("print_printer_port", "")).strip() or None,
                 timeout_seconds=max(
-                    1, int(str(config.values.get("print_command_timeout_seconds", 120)))
+                    1, int(str(config.values.get("print_command_timeout_seconds", 0)))
                 ),
             )
             print_section = build_print_readiness_section(
@@ -2796,31 +2796,21 @@ def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
         storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
         payload = inspect_playwright_report_download(
             base_url=str(config.values.get("erp_base_url", "")).strip(),
-            report_relative_url=str(
-                config.values.get(
-                    "erp_lc_register_relative_url",
-                    "/RptCommercialExport/DateWiseLCRegisterForDocuments",
-                )
-            ).strip()
-            or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+            report_relative_url=str(config.values.get("erp_lc_register_relative_url", "")).strip(),
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
-            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
-            headless=(False if args.headed else bool(config.values.get("playwright_headless", True))),
+            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
+            headless=(False if args.headed else bool(config.values.get("playwright_headless", False))),
             output_dir=output_dir,
             field_values=_resolve_erp_fill_values(args=args, config=config) or _default_live_erp_fill_values(config),
             submit_selector=args.submit_selector
-            or str(config.values.get("erp_report_submit_selector", "")).strip()
-            or 'role=button[name="Submit"]',
+            or str(config.values.get("erp_report_submit_selector", "")).strip(),
             post_submit_wait_selector=args.post_submit_wait_selector
-            or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
-            or ".dx-menu-item-popout",
+            or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
             download_menu_selector=args.download_menu_selector
-            or str(config.values.get("erp_report_download_menu_selector", "")).strip()
-            or ".dx-menu-item-popout",
+            or str(config.values.get("erp_report_download_menu_selector", "")).strip(),
             download_format_selector=args.download_format_selector
-            or str(config.values.get("erp_report_download_format_selector", "")).strip()
-            or '.dxrd-preview-export-item-text:text-is("CSV")',
+            or str(config.values.get("erp_report_download_format_selector", "")).strip(),
         )
         payload["workflow_id"] = descriptor.workflow_id.value
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
@@ -3824,11 +3814,27 @@ def _format_erp_report_date(value) -> str:
 
 def _default_live_erp_fill_values(config) -> list[tuple[str, str]]:
     today = datetime.now(tz=validate_timezone(config.state_timezone)).date()
-    start_date = today - timedelta(days=365)
+    start_date = today - timedelta(days=int(config.values.get("erp_report_default_lookback_days", 0)))
     return [
-        (":nth-match(.dx-texteditor-input, 3)", _format_erp_report_date(start_date)),
-        (":nth-match(.dx-texteditor-input, 4)", _format_erp_report_date(today)),
+        (
+            _nth_match_selector(
+                base_selector=str(config.values.get("erp_report_default_from_input_selector", "")).strip(),
+                zero_based_index=int(config.values.get("erp_report_default_from_input_index", 0)),
+            ),
+            _format_erp_report_date(start_date),
+        ),
+        (
+            _nth_match_selector(
+                base_selector=str(config.values.get("erp_report_default_to_input_selector", "")).strip(),
+                zero_based_index=int(config.values.get("erp_report_default_to_input_index", 0)),
+            ),
+            _format_erp_report_date(today),
+        ),
     ]
+
+
+def _nth_match_selector(*, base_selector: str, zero_based_index: int) -> str:
+    return f":nth-match({base_selector}, {zero_based_index + 1})"
 
 
 def _load_snapshot_if_supplied(
@@ -3870,36 +3876,17 @@ def _load_erp_provider(
         configured_fill_values = _resolve_configured_erp_fill_values(config)
         return PlaywrightERPRowProvider(
             base_url=str(config.values.get("erp_base_url", "")).strip(),
-            report_relative_url=str(
-                config.values.get(
-                    "erp_lc_register_relative_url",
-                    "/RptCommercialExport/DateWiseLCRegisterForDocuments",
-                )
-            ).strip()
-            or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+            report_relative_url=str(config.values.get("erp_lc_register_relative_url", "")).strip(),
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
             field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
-            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip()
-            or 'role=button[name="Submit"]',
-            post_submit_wait_selector=str(
-                config.values.get("erp_report_post_submit_wait_selector", ".dx-menu-item-popout")
-            ).strip()
-            or ".dx-menu-item-popout",
-            download_menu_selector=str(
-                config.values.get("erp_report_download_menu_selector", ".dx-menu-item-popout")
-            ).strip()
-            or ".dx-menu-item-popout",
-            download_format_selector=str(
-                config.values.get(
-                    "erp_report_download_format_selector",
-                    '.dxrd-preview-export-item-text:text-is("CSV")',
-                )
-            ).strip()
-            or '.dxrd-preview-export-item-text:text-is("CSV")',
-            table_selector=str(config.values.get("erp_report_table_selector", "table")).strip() or "table",
-            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
-            headless=bool(config.values.get("playwright_headless", True)),
+            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip(),
+            post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
+            download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip(),
+            download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip(),
+            table_selector=str(config.values.get("erp_report_table_selector", "")).strip(),
+            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
+            headless=bool(config.values.get("playwright_headless", False)),
         )
     return EmptyERPRowProvider()
 
@@ -3946,13 +3933,7 @@ def _load_dashboard_provider(
 
     storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
     return PlaywrightDashboardLookupProvider(
-        login_url=str(
-            config.values.get(
-                "bb_dashboard_login_url",
-                "https://exp.bb.org.bd/ords/oims/r/import/75",
-            )
-        ).strip()
-        or "https://exp.bb.org.bd/ords/oims/r/import/75",
+        login_url=str(config.values.get("bb_dashboard_login_url", "")).strip(),
         username=str(config.values.get("bb_dashboard_username", "")).strip() or None,
         password=str(config.values.get("bb_dashboard_password", "")).strip() or None,
         username_selector=str(config.values.get("bb_dashboard_username_selector", "")).strip() or None,
@@ -3974,10 +3955,29 @@ def _load_dashboard_provider(
         lc_value_selector=str(config.values.get("bb_dashboard_lc_value_selector", "")).strip(),
         foreign_lc_selector=str(config.values.get("bb_dashboard_foreign_lc_selector", "")).strip(),
         quantity_selector=str(config.values.get("bb_dashboard_quantity_selector", "")).strip(),
+        back_link_text=str(config.values.get("bb_dashboard_back_link_text", "")).strip(),
+        search_edit_link_text=str(config.values.get("bb_dashboard_search_edit_link_text", "")).strip(),
+        login_path_fragment=str(config.values.get("bb_dashboard_login_path_fragment", "")).strip(),
+        reset_intermediate_url_pattern=str(
+            config.values.get("bb_dashboard_reset_intermediate_url_pattern", "")
+        ).strip(),
+        reset_search_url_pattern=str(config.values.get("bb_dashboard_reset_search_url_pattern", "")).strip(),
         browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
         storage_state_path=Path(storage_state_value) if storage_state_value else None,
-        timeout_ms=max(1, int(str(config.values.get("bb_dashboard_timeout_seconds", 120)))) * 1000,
-        headless=bool(config.values.get("playwright_headless", True)),
+        timeout_ms=max(1, int(str(config.values.get("bb_dashboard_timeout_seconds", 0)))) * 1000,
+        headless=bool(config.values.get("playwright_headless", False)),
+        snapshot_settle_timeout_ms=max(
+            1,
+            int(str(config.values.get("bb_dashboard_snapshot_settle_timeout_ms", 0))),
+        ),
+        snapshot_stability_window_ms=max(
+            1,
+            int(str(config.values.get("bb_dashboard_snapshot_stability_window_ms", 0))),
+        ),
+        snapshot_poll_interval_ms=max(
+            1,
+            int(str(config.values.get("bb_dashboard_snapshot_poll_interval_ms", 0))),
+        ),
     )
 
 
@@ -4076,27 +4076,17 @@ def _probe_live_erp_download_readiness(config) -> None:
     storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
     payload = inspect_playwright_report_download(
         base_url=str(config.values.get("erp_base_url", "")).strip(),
-        report_relative_url=str(
-            config.values.get(
-                "erp_lc_register_relative_url",
-                "/RptCommercialExport/DateWiseLCRegisterForDocuments",
-            )
-        ).strip()
-        or "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+        report_relative_url=str(config.values.get("erp_lc_register_relative_url", "")).strip(),
         browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
         storage_state_path=Path(storage_state_value) if storage_state_value else None,
-        timeout_ms=int(config.values.get("erp_download_timeout_seconds", 120)) * 1000,
-        headless=bool(config.values.get("playwright_headless", True)),
+        timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
+        headless=bool(config.values.get("playwright_headless", False)),
         output_dir=Path(tempfile.mkdtemp(prefix="erp-readiness-")),
         field_values=_resolve_configured_erp_fill_values(config) or _default_live_erp_fill_values(config),
-        submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip()
-        or 'role=button[name="Submit"]',
-        post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
-        or ".dx-menu-item-popout",
-        download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip()
-        or ".dx-menu-item-popout",
-        download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip()
-        or '.dxrd-preview-export-item-text:text-is("CSV")',
+        submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip(),
+        post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
+        download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip(),
+        download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip(),
     )
     if payload.get("status") != "ready":
         raise ValueError(f"Live ERP download flow failed: {payload.get('error') or 'unknown error'}")

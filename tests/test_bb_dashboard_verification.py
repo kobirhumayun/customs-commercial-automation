@@ -670,6 +670,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage(url="https://exp.bb.org.bd/ords/oims/r/import/75?session=1")
         provider._page_dirty = False
@@ -788,6 +793,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = True
@@ -885,6 +895,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = True
@@ -930,6 +945,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = False
@@ -998,6 +1018,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = False
@@ -1049,6 +1074,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
 
         partial_snapshot = DashboardFamilySnapshot(
@@ -1116,6 +1146,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
 
         partial_snapshot = DashboardFamilySnapshot(
@@ -1189,6 +1224,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = False
@@ -1247,6 +1287,11 @@ class BBDashboardVerificationTests(unittest.TestCase):
             lc_value_selector="#P75_LC_VALUE",
             foreign_lc_selector="xpath=//foreign",
             quantity_selector="xpath=//quantity",
+            back_link_text="Back",
+            search_edit_link_text="Inland BTB LC/Contract Search/Edit",
+            login_path_fragment="/ords/oims/r/import/login",
+            reset_intermediate_url_pattern="**/350?session=*",
+            reset_search_url_pattern="**/75?clear=75**",
         )
         provider._page = FakePage()
         provider._page_dirty = False
