@@ -17,6 +17,7 @@ from project.documents import (
 from project.erp import (
     DelimitedERPExportRowProvider,
     EmptyERPRowProvider,
+    inspect_playwright_report_page,
     inspect_playwright_report_download,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
@@ -2367,7 +2368,7 @@ def _collect_live_readiness_report(*, descriptor: WorkflowDescriptor, config, er
                 erp_payload=erp_payload,
             )
         else:
-            _probe_live_erp_download_readiness(config)
+            _probe_live_erp_page_readiness(config)
             erp_section = build_erp_readiness_section(
                 requested_file_numbers=[],
                 erp_payload=None,
@@ -4072,41 +4073,27 @@ def _default_erp_download_output_dir(*, report_root: Path, workflow_id: str) -> 
     return report_root / "erp_debug" / f"{workflow_id}.{timestamp}"
 
 
-def _probe_live_erp_download_readiness(config) -> None:
+def _probe_live_erp_page_readiness(config) -> None:
     storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
-    payload = inspect_playwright_report_download(
+    required_selectors = [
+        selector
+        for selector, _value in (_resolve_configured_erp_fill_values(config) or _default_live_erp_fill_values(config))
+    ]
+    submit_selector = str(config.values.get("erp_report_submit_selector", "")).strip()
+    if submit_selector:
+        required_selectors.append(submit_selector)
+
+    payload = inspect_playwright_report_page(
         base_url=str(config.values.get("erp_base_url", "")).strip(),
         report_relative_url=str(config.values.get("erp_lc_register_relative_url", "")).strip(),
         browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
         storage_state_path=Path(storage_state_value) if storage_state_value else None,
         timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
         headless=bool(config.values.get("playwright_headless", False)),
-        output_dir=Path(tempfile.mkdtemp(prefix="erp-readiness-")),
-        field_values=_resolve_configured_erp_fill_values(config) or _default_live_erp_fill_values(config),
-        submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip(),
-        post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
-        download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip(),
-        download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip(),
+        required_selectors=required_selectors,
     )
     if payload.get("status") != "ready":
-        raise ValueError(f"Live ERP download flow failed: {payload.get('error') or 'unknown error'}")
-    receipt = payload.get("download_receipt")
-    if not isinstance(receipt, dict):
-        raise ValueError("Live ERP readiness probe did not return a download receipt.")
-    if receipt.get("exists") is False:
-        raise ValueError("Live ERP readiness probe did not save the downloaded file.")
-    if receipt.get("is_empty") is True:
-        raise ValueError("Live ERP readiness probe downloaded an empty file.")
-    if receipt.get("looks_like_html") is True:
-        raise ValueError("Live ERP readiness probe downloaded HTML instead of a report export.")
-    if receipt.get("has_required_erp_headers") is False:
-        missing = receipt.get("erp_header_missing")
-        if isinstance(missing, list) and missing:
-            raise ValueError(
-                "Live ERP readiness probe is missing required ERP headers: "
-                + ", ".join(str(item) for item in missing)
-            )
-        raise ValueError("Live ERP readiness probe did not expose required ERP headers.")
+        raise ValueError(f"Live ERP page probe failed: {payload.get('error') or 'unknown error'}")
 
 
 def _default_workflow_summary_output_path(*, report_root: Path, workflow_id: str) -> Path:

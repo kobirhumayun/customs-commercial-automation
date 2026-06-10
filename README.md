@@ -95,6 +95,7 @@ Operational notes:
 - Completed runs may still retain earlier discrepancy records from failed intermediate attempts in the audit trail; the terminal phase statuses are the authoritative operational state.
 - Daily `validate-run` saves PDF attachments when `--document-root` is used, but it no longer performs OCR-based saved-document analysis by default in the released export workflow path.
 - For export LC/SC workbook mapping, the `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are required. If ERP leaves the `Ship. Remarks` value blank for a row, the workflow writes a blank value rather than blocking the mail.
+- `report-live-readiness` checks ERP page access and expected selectors without downloading the report; the real ERP export download happens during `validate-run`.
 
 ## Daily Operator Decision Tree
 Use this as the normal day-to-day workflow guide after release:

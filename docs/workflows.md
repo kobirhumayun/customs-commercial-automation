@@ -932,6 +932,7 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 
 ### Release readiness checklist
 - `report-live-readiness` must return `overall_status = "ready"` before first live use on a workstation/profile
+- the ERP portion of `report-live-readiness` is a non-download page-access/selector probe; the actual ERP export used by workflows occurs during `validate-run`
 - Outlook folder `EntryID` values must be copied from `inspect-outlook-folders` into the active TOML
 - ERP download selectors/settings must be validated against the live report form
 - the workbook year, sheet, and header mapping must be confirmed for the active filing cycle

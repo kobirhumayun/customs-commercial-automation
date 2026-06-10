@@ -307,6 +307,93 @@ def inspect_playwright_report_download(
                 pass
 
 
+def inspect_playwright_report_page(
+    *,
+    base_url: str,
+    report_relative_url: str,
+    browser_channel: str | None,
+    storage_state_path: Path | None,
+    timeout_ms: int,
+    headless: bool,
+    required_selectors: list[str] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": "issue",
+        "target_url": None,
+        "final_url": None,
+        "page_title": None,
+        "headless": headless,
+        "required_selectors": list(required_selectors or []),
+        "selector_receipts": [],
+        "error": None,
+    }
+
+    if not base_url.strip():
+        payload["error"] = "Live ERP provider requires a non-empty erp_base_url"
+        return payload
+    if storage_state_path is not None and not storage_state_path.exists():
+        payload["error"] = f"Playwright storage state path does not exist: {storage_state_path}"
+        return payload
+
+    target_url = urljoin(base_url.rstrip("/") + "/", report_relative_url.lstrip("/"))
+    payload["target_url"] = target_url
+
+    page = None
+    browser = None
+    context = None
+    try:
+        sync_playwright = _load_playwright_sync_api()
+        with sync_playwright() as playwright:
+            browser_launch_kwargs: dict[str, object] = {"headless": headless}
+            if browser_channel:
+                browser_launch_kwargs["channel"] = browser_channel
+            browser = playwright.chromium.launch(**browser_launch_kwargs)
+            context_kwargs: dict[str, object] = {}
+            if storage_state_path is not None:
+                context_kwargs["storage_state"] = str(storage_state_path)
+            context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+
+            selector_receipts: list[dict[str, object]] = []
+            for selector in required_selectors or []:
+                locator = page.locator(selector)
+                locator.wait_for(state="visible", timeout=timeout_ms)
+                selector_receipts.append(
+                    {
+                        "selector": selector,
+                        "matched_count": locator.count(),
+                        "visible": True,
+                    }
+                )
+
+            payload["selector_receipts"] = selector_receipts
+            payload["final_url"] = page.url
+            payload["page_title"] = page.title()
+            payload["status"] = "ready"
+            return payload
+    except Exception as exc:
+        payload["error"] = str(exc)
+        if page is not None:
+            try:
+                payload["final_url"] = payload["final_url"] or page.url
+            except Exception:
+                pass
+        return payload
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
 def _click_locator(locator, *, timeout_ms: int) -> None:
     target = getattr(locator, "first", locator)
     try:

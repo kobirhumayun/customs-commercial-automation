@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from project.erp import (
     DelimitedERPExportRowProvider,
+    inspect_playwright_report_page,
     inspect_playwright_report_download,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
@@ -162,6 +163,89 @@ class ERPProviderTests(unittest.TestCase):
             self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
             self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
             self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
+
+    def test_inspect_playwright_report_page_verifies_required_selectors_without_download(self) -> None:
+        class FakeLocator:
+            def __init__(self, page, selector: str) -> None:
+                self.page = page
+                self.selector = selector
+
+            def count(self) -> int:
+                return 1
+
+            def wait_for(self, state: str, timeout: int) -> None:
+                self.page.waits.append((self.selector, state, timeout))
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.url = "https://erp.local/final"
+                self.waits: list[tuple[str, str, int]] = []
+                self.locators: dict[str, FakeLocator] = {}
+
+            def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                self.goto_call = (url, wait_until, timeout)
+
+            def wait_for_load_state(self, state: str, timeout: int) -> None:
+                self.load_state_call = (state, timeout)
+
+            def locator(self, selector: str):
+                if selector not in self.locators:
+                    self.locators[selector] = FakeLocator(self, selector)
+                return self.locators[selector]
+
+            def title(self) -> str:
+                return "ERP Report"
+
+        class FakeContext:
+            def __init__(self) -> None:
+                self.page = FakePage()
+
+            def new_page(self):
+                return self.page
+
+            def close(self) -> None:
+                return None
+
+        class FakeBrowser:
+            def new_context(self, **_kwargs):
+                return FakeContext()
+
+            def close(self) -> None:
+                return None
+
+        class FakeChromium:
+            def launch(self, **_kwargs):
+                return FakeBrowser()
+
+        class FakePlaywright:
+            chromium = FakeChromium()
+
+        class FakeSyncPlaywright:
+            def __call__(self):
+                return self
+
+            def __enter__(self):
+                return FakePlaywright()
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("project.erp.providers._load_playwright_sync_api", return_value=FakeSyncPlaywright()):
+            payload = inspect_playwright_report_page(
+                base_url="https://erp.local",
+                report_relative_url="/report",
+                browser_channel="msedge",
+                storage_state_path=None,
+                timeout_ms=30_000,
+                headless=False,
+                required_selectors=["#fromDate", "#toDate", "#show"],
+            )
+
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["page_title"], "ERP Report")
+        self.assertEqual(len(payload["selector_receipts"]), 3)
+        self.assertEqual(payload["selector_receipts"][0]["selector"], "#fromDate")
+        self.assertEqual(payload["selector_receipts"][2]["selector"], "#show")
 
     def test_inspect_playwright_report_download_retries_force_click_when_pointer_events_intercept(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
