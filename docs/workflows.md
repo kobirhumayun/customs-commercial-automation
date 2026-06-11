@@ -785,25 +785,38 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 
 ### Inputs
 - Outlook folder: `working` after operator triage from `temp-import`; snapshot all messages in the folder when the CLI is triggered
-- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list stored in code
+- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list loaded from the workflow rule-pack keyword module
+- Attachment storage base path comes from workflow configuration and import PDFs are stored under the BTB LC year derived from the normalized BTB LC date
 
 ### Extraction targets
+- Extract only the import BTB LC portion from the first three pages of the PDF
 - BTB LC number
 - BTB LC date
 - BTB LC value
-- yarn quantity from PI
+- PI number
 - related export LC number from clause text
+- Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
+- PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
 
 ### Candidate row rules
+- Normalize import BTB LC values and workbook export LC values to canonical numeric values before comparison
+- Group all validated import BTB LCs in the run by related export LC
+- Within each related-export-LC group, process import BTB LCs from highest to lowest normalized import BTB LC value
 - export LC matches related export LC
 - `UP No.` blank
 - BTB LC target field blank
-- choose the first row where BTB LC value is between 40% and 80% of export LC value
+- row not already selected by an earlier import BTB LC allocation in the same run
+- eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
+- if multiple rows qualify, select the row with the highest normalized export LC value
+- if multiple remaining rows are still tied after the highest-export-value key, the lowest workbook row index wins
 - one import LC maps to one row only
 
 ### Batch execution behavior
 - blocked emails remain in `working`
-- successfully processed import-team emails move to `Import` only after the batch workbook-write and batch print phases finish
+- this workflow has no document print phase
+- emit JSON and HTML reports for the run and affected export-LC groups
+- automatically open the generated HTML report in the default browser after terminal mail-move success
+- successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
 
 ## Bangladesh Bank dashboard verification
 
@@ -1054,14 +1067,14 @@ Versioned JSON schema definitions for run-level, mail-level, discrepancy, and re
 ### Import workflow keyword-governance contract (normative)
 For `import_btb_lc`, the fabric-subject keyword list must be managed as versioned rule data rather than ad hoc constants.
 
-- Canonical source path: `rules/import_btb_lc/keywords.yaml`.
-- The file must contain:
-  - `revision` (string, required)
-  - `include_keywords` (array of case-insensitive substrings, required)
-  - `exclude_keywords` (array, optional; evaluated after include match)
+- Canonical source path: `project/rules/workflows/import_btb_lc/keywords.py`.
+- The module must export:
+  - `IMPORT_KEYWORD_REVISION` (string, required)
+  - `IMPORT_SUBJECT_KEYWORDS` (sequence of case-insensitive substrings, required)
+  - `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` (sequence, optional; evaluated after include match)
 - Matching policy:
   1. subject is normalized by trim + whitespace collapse + ASCII case-folding to lowercase
-  2. include pass requires at least one include keyword hit
+  2. include pass requires at least one `IMPORT_SUBJECT_KEYWORDS` hit
   3. any exclude hit after include pass makes the mail ineligible
-- `mail_report.import_keyword_revision` must equal `revision` from the loaded keyword file for every processed import mail.
-- Loader failures (missing file, invalid schema, empty include list) are startup hard failures for `import_btb_lc`.
+- `mail_report.import_keyword_revision` must equal `IMPORT_KEYWORD_REVISION` from the loaded keyword module for every processed import mail.
+- Loader failures (missing module, invalid exports, empty include list) are startup hard failures for `import_btb_lc`.

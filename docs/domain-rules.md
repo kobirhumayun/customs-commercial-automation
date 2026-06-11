@@ -23,7 +23,7 @@
 The configured export `document_root` is a stable storage base, not a per-run container. New emails, amendments, and later-arriving related PDFs for the same canonical LC/SC family must resolve back into the same attachment directory under that base path, even when they arrive on different days or reference different file numbers from the same family.
 
 ### Import path
-Designated import root organized by year.
+The configured import storage base path is a stable root, not a per-run container. Import BTB LC attachments must be stored under `<import_document_root>/<BTB LC year>/`, where the year is derived from the normalized BTB LC date.
 
 ### Duplicate rule
 A duplicate PDF is defined only by identical filename.
@@ -457,18 +457,33 @@ The dashboard column is verification-only and should not be used to drive other 
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against a versioned rules data file: `rules/import_btb_lc/keywords.yaml`.
-- Required keys in `keywords.yaml`:
-  - `revision` (string)
-  - `include_keywords` (non-empty array of non-empty strings)
-  - `exclude_keywords` (array, optional)
+- Fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
+- Required module exports:
+  - `IMPORT_KEYWORD_REVISION` (string)
+  - `IMPORT_SUBJECT_KEYWORDS` (non-empty sequence of non-empty strings)
+  - `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` (sequence, optional)
 - Subject matching sequence:
   1. normalize subject with trim + whitespace collapse + lowercase
-  2. require at least one include-keyword hit
+  2. require at least one include-keyword hit from `IMPORT_SUBJECT_KEYWORDS`
   3. reject if any exclude-keyword hit is present
-- Startup must hard-fail before run snapshot/side effects if file is missing, malformed, or include list is empty.
-- The active `revision` value must be stamped as `import_keyword_revision` in run and mail reports.
+- Startup must hard-fail before run snapshot/side effects if the module is missing, malformed, or the include list is empty.
+- The active `IMPORT_KEYWORD_REVISION` value must be stamped as `import_keyword_revision` in run and mail reports.
 - Keyword-list changes must follow code-review and release boundaries; no ad hoc runtime edits.
+
+## Import BTB LC allocation rule
+- Import BTB LC value comparison is numeric, not lexical. Implementations must normalize BTB LC values and workbook export `Amount` values to canonical decimals before evaluating the 40%-80% rule.
+- A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
+- For allocation, the run must group all validated import BTB LCs by related export LC and process each group from highest to lowest normalized import BTB LC value.
+- Candidate workbook rows for a given import BTB LC must satisfy all of:
+  - workbook export LC matches the related export LC
+  - `UP No.` is blank
+  - import `BTB L/C No.` target is blank
+  - row has not already been reserved by an earlier import BTB LC allocation in the same run
+- A workbook row is value-eligible only when the normalized import BTB LC value is between 40% and 80% of the normalized workbook export `Amount` value, inclusive.
+- If multiple rows are value-eligible for one import BTB LC, choose the row with the highest normalized workbook export `Amount` value.
+- If multiple remaining rows are still tied after the highest-export-value key, choose the row with the lowest workbook row index.
+- Once a workbook row is selected for one import BTB LC in the run, that row must be excluded from all later import BTB LC allocations in the same run.
+- One import BTB LC maps to one workbook row only.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
@@ -515,7 +530,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
 - Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
-- Successfully processed import-team emails move to `Import` only after batch workbook writes and printing complete.
+- Successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; the generated HTML report opens automatically after terminal mail-move success.
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.
@@ -528,7 +543,7 @@ The dashboard column is verification-only and should not be used to drive other 
 To keep import relevance deterministic and auditable, keyword changes must follow a documented lifecycle.
 
 ### Change control checklist
-Every pull request that modifies `project/workflows/import_btb_lc/keywords.py` must include:
+Every pull request that modifies `project/rules/workflows/import_btb_lc/keywords.py` must include:
 1. updated `IMPORT_KEYWORD_REVISION` matching `YYYY-MM-DD.N`
 2. rationale for each added/removed keyword
 3. business-domain approval note
@@ -542,6 +557,7 @@ At minimum, tests must cover:
 - case-insensitive matching behavior
 - duplicate keyword normalization behavior
 - startup hard-fail paths for missing/malformed `IMPORT_SUBJECT_KEYWORDS`
+- startup hard-fail paths for malformed `IMPORT_SUBJECT_EXCLUDE_KEYWORDS`
 - startup hard-fail path for malformed `IMPORT_KEYWORD_REVISION`
 
 Suggested fixture location for implementation: `tests/workflows/import_btb_lc/fixtures/`.

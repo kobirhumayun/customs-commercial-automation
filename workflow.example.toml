@@ -10,6 +10,12 @@ run_artifact_root = "C:/customs-automation/state/runs"
 backup_root = "C:/customs-automation/state/backups"
 master_workbook_root = "C:/customs-automation/workbooks"
 
+# Optional workflow-specific storage roots.
+# Example for `import_btb_lc`:
+# import_document_root = "C:/customs-automation/import-documents"
+# Import workflow storage shape:
+# <import_document_root>/<BTB LC year>/
+
 # Outlook / ERP / browser settings.
 outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
@@ -85,6 +91,8 @@ bb_dashboard_snapshot_poll_interval_ms = 100
 # master_workbook_path_template = "C:/customs-automation/workbooks/{workflow_id}-{year}.xlsx"
 master_workbook_path_template = "C:/customs-automation/workbooks/UP Issuing Status for the Period # 01-03-2026 to 28-02-2027.xlsx"
 excel_lock_timeout_seconds = 120
+# Set `print_enabled=false` for workflows without a live print phase,
+# including `import_btb_lc` and `bb_dashboard_verification`.
 print_enabled = true
 
 # Required Outlook folder EntryIDs for the workflow being run.

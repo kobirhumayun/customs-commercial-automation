@@ -254,12 +254,16 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 
 ### Import / BTB LC CLI
 - Operator moves fabric-relevant emails from `temp-import` to `working`.
-- Relevance is determined by case-insensitive substring matching against the fabric subject keyword list stored in code.
-- New PDFs are saved into the designated import folder organized by year.
-- Extraction returns BTB LC number/date/value, PI yarn quantity, and related export LC number from clauses.
+- Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack.
+- New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date.
+- Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value, PI number, and related export LC number from LC clauses.
+- The low-quality scanned PI and export-LC pages appended below the BTB LC are out of phase-1 PDF extraction scope; PI yarn quantity remains a future import-ERP integration input rather than a direct PDF extraction target.
+- Candidate processing groups all validated import BTB LCs in the run by related export LC family, orders each family from highest to lowest normalized import BTB LC value, and excludes workbook rows already claimed earlier in the same run.
 - Candidate workbook rows are filtered by matching export LC with blank `UP No.` and blank BTB LC field.
-- Strict validation selects the first row where BTB LC value falls between 40% and 80% of export LC value.
+- Strict validation selects a row only when the normalized BTB LC value falls between 40% and 80% of the normalized workbook export LC value, inclusive.
+- If multiple workbook rows qualify for one import BTB LC, the selected row is the one with the highest normalized workbook export LC value; if a tie remains, the lowest workbook row index wins.
 - One import LC populates exactly one workbook row.
+- The workflow has no document print phase; it emits JSON and HTML reports and opens the HTML report automatically after terminal mail-move success.
 - Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
 
 ### Bangladesh Bank dashboard verification CLI
@@ -438,9 +442,10 @@ This allows deterministic review of why a value was accepted or blocked.
 ### Deterministic list location
 - Workflow keyword/rule lists that directly influence write/no-write decisions (including import relevance keywords) must live in **in-repo Python constants**, not operator-editable external config files, in phase 1.
 - Rationale: keeps behavior deterministic, code-reviewed, and tied to explicit release artifacts.
-- Import relevance keyword constants must use the canonical module path `project/workflows/import_btb_lc/keywords.py` (import path `project.workflows.import_btb_lc.keywords`) so startup validation and lineage stamping are deterministic across environments.
+- Import relevance keyword constants must use the canonical module path `project/rules/workflows/import_btb_lc/keywords.py` (import path `project.rules.workflows.import_btb_lc.keywords`) so startup validation and lineage stamping remain aligned with the workflow-specific rule-pack structure used by other finalized workflows.
 - The module must export both required constants:
   - `IMPORT_SUBJECT_KEYWORDS`
+  - `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` (optional)
   - `IMPORT_KEYWORD_REVISION`
 
 ### Ownership and update workflow
@@ -461,7 +466,7 @@ This allows deterministic review of why a value was accepted or blocked.
 
 ### Missing/malformed configuration behavior
 - If required deterministic list constants cannot be loaded, are empty when marked mandatory, or fail schema/shape validation at startup, the CLI must terminate with a **startup hard failure** before snapshot side effects.
-- Import keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`.
+- Import keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`; malformed optional `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` must also hard-fail startup.
 - Phase 1 must not silently fall back to permissive defaults for missing/malformed decision-driving lists.
 
 ## 10. Windows deployment and operations
@@ -648,7 +653,7 @@ Optional placeholders may be used if a deployment intentionally wants generated 
 - `{workflow_id}`
 
 ### Workflow-specific required keys
-Workflow modules must declare their own required key list (for example import keyword controls, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
+Workflow modules must declare their own required key list (for example import document storage root, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
 
 ### Secrets handling (Windows-first)
 - Credentials must not be hard-coded in source files.
