@@ -71,6 +71,12 @@ Every discrepancy payload should include:
 | `export_required_erp_field_missing` | `hard_block` | export_lc_sc | A canonical ERP row is missing one or more fields required for export workbook staging. |
 | `export_subject_family_mismatch` | `hard_block` | export_lc_sc | Parsed export subject fields did not match the verified ERP family. |
 | `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Import candidate resolution remained tied after all keys. |
+| `import_duplicate_document_same_mail` | `warning` | import_btb_lc | Repeated import BTB LC evidence within one mail matched exactly and was treated as duplicate-only with no additional write. |
+| `import_duplicate_document_same_run` | `warning` | import_btb_lc | A later import BTB LC in the same run matched an earlier accepted import BTB LC exactly and was treated as duplicate-only with no additional write. |
+| `import_filename_number_mismatch` | `warning` | import_btb_lc | The import BTB LC attachment filename did not match the extracted BTB LC number, but required extracted values remained valid so processing continued. |
+| `import_duplicate_document_conflict` | `hard_block` | import_btb_lc | Duplicate import BTB LC evidence conflicted on required extracted values or deterministic workbook implications. |
+| `import_no_qualified_workbook_row` | `hard_block` | import_btb_lc | The extracted import BTB LC did not qualify any workbook row under the deterministic candidate rules. |
+| `import_required_document_missing` | `hard_block` | import_btb_lc | No deterministic import BTB LC PDF could be extracted from the relevant import mail. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |
 
 ### OCR / extraction quality

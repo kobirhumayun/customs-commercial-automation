@@ -795,13 +795,19 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - BTB LC value
 - PI number
 - related export LC number from clause text
+- attachment filename comparison against extracted BTB LC number as warning-only evidence
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
 - PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
+- if no import BTB LC PDF can be extracted deterministically from a relevant mail, the mail hard-blocks and the report must capture the missing/failed extraction evidence
 
 ### Candidate row rules
 - Normalize import BTB LC values and workbook export LC values to canonical numeric values before comparison
 - Group all validated import BTB LCs in the run by related export LC
 - Within each related-export-LC group, process import BTB LCs from highest to lowest normalized import BTB LC value
+- Before row allocation, detect duplicate import BTB LC evidence already present in the workbook and duplicate import BTB LC evidence repeated earlier in the same run across the same mail or different mails
+- If the normalized import BTB LC number is already present anywhere in workbook column `BTB L/C No.`, treat it as an immediate duplicate-only/no-write success before export-LC candidate-row filtering begins
+- Exact duplicate import BTB LC evidence is a duplicate-only/no-write success and must remain visible in reports
+- Conflicting duplicate import BTB LC evidence is a hard-block
 - export LC matches related export LC
 - `UP No.` blank
 - BTB LC target field blank
@@ -810,11 +816,13 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - if multiple rows qualify, select the row with the highest normalized export LC value
 - if multiple remaining rows are still tied after the highest-export-value key, the lowest workbook row index wins
 - one import LC maps to one row only
+- if an extracted import BTB LC does not qualify any workbook row, that import BTB LC is hard-blocked and the report must include the failed candidate evidence
 
 ### Batch execution behavior
 - blocked emails remain in `working`
 - this workflow has no document print phase
 - emit JSON and HTML reports for the run and affected export-LC groups
+- reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
 - automatically open the generated HTML report in the default browser after terminal mail-move success
 - successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
 

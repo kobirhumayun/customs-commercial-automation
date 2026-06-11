@@ -455,6 +455,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Subject/attachment token formatting differs cosmetically (such as extra separators) but required identifiers and normalized entities match ERP/workbook context.
 - Buyer text includes harmless punctuation/case variation while canonical normalization confirms an exact business-entity match.
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
+- For `import_btb_lc`, attachment filename text does not match the extracted BTB LC number, but the extracted BTB LC data remains internally valid and deterministic workbook selection still passes.
 
 ## Import relevance rule
 - Fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
@@ -474,6 +475,13 @@ The dashboard column is verification-only and should not be used to drive other 
 - Import BTB LC value comparison is numeric, not lexical. Implementations must normalize BTB LC values and workbook export `Amount` values to canonical decimals before evaluating the 40%-80% rule.
 - A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
 - For allocation, the run must group all validated import BTB LCs by related export LC and process each group from highest to lowest normalized import BTB LC value.
+- Attachment filename and extracted BTB LC number are expected to match for import BTB LC PDFs. A mismatch is warning-only evidence and must be preserved in run/mail reports; filename text must not replace or override extracted BTB LC values.
+- Duplicate import BTB LC handling must check both:
+  - already-recorded workbook `BTB L/C No.` values
+  - import BTB LC values already accepted earlier in the same run, whether from the same mail or a different mail
+- If the normalized import BTB LC number is already present anywhere in workbook column `BTB L/C No.`, the result is an immediate duplicate-only/no-write success path before candidate-row filtering starts.
+- Exact duplicate import BTB LC evidence is a duplicate-only/no-write success path.
+- If duplicate import BTB LC evidence disagrees on required extracted values or workbook-target implications, the result is a hard block.
 - Candidate workbook rows for a given import BTB LC must satisfy all of:
   - workbook export LC matches the related export LC
   - `UP No.` is blank
@@ -484,6 +492,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - If multiple remaining rows are still tied after the highest-export-value key, choose the row with the lowest workbook row index.
 - Once a workbook row is selected for one import BTB LC in the run, that row must be excluded from all later import BTB LC allocations in the same run.
 - One import BTB LC maps to one workbook row only.
+- If an extracted import BTB LC produces zero value-eligible workbook rows, the result is `hard_block`; the report must include the normalized BTB LC value, related export LC, and compared candidate-row evidence.
+- If no deterministic import BTB LC PDF can be extracted from a relevant import mail, the mail is `hard_block` and the report must include attachment-level extraction-failure evidence.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
