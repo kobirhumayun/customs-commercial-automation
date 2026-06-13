@@ -73,6 +73,10 @@ Goal: support shared-column population and quantity/value matching rules.
 
 ### Phase 4 — Import / BTB LC workflow
 Goal: process fabric-related import emails and map validated BTB LC data to a single eligible workbook row.
+- Two CMD launchers:
+  - Current Full Path: Outlook/mail-driven intake plus local storage
+  - File Picker Path: previously stored-file intake with no mail interaction
+- File Picker Path should still emit the same run/mail artifact model by representing each selected file as one synthetic mail-level unit.
 - Subject-based relevance filtering.
 - Save and iterate all new import PDFs.
 - Extract import LC number/date/value, PI yarn quantity, and related export LC.

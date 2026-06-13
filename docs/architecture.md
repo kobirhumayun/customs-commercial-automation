@@ -96,6 +96,8 @@ Each manually triggered CLI run should follow one explicit execution contract:
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
+For launcher paths that do not begin from Outlook mail objects, the workflow must still preserve the same downstream run/mail model by creating deterministic synthetic mail-level units. For `import_btb_lc` File Picker Path, each selected PDF file becomes one synthetic mail-level unit with a stable synthetic `mail_id`; workbook staging, duplicate handling, and report generation must use that synthetic unit exactly as the Current Full Path uses an Outlook-backed mail.
+
 ### Operator print-annotation checklist contract (normative)
 For workflows that require print-annotation handling, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
 
@@ -253,9 +255,13 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Write is blocked if matching rules are incomplete, contradictory, or leave unresolved discrepancies under the defined thresholds.
 
 ### Import / BTB LC CLI
-- Operator moves fabric-relevant emails from `temp-import` to `working`.
-- Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack.
-- New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date.
+- The workflow must expose two operator-facing CMD launchers that share one deterministic extraction/validation/write/report core:
+  - **Current Full Path**: reads relevant PDFs from Outlook-driven mail intake, saves new PDFs under the configured import storage path, performs workbook updates, generates reports, and opens the HTML report in the browser.
+  - **File Picker Path**: starts from an operator file picker over previously stored files and bypasses all mail intake interactions.
+- For the File Picker Path, each selected PDF file must be represented downstream as one synthetic mail-level unit so run ordering, staged writes, duplicate handling, and report outputs remain structurally identical to the Current Full Path.
+- Operator moves fabric-relevant emails from `temp-import` to `working` for the Current Full Path.
+- Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack for the Current Full Path; the File Picker Path assumes the operator directly selects candidate stored files instead of using mail-subject relevance.
+- New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date in the Current Full Path; the File Picker Path reads previously stored files and does not depend on Outlook mail access.
 - Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value, PI number, and related export LC number from LC clauses.
 - For phase-1 import BTB LC processing, PI number extraction from LC clauses must match one of the approved case-insensitive regex patterns: `btl/\d{2}/\d{4}` or `kyl/\d{2}/\d{4}`.
 - Import BTB LC PDFs follow UCP clause structure, but bank formatting differs materially and minor same-bank formatting variation is expected; extraction must therefore validate BTB LC numbers against documented bank-specific identifier shapes rather than one generic layout.
@@ -271,7 +277,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - The workflow has no document print phase; it emits JSON and HTML reports that must include duplicate-only outcomes, filename-mismatch warnings, extraction misses, and no-qualified-row outcomes, and opens the HTML report automatically after terminal mail-move success.
 - A mail containing one or more duplicate-only import BTB LC PDFs may still complete post-run mail movement when every non-duplicate import BTB LC in that same mail reaches a successful non-hard-block terminal outcome.
 - A mail containing only duplicate-only import BTB LC PDFs and producing zero new workbook writes remains move-eligible after run-report artifact generation completes.
-- Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
+- Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase in the Current Full Path; the File Picker Path performs no mail interactions or mail moves.
 
 ### Bangladesh Bank dashboard verification CLI
 - Reads candidate rows where `UP No.` is blank, `UD No. & IP No.` exists, the first non-empty line does not begin with `EXP` or `IP`, and `Bangladesh Bank Dashboard` is blank or not already compliant.
@@ -530,13 +536,15 @@ Required fields:
 
 ### `EmailMessage` (mail-level)
 Required fields:
-- `mail_id` (string): stable mail identifier derived from Outlook `EntryID`.
-- `entry_id` (string): raw Outlook `EntryID`.
-- `received_time_utc` (string): normalized ISO-8601 UTC timestamp.
-- `received_time_workflow_tz` (string): timestamp in configured workflow timezone.
-- `subject_raw` (string): original subject.
-- `sender_address` (string): canonical sender SMTP address when available.
+- `mail_id` (string): stable mail identifier derived from Outlook `EntryID`, or stable synthetic identifier for non-Outlook launcher paths.
+- `entry_id` (string|null): raw Outlook `EntryID` for Outlook-backed paths; `null` for synthetic mail-level units such as `import_btb_lc` File Picker Path.
+- `received_time_utc` (string): normalized ISO-8601 UTC timestamp; for synthetic mail-level units, use the deterministic file-selection or workflow-defined file timestamp source.
+- `received_time_workflow_tz` (string): timestamp in configured workflow timezone derived from the same source as `received_time_utc`.
+- `subject_raw` (string): original subject for Outlook-backed paths; synthetic descriptive label for file-picker-backed units.
+- `sender_address` (string|null): canonical sender SMTP address when available; `null` for file-picker-backed synthetic units.
 - `snapshot_index` (integer): position from deterministic run snapshot ordering.
+
+For `import_btb_lc` File Picker Path, one selected PDF file = one synthetic `EmailMessage` unit.
 
 ### `SavedDocument`
 Required fields:
@@ -575,6 +583,8 @@ Required fields:
 - `source_folder`, `destination_folder` (string): expected move path.
 - `moved_at_utc` (string|null): completion evidence timestamp.
 - `move_status` (string): `pending`, `moved`, or `inconsistent`.
+
+`MailMoveOperation` is produced only for workflows/launcher paths that interact with Outlook mail state. `import_btb_lc` File Picker Path does not produce mail-move operations.
 
 ## 16. Report schema/versioning contract (normative)
 All JSON report payloads must include `report_schema_version` using semantic versioning:

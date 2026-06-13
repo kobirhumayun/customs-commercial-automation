@@ -5,8 +5,8 @@ Every CLI workflow should follow the same control shape:
 1. capture operator execution context
 2. capture a run-level snapshot of all source emails/documents from the relevant manual intake location
 3. determine deterministic mail iteration order for the snapshot by:
-   - primary key: `ReceivedTime` converted to the workflow state timezone configured for operations (current deployment basis: Bangladesh Standard Time, UTC+06:00)
-   - tie-breaker: ascending Outlook `EntryID`
+   - Outlook-backed paths: primary key = `ReceivedTime` converted to the workflow state timezone configured for operations (current deployment basis: Bangladesh Standard Time, UTC+06:00), tie-breaker = ascending Outlook `EntryID`
+   - non-Outlook paths: create deterministic synthetic mail-level units first, then order them by the workflow-defined synthetic timestamp/source ordering contract
 4. save only new attachments/documents while iterating the snapshotted mails in that order
 5. extract and normalize entities per mail
 6. run workflow rule packs and stage per-mail write/print/move outcomes
@@ -783,10 +783,18 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 
 ## Import / BTB LC processing
 
+### Launcher paths
+- `Current Full Path`: load candidate mails from Outlook `working`, save new PDFs into the configured import storage hierarchy, run the shared import BTB LC extraction/validation/workbook/report flow, and open the generated HTML report after terminal success.
+- `File Picker Path`: start from an operator file picker over previously stored import BTB LC PDFs, bypass Outlook mail intake entirely, run the same shared import BTB LC extraction/validation/workbook/report flow, and generate the same JSON/HTML report outputs.
+- For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
+- Core processing after file acquisition is identical between both launcher paths: extraction rules, bank-specific LC-number validation, PI-number validation, duplicate handling, workbook candidate selection, workbook write staging, and report generation must not diverge by launcher.
+
 ### Inputs
-- Outlook folder: `working` after operator triage from `temp-import`; snapshot all messages in the folder when the CLI is triggered
-- Fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list loaded from the workflow rule-pack keyword module
-- Attachment storage base path comes from workflow configuration and import PDFs are stored under the BTB LC year derived from the normalized BTB LC date
+- `Current Full Path`: Outlook folder `working` after operator triage from `temp-import`; snapshot all messages in the folder when the CLI is triggered
+- `Current Full Path`: fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list loaded from the workflow rule-pack keyword module
+- `Current Full Path`: attachment storage base path comes from workflow configuration and import PDFs are stored under the BTB LC year derived from the normalized BTB LC date
+- `File Picker Path`: operator-selected previously stored PDF files; no Outlook folder access, message snapshot, or subject-keyword relevance filter applies
+- `File Picker Path`: each selected file is represented as one synthetic mail-level unit in run artifacts and mail-level reports
 
 ### Extraction targets
 - Extract only the import BTB LC portion from the first three pages of the PDF
@@ -838,6 +846,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
 - duplicate-only import BTB LC PDFs inside a mixed mail do not block mail movement; the mail may still move when every import BTB LC in that mail finishes as either duplicate-only/no-write or successful non-hard-block
 - a mail containing only duplicate-only/no-write import BTB LC PDFs may still move to `Import` after run-report artifacts are persisted, even when the mail produced zero workbook writes
+- in the `File Picker Path`, there is no Outlook mail movement stage; workbook and report phases still execute, but mail-move artifacts are not produced
 
 ## Bangladesh Bank dashboard verification
 
