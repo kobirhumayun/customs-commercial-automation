@@ -257,6 +257,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack.
 - New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date.
 - Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value, PI number, and related export LC number from LC clauses.
+- For phase-1 import BTB LC processing, PI number extraction from LC clauses must match one of the approved case-insensitive regex patterns: `btl/\d{2}/\d{4}` or `kyl/\d{2}/\d{4}`.
 - Import BTB LC PDFs follow UCP clause structure, but bank formatting differs materially and minor same-bank formatting variation is expected; extraction must therefore validate BTB LC numbers against documented bank-specific identifier shapes rather than one generic layout.
 - Embedded spaces inside a BTB LC number are not allowed for any approved bank pattern; if a candidate number contains internal spaces, validation fails for deterministic phase-1 processing.
 - Import attachment filename and extracted BTB LC number are expected to match; a mismatch is warning-only evidence captured in reports and must not block workbook write or mail movement when all other required extracted values and workbook-selection checks for the affected import BTB LC still pass.

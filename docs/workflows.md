@@ -801,6 +801,9 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - BTB LC date
 - BTB LC value
 - PI number
+- validate extracted PI number from LC clauses against one of these case-insensitive regex patterns:
+  - `btl/\d{2}/\d{4}`
+  - `kyl/\d{2}/\d{4}`
 - related export LC number from clause text
 - attachment filename comparison against extracted BTB LC number as warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
