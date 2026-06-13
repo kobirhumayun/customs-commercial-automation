@@ -81,8 +81,9 @@ Invalid patterns:
 
 Match rule: exact canonical equality.
 
-### PI number profile
+### Export PI number profile
 Accepted raw forms are PI references such as `PDL-YY-NNNN` with optional revision token `R<digits>`.
+This profile applies only to export-fabric PI references. Import seller PI references used by `import_btb_lc` are governed separately by that workflow's clause-extraction regex rules and must not be normalized as `PDL-YY-NNNN`.
 
 Normalization steps (exact order):
 1. apply shared primitives 1, 3, 4, 5
@@ -158,7 +159,7 @@ Match rule: exact canonical equality.
 - `LC-092387-COMTRADING APPAREL`
 
 ### Naming conventions assumed reliable in phase 1
-- PI: `PDL-YY-NNNN` with optional revision like `R4`
+- Export PI: `PDL-YY-NNNN` with optional revision like `R4`
 - UD: `UD-LC/SC-LC/SC_ENDSEQ-BUYERNAME_EXTENSION`
 - LC standard/amendment/ack patterns as documented
 - IP example: `IP-LC-0043-VINTAGE DENIM STUDIO LTD`

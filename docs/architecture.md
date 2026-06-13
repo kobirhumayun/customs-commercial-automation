@@ -259,6 +259,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
   - **Current Full Path**: reads relevant PDFs from Outlook-driven mail intake, saves new PDFs under the configured import storage path, performs workbook updates, generates reports, and opens the HTML report in the browser.
   - **File Picker Path**: starts from an operator file picker over previously stored files and bypasses all mail intake interactions.
 - For the File Picker Path, each selected PDF file must be represented downstream as one synthetic mail-level unit so run ordering, staged writes, duplicate handling, and report outputs remain structurally identical to the Current Full Path.
+- For the File Picker Path, deterministic synthetic-mail ordering is ascending normalized absolute file path. `snapshot_index`, synthetic `mail_id`, and persisted `mail_iteration_order` must all derive from that sorted file-path order rather than the picker click order or file timestamp values.
 - Operator moves fabric-relevant emails from `temp-import` to `working` for the Current Full Path.
 - Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack for the Current Full Path; the File Picker Path assumes the operator directly selects candidate stored files instead of using mail-subject relevance.
 - New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date in the Current Full Path; the File Picker Path reads previously stored files and does not depend on Outlook mail access.
@@ -447,8 +448,8 @@ This allows deterministic review of why a value was accepted or blocked.
 - Duplicate PDF detection is by filename only.
 - Export files follow the hierarchy `Year / Buyer / LC-or-SC / All Attachments`.
 - Import files live under the designated import root organized by year.
-- JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
-- Run-level JSON metadata must persist deterministic `mail_iteration_order` (timezone-normalized `ReceivedTime` + `EntryID`) and final `print_group_order` (mail-group ids ranked by workbook row sequence).
+- JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, workflow-specific extracted identifiers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions when applicable, phase metadata, timestamps, and operator context.
+- Run-level JSON metadata must persist deterministic `mail_iteration_order` using the launcher-path ordering contract: Outlook-backed paths use timezone-normalized `ReceivedTime` + `EntryID`, while `import_btb_lc` File Picker Path uses ascending normalized absolute file path for its synthetic mail-level units.
 - Run-level and mail-level reports must include revision stamps for every active deterministic list/rule set used during evaluation (for example `import_subject_keyword_list_version`).
 
 ## Configuration layer policy (phase 1)
@@ -531,14 +532,14 @@ Required fields:
 - `run_start_backup_hash` (string): lowercase hex SHA-256 digest.
 - `staged_write_plan_hash` (string|null): lowercase hex SHA-256 digest when write-capable workflow stages writes.
 - `write_phase_status` (string): workflow write phase checkpoint.
-- `print_phase_status` (string): workflow print checkpoint.
-- `mail_move_phase_status` (string): workflow mail-move checkpoint.
+- `print_phase_status` (string): workflow print checkpoint; workflows or launcher paths with no live print phase must persist `completed`.
+- `mail_move_phase_status` (string): workflow mail-move checkpoint; workflows or launcher paths with no post-run mail-move phase must persist `completed`.
 
 ### `EmailMessage` (mail-level)
 Required fields:
 - `mail_id` (string): stable mail identifier derived from Outlook `EntryID`, or stable synthetic identifier for non-Outlook launcher paths.
 - `entry_id` (string|null): raw Outlook `EntryID` for Outlook-backed paths; `null` for synthetic mail-level units such as `import_btb_lc` File Picker Path.
-- `received_time_utc` (string): normalized ISO-8601 UTC timestamp; for synthetic mail-level units, use the deterministic file-selection or workflow-defined file timestamp source.
+- `received_time_utc` (string): normalized ISO-8601 UTC timestamp; for `import_btb_lc` File Picker Path synthetic units, use the selected file's normalized last-modified timestamp for lineage only.
 - `received_time_workflow_tz` (string): timestamp in configured workflow timezone derived from the same source as `received_time_utc`.
 - `subject_raw` (string): original subject for Outlook-backed paths; synthetic descriptive label for file-picker-backed units.
 - `sender_address` (string|null): canonical sender SMTP address when available; `null` for file-picker-backed synthetic units.
@@ -585,6 +586,10 @@ Required fields:
 - `move_status` (string): `pending`, `moved`, or `inconsistent`.
 
 `MailMoveOperation` is produced only for workflows/launcher paths that interact with Outlook mail state. `import_btb_lc` File Picker Path does not produce mail-move operations.
+
+For workflows or launcher paths that intentionally skip a downstream phase, the persisted run/report state must still be explicit:
+- no-print paths: `print_phase_status = completed`, `print_group_order = []`, no print plan/checklist artifacts, and empty print-marker collections
+- no-mail-move paths: `mail_move_phase_status = completed`, no mail-move operations, and empty mail-move-marker collections
 
 ## 16. Report schema/versioning contract (normative)
 All JSON report payloads must include `report_schema_version` using semantic versioning:

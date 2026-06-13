@@ -4,14 +4,14 @@ All workflows must emit versioned JSON payloads using the schema contracts in th
 All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 
 ## 1) Schema versioning policy
-- Every payload includes `schema_id` and `schema_version`.
+- Every payload includes `report_schema_version`.
+- Payload type is determined by the persisted artifact filename/context (`run_metadata.json`, `mail_outcomes.jsonl`, checklist artifact, recovery artifact, and so on); a separate `schema_id` field is not required.
 - Backward-compatible additive field changes increment **minor**.
 - Breaking changes increment **major**.
 - Patch changes are documentation/clarification only.
 
 ## 2) Run-level report schema
-- `schema_id`: `run_report`
-- `schema_version`: `1.0.0`
+- `report_schema_version`: `1.0.0`
 
 ### Required fields
 - `run_id` (string)
@@ -23,10 +23,10 @@ All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 - `completed_at_utc` (ISO-8601 UTC or null if incomplete)
 - `state_timezone` (IANA timezone string)
 - `mail_iteration_order` (array of mail ids in processing order)
-- `print_group_order` (array; may be empty)
+- `print_group_order` (array; must be empty when the workflow/launcher path has no print phase)
 - `write_phase_status` (enum)
-- `print_phase_status` (enum)
-- `mail_move_phase_status` (enum)
+- `print_phase_status` (enum; workflows/launcher paths with no print phase persist `completed`)
+- `mail_move_phase_status` (enum; workflows/launcher paths with no mail-move phase persist `completed`)
 - `hash_algorithm` (`sha256`)
 - `run_start_backup_hash` (64-char lowercase hex)
 - `current_workbook_hash` (64-char lowercase hex)
@@ -42,8 +42,7 @@ All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 Any undeclared enum value is schema-invalid and must be treated as a hard-block recovery/reporting condition.
 
 ## 3) Mail-level report schema
-- `schema_id`: `mail_report`
-- `schema_version`: `1.0.0`
+- `report_schema_version`: `1.0.0`
 
 ### Required fields
 - `run_id` (string)
@@ -54,7 +53,10 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `applied_rule_ids` (ordered array of strings)
 - `final_decision` (`pass` | `warning` | `hard_block`)
 - `decision_reasons` (array)
-- `file_numbers_extracted` (array)
+- `file_numbers_extracted` (array; required for `export_lc_sc` and `ud_ip_exp`, optional/null otherwise)
+- `btb_lc_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
+- `pi_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
+- `related_export_lc_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
 - `saved_documents` (array)
 - `staged_write_operations` (array)
 - `discrepancies` (array)
@@ -62,8 +64,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `ud_selection` (object; required for `ud_ip_exp` mails that reach UD allocation, optional/null otherwise)
 
 ## 4) Discrepancy report schema
-- `schema_id`: `discrepancy_report`
-- `schema_version`: `1.0.0`
+- `report_schema_version`: `1.0.0`
 
 ### Required fields
 - `run_id`
@@ -144,8 +145,7 @@ In that case:
 For dense structured UD matches, the selected candidate must still be present in `candidates[]` even when truncation is active.
 
 ## 5) Print-annotation checklist schema
-- `schema_id`: `print_annotation_checklist`
-- `schema_version`: `1.0.0`
+- `report_schema_version`: `1.0.0`
 
 ### Required fields
 - `run_id`
@@ -203,8 +203,7 @@ When `print_plan.json` includes `annotation_documents` for a print group, each i
 For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_documents` records and use older mail-level reconstruction fallbacks only for backward compatibility with older run artifacts.
 
 ## 6) Recovery/idempotency artifact schema
-- `schema_id`: `recovery_artifact`
-- `schema_version`: `1.0.0`
+- `report_schema_version`: `1.0.0`
 
 ### Required fields
 - `run_id`
@@ -217,16 +216,15 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
 - `current_workbook_hash`
 - `staged_write_plan_hash`
 - `post_write_probe_summary`
-- `print_completion_markers` (array of marker ids)
-- `mail_move_completion_markers` (array of marker ids)
+- `print_completion_markers` (array of marker ids; empty when no print phase applies)
+- `mail_move_completion_markers` (array of marker ids; empty when no mail-move phase applies)
 
 ## 7) Minimal examples
 
 ### Run report (minimal)
 ```json
 {
-  "schema_id": "run_report",
-  "schema_version": "1.0.0",
+  "report_schema_version": "1.0.0",
   "run_id": "run-2026-03-24T09-30-00Z",
   "workflow_id": "export_lc_sc",
   "tool_version": "0.1.0",
@@ -251,8 +249,7 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
 ### Mail report (full shape sketch)
 ```json
 {
-  "schema_id": "mail_report",
-  "schema_version": "1.0.0",
+  "report_schema_version": "1.0.0",
   "run_id": "run-2026-03-24T09-30-00Z",
   "mail_id": "00000000A1B2C3D4",
   "workflow_id": "import_btb_lc",
@@ -260,11 +257,14 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
   "rule_pack_version": "1.2.0",
   "applied_rule_ids": ["core.x", "import.y"],
   "final_decision": "warning",
-  "decision_reasons": ["cosmetic subject token mismatch"],
-  "file_numbers_extracted": ["P/26/0042"],
+  "decision_reasons": ["attachment filename did not match extracted BTB LC number"],
+  "file_numbers_extracted": null,
+  "btb_lc_numbers_extracted": ["0742123456789"],
+  "pi_numbers_extracted": ["BTL/26/0042"],
+  "related_export_lc_numbers_extracted": ["LC-1234-2026"],
   "saved_documents": [{"path": "C:/.../doc1.pdf"}],
   "staged_write_operations": [],
-  "discrepancies": [{"code": "subject_token_variation"}],
+  "discrepancies": [{"code": "import_filename_number_mismatch"}],
   "import_keyword_revision": "2026-03-24.1"
 }
 ```

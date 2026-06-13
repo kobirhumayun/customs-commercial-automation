@@ -16,13 +16,17 @@ Under `run_artifact_root/<workflow_id>/<run_id>/`:
 - `mail_outcomes.jsonl`
 - `staged_write_plan.json`
 - `target_probes.jsonl`
+- `discrepancies.jsonl`
+- `logs/` (structured log fragments if enabled)
+
+Required only when the workflow/launcher path includes a live print phase:
 - `print_plan.json`
 - `print_annotation_checklist.json`
 - `print_annotation_checklist.html`
 - `print_markers/` (one marker per print group)
+
+Required only when the workflow/launcher path includes post-run Outlook mail moves:
 - `mail_move_markers/` (one marker per mail move)
-- `discrepancies.jsonl`
-- `logs/` (structured log fragments if enabled)
 
 Under `backup_root/<workflow_id>/<run_id>/`:
 
@@ -51,7 +55,7 @@ Partial/truncated files are invalid artifacts and must trigger hard-block during
 - Purge jobs must emit a deletion audit log containing run id, workflow id, and deleted paths.
 
 ## 6) Corruption/missing artifact behavior
-If any required recovery artifact is missing, unreadable, hash-invalid, or malformed:
+If any required recovery artifact for the applicable workflow phases is missing, unreadable, hash-invalid, or malformed:
 - recovery outcome must be hard-block
 - no workbook write may start
 - discrepancy report must include exact missing/invalid paths and validation failures

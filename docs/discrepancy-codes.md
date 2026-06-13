@@ -77,6 +77,7 @@ Every discrepancy payload should include:
 | `import_duplicate_document_conflict` | `hard_block` | import_btb_lc | Duplicate import BTB LC evidence conflicted on required extracted values or deterministic workbook implications. |
 | `import_no_qualified_workbook_row` | `hard_block` | import_btb_lc | The extracted import BTB LC did not qualify any workbook row under the deterministic candidate rules. |
 | `import_required_document_missing` | `hard_block` | import_btb_lc | No deterministic import BTB LC PDF could be extracted from the relevant import mail. |
+| `import_report_browser_open_failed` | `warning` | import_btb_lc | The import BTB LC HTML report was generated successfully, but the system could not open it automatically in the default browser. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |
 
 ### OCR / extraction quality

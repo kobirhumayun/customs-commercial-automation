@@ -6,7 +6,7 @@ Every CLI workflow should follow the same control shape:
 2. capture a run-level snapshot of all source emails/documents from the relevant manual intake location
 3. determine deterministic mail iteration order for the snapshot by:
    - Outlook-backed paths: primary key = `ReceivedTime` converted to the workflow state timezone configured for operations (current deployment basis: Bangladesh Standard Time, UTC+06:00), tie-breaker = ascending Outlook `EntryID`
-   - non-Outlook paths: create deterministic synthetic mail-level units first, then order them by the workflow-defined synthetic timestamp/source ordering contract
+   - non-Outlook paths: create deterministic synthetic mail-level units first, then order them by the workflow-defined synthetic source ordering contract; if synthetic timestamps are also recorded for lineage, those timestamps must not override the documented source-order contract
 4. save only new attachments/documents while iterating the snapshotted mails in that order
 5. extract and normalize entities per mail
 6. run workflow rule packs and stage per-mail write/print/move outcomes
@@ -102,6 +102,7 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
 
 #### `print_phase_status` enum
 - Allowed values: `not_started`, `planned`, `printing`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Workflows or launcher paths with no live print phase must persist `print_phase_status = completed`, `print_group_order = []`, and no print artifacts or print markers.
 - Allowed transitions:
   1. `not_started` → `planned`
   2. `planned` → `printing`
@@ -112,6 +113,7 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
 
 #### `mail_move_phase_status` enum
 - Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
+- Workflows or launcher paths with no post-run mail-move phase must persist `mail_move_phase_status = completed` and no mail-move artifacts or markers.
 - Allowed transitions:
   1. `not_started` → `moving`
   2. `moving` → `completed`
@@ -530,6 +532,7 @@ Mail-level:
 - `rule_pack_id`, `rule_pack_version`
 - `applied_rule_ids`, `final_decision`
 - `discrepancies`
+- workflow-specific extracted identifier arrays (for example export/UD `file_numbers_extracted`; import `btb_lc_numbers_extracted`, `pi_numbers_extracted`, and `related_export_lc_numbers_extracted`)
 - `saved_documents`
 - `staged_write_operations`
 - `print_group_id` (if eligible)
@@ -787,6 +790,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - `Current Full Path`: load candidate mails from Outlook `working`, save new PDFs into the configured import storage hierarchy, run the shared import BTB LC extraction/validation/workbook/report flow, and open the generated HTML report after terminal success.
 - `File Picker Path`: start from an operator file picker over previously stored import BTB LC PDFs, bypass Outlook mail intake entirely, run the same shared import BTB LC extraction/validation/workbook/report flow, and generate the same JSON/HTML report outputs.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
+- For the `File Picker Path`, deterministic snapshot ordering is ascending normalized absolute file path; `snapshot_index`, synthetic `mail_id`, and run-level `mail_iteration_order` must derive from that sorted order, while file timestamps are lineage evidence only and do not affect ordering.
 - Core processing after file acquisition is identical between both launcher paths: extraction rules, bank-specific LC-number validation, PI-number validation, duplicate handling, workbook candidate selection, workbook write staging, and report generation must not diverge by launcher.
 
 ### Inputs
@@ -812,6 +816,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - validate extracted PI number from LC clauses against one of these case-insensitive regex patterns:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
+- these import seller PI references are distinct from the export PI profile `PDL-YY-NNNN` and must not be normalized with export PI rules
 - related export LC number from clause text
 - attachment filename comparison against extracted BTB LC number as warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
@@ -840,13 +845,14 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Batch execution behavior
 - blocked emails remain in `working`
 - this workflow has no document print phase
-- emit JSON and HTML reports for the run and affected export-LC groups
+- emit the standard run-level and mail-level JSON artifacts plus an HTML report that may summarize affected export-LC groups
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
-- automatically open the generated HTML report in the default browser after terminal mail-move success
+- automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
+- if the HTML report is generated successfully but the browser cannot be opened automatically, emit warning discrepancy `import_report_browser_open_failed` and keep the run outcome otherwise unchanged
 - successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
 - duplicate-only import BTB LC PDFs inside a mixed mail do not block mail movement; the mail may still move when every import BTB LC in that mail finishes as either duplicate-only/no-write or successful non-hard-block
 - a mail containing only duplicate-only/no-write import BTB LC PDFs may still move to `Import` after run-report artifacts are persisted, even when the mail produced zero workbook writes
-- in the `File Picker Path`, there is no Outlook mail movement stage; workbook and report phases still execute, but mail-move artifacts are not produced
+- in the `File Picker Path`, there is no Outlook mail movement stage; workbook and report phases still execute, `mail_move_phase_status` is recorded as `completed`, and no mail-move artifacts are produced
 
 ## Bangladesh Bank dashboard verification
 

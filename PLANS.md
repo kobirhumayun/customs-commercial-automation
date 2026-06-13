@@ -79,7 +79,7 @@ Goal: process fabric-related import emails and map validated BTB LC data to a si
 - File Picker Path should still emit the same run/mail artifact model by representing each selected file as one synthetic mail-level unit.
 - Subject-based relevance filtering.
 - Save and iterate all new import PDFs.
-- Extract import LC number/date/value, PI yarn quantity, and related export LC.
+- Extract import LC number/date/value, seller PI number, and related export LC; PI yarn quantity remains deferred to later ERP integration.
 - Candidate-row filtering and 40%-80% validation rule.
 - One import LC mapped to exactly one row.
 
