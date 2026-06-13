@@ -599,4 +599,4 @@ Suggested fixture location for implementation: `tests/workflows/import_btb_lc/fi
 ### Release gate requirements
 - Keyword changes become active only after merge + deployment release boundary.
 - Runtime/manual editing on operator machines is prohibited.
-- Run-level and mail-level outputs must stamp `import_keyword_revision` for every relevance decision, including blocked mails.
+- For `import_btb_lc` Current Full Path, run-level and mail-level outputs must stamp `import_keyword_revision` for every relevance decision, including blocked mails.

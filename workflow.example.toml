@@ -91,9 +91,11 @@ bb_dashboard_snapshot_poll_interval_ms = 100
 # master_workbook_path_template = "C:/customs-automation/workbooks/{workflow_id}-{year}.xlsx"
 master_workbook_path_template = "C:/customs-automation/workbooks/UP Issuing Status for the Period # 01-03-2026 to 28-02-2027.xlsx"
 excel_lock_timeout_seconds = 120
-# Set `print_enabled=false` for workflows without a live print phase,
-# including `import_btb_lc` and `bb_dashboard_verification`.
-# Keep `print_enabled=true` only for workflows/launcher paths that actually execute print.
+# Workstation-level live-print safety switch.
+# Leave this unchanged when switching workflows:
+# - print-capable workflows (`export_lc_sc`, `ud_ip_exp`) consult it only for live print execution
+# - non-print workflows (`import_btb_lc`, `bb_dashboard_verification`) ignore it
+# Set `false` only if this workstation should block all live print execution.
 print_enabled = true
 
 # Required Outlook folder EntryIDs only for Outlook-backed launcher paths.

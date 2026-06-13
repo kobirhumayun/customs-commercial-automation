@@ -263,6 +263,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Operator moves fabric-relevant emails from `temp-import` to `working` for the Current Full Path.
 - Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack for the Current Full Path; the File Picker Path assumes the operator directly selects candidate stored files instead of using mail-subject relevance.
 - New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date in the Current Full Path; the File Picker Path reads previously stored files and does not depend on Outlook mail access.
+- Phase-1 `import_btb_lc` candidate allocation is workbook-driven after extraction and does not require a separate ERP download/search step.
 - Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value, PI number, and related export LC number from LC clauses.
 - For phase-1 import BTB LC processing, PI number extraction from LC clauses must match one of the approved case-insensitive regex patterns: `btl/\d{2}/\d{4}` or `kyl/\d{2}/\d{4}`.
 - Import BTB LC PDFs follow UCP clause structure, but bank formatting differs materially and minor same-bank formatting variation is expected; extraction must therefore validate BTB LC numbers against documented bank-specific identifier shapes rather than one generic layout.
@@ -673,6 +674,11 @@ Write-capable workflows must also provide:
 `master_workbook_path_template` controls the expected yearly workbook filename.
 The normal production pattern is to store the exact real workbook filename in config and update it manually when the yearly workbook changes.
 
+`print_enabled` is a workstation-level live-print safety switch, not a workflow selector.
+- Workflows or launcher paths with no print phase ignore this setting.
+- Print-capable workflows consult it only when a live print execution path is actually requested.
+- Operators should not need to edit this value each time they switch workflows; leave it at the workstation's intended live-print policy.
+
 Optional placeholders may be used if a deployment intentionally wants generated naming:
 - `{year}`
 - `{workflow_id}`
@@ -713,6 +719,11 @@ playwright_browser_channel = "msedge"
 print_enabled = true
 excel_lock_timeout_seconds = 120
 ```
+
+Recommended interpretation:
+- `print_enabled = true` means this workstation allows live print execution for print-capable workflows such as `export_lc_sc` and `ud_ip_exp`
+- `print_enabled = false` disables live print execution even for print-capable workflows
+- non-print workflows such as `import_btb_lc` and `bb_dashboard_verification` ignore this setting
 
 ## 9. Artifact storage layout reference
 Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.

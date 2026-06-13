@@ -806,6 +806,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - `Current Full Path`: attachment storage base path comes from workflow configuration and import PDFs are stored under the BTB LC year derived from the normalized BTB LC date
 - `File Picker Path`: operator-selected previously stored PDF files; no Outlook folder access, message snapshot, or subject-keyword relevance filter applies
 - `File Picker Path`: each selected file is represented as one synthetic mail-level unit in run artifacts and mail-level reports
+- phase-1 `import_btb_lc` candidate selection is driven by extracted BTB LC data plus workbook state and does not require a separate ERP download/search step
 
 ### Extraction targets
 - Extract only the import BTB LC portion from the first three pages of the PDF
@@ -853,6 +854,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - blocked emails remain in `working`
 - this workflow has no document print phase
 - emit the standard run-level and mail-level JSON artifacts plus an HTML report that may summarize affected export-LC groups
+- no separate import-specific JSON summary artifact is required beyond the standard `run_metadata.json` and `mail_outcomes.jsonl`; the canonical import-specific summary artifact is `import_btb_lc_report.html`
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
 - automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
 - if the HTML report is generated successfully but the browser cannot be opened automatically, emit warning discrepancy `import_report_browser_open_failed` and keep the run outcome otherwise unchanged
