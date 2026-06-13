@@ -13,11 +13,14 @@ Implementations must use configured roots (see `docs/architecture.md`) and creat
 Under `run_artifact_root/<workflow_id>/<run_id>/`:
 
 - `run_metadata.json`
-- `mail_outcomes.jsonl`
+- `mail_outcomes.jsonl` (canonical mail-level JSON report stream)
 - `staged_write_plan.json`
 - `target_probes.jsonl`
 - `discrepancies.jsonl`
 - `logs/` (structured log fragments if enabled)
+
+Required only for `import_btb_lc`:
+- `import_btb_lc_report.html` (canonical workflow HTML summary report)
 
 Required only when the workflow/launcher path includes a live print phase:
 - `print_plan.json`

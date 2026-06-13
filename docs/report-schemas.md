@@ -6,6 +6,8 @@ All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 ## 1) Schema versioning policy
 - Every payload includes `report_schema_version`.
 - Payload type is determined by the persisted artifact filename/context (`run_metadata.json`, `mail_outcomes.jsonl`, checklist artifact, recovery artifact, and so on); a separate `schema_id` field is not required.
+- `run_metadata.json` is the canonical persisted run-level JSON report artifact.
+- `mail_outcomes.jsonl` is the canonical persisted mail-level JSON report stream, with one mail-report-shaped object per line.
 - Backward-compatible additive field changes increment **minor**.
 - Breaking changes increment **major**.
 - Patch changes are documentation/clarification only.
@@ -60,7 +62,7 @@ Any undeclared enum value is schema-invalid and must be treated as a hard-block 
 - `saved_documents` (array)
 - `staged_write_operations` (array)
 - `discrepancies` (array)
-- `import_keyword_revision` (string; required for import workflow, optional/null otherwise)
+- `import_keyword_revision` (string; required for `import_btb_lc` Current Full Path, optional/null for `import_btb_lc` File Picker Path and non-import workflows)
 - `ud_selection` (object; required for `ud_ip_exp` mails that reach UD allocation, optional/null otherwise)
 
 ## 4) Discrepancy report schema

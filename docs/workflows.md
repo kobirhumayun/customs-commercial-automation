@@ -1119,5 +1119,6 @@ For `import_btb_lc`, the fabric-subject keyword list must be managed as versione
   1. subject is normalized by trim + whitespace collapse + ASCII case-folding to lowercase
   2. include pass requires at least one `IMPORT_SUBJECT_KEYWORDS` hit
   3. any exclude hit after include pass makes the mail ineligible
-- `mail_report.import_keyword_revision` must equal `IMPORT_KEYWORD_REVISION` from the loaded keyword module for every processed import mail.
-- Loader failures (missing module, invalid exports, empty include list) are startup hard failures for `import_btb_lc`.
+- This keyword-governance contract applies to `import_btb_lc` Current Full Path only; `File Picker Path` bypasses subject-keyword relevance.
+- `mail_report.import_keyword_revision` must equal `IMPORT_KEYWORD_REVISION` from the loaded keyword module for every processed `import_btb_lc` Current Full Path mail; `File Picker Path` may persist `null`.
+- Loader failures (missing module, invalid exports, empty include list) are startup hard failures for `import_btb_lc` Current Full Path.

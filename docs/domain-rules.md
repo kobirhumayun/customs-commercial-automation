@@ -459,7 +459,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - For `import_btb_lc`, attachment filename text does not match the extracted BTB LC number, but the extracted BTB LC data remains internally valid and all other deterministic workbook-selection requirements still pass.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
+- In `import_btb_lc` Current Full Path, fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
+- In `import_btb_lc` File Picker Path, the operator-selected stored PDFs are treated as the candidate set directly and this subject-keyword relevance filter does not apply.
 - Required module exports:
   - `IMPORT_KEYWORD_REVISION` (string)
   - `IMPORT_SUBJECT_KEYWORDS` (non-empty sequence of non-empty strings)
@@ -468,8 +469,9 @@ The dashboard column is verification-only and should not be used to drive other 
   1. normalize subject with trim + whitespace collapse + lowercase
   2. require at least one include-keyword hit from `IMPORT_SUBJECT_KEYWORDS`
   3. reject if any exclude-keyword hit is present
-- Startup must hard-fail before run snapshot/side effects if the module is missing, malformed, or the include list is empty.
-- The active `IMPORT_KEYWORD_REVISION` value must be stamped as `import_keyword_revision` in run and mail reports.
+- For `import_btb_lc` Current Full Path, startup must hard-fail before run snapshot/side effects if the module is missing, malformed, or the include list is empty.
+- For `import_btb_lc` File Picker Path, subject-keyword relevance is not evaluated and `import_keyword_revision` may be `null`.
+- The active `IMPORT_KEYWORD_REVISION` value must be stamped as `import_keyword_revision` in run and mail reports for every Current Full Path relevance decision.
 - Keyword-list changes must follow code-review and release boundaries; no ad hoc runtime edits.
 
 ## Import BTB LC allocation rule
@@ -556,7 +558,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
 - Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
-- Successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; duplicate-only/no-write import BTB LC PDFs inside an otherwise successful mail do not block that move, mails containing only duplicate-only/no-write import BTB LC PDFs are still move-eligible after report generation, and the generated HTML report opens automatically after terminal mail-move success.
+- In `import_btb_lc` Current Full Path, successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; duplicate-only/no-write import BTB LC PDFs inside an otherwise successful mail do not block that move, mails containing only duplicate-only/no-write import BTB LC PDFs are still move-eligible after report generation, and the generated HTML report opens automatically after terminal mail-move success.
+- In `import_btb_lc` File Picker Path, no Outlook post-processing occurs; the same workbook/report decisions apply, but the generated HTML report opens automatically after report generation completes.
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.

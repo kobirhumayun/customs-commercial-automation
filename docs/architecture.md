@@ -275,7 +275,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Strict validation selects a row only when the normalized BTB LC value falls between 40% and 80% of the normalized workbook export LC value, inclusive.
 - If multiple workbook rows qualify for one import BTB LC, the selected row is the one with the highest normalized workbook export LC value; if a tie remains, the lowest workbook row index wins.
 - One import LC populates exactly one workbook row.
-- The workflow has no document print phase; it emits JSON and HTML reports that must include duplicate-only outcomes, filename-mismatch warnings, extraction misses, and no-qualified-row outcomes, and opens the HTML report automatically after terminal mail-move success.
+- The workflow has no document print phase; it emits the standard run/mail JSON report artifacts plus an import HTML summary report that must include duplicate-only outcomes, filename-mismatch warnings, extraction misses, and no-qualified-row outcomes. The Current Full Path opens that HTML report after terminal mail-move success, while the File Picker Path opens it after report generation completes because no mail-move phase exists there.
 - A mail containing one or more duplicate-only import BTB LC PDFs may still complete post-run mail movement when every non-duplicate import BTB LC in that same mail reaches a successful non-hard-block terminal outcome.
 - A mail containing only duplicate-only import BTB LC PDFs and producing zero new workbook writes remains move-eligible after run-report artifact generation completes.
 - Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase in the Current Full Path; the File Picker Path performs no mail interactions or mail moves.
@@ -473,15 +473,17 @@ This allows deterministic review of why a value was accepted or blocked.
 - Each deterministic list/rule set must expose a stable revision identifier (for example semantic version or date+sequence token).
 - For import relevance keywords, revision format is required: `YYYY-MM-DD.N` (`N` is a positive integer sequence for that date).
 - The orchestrator must capture the active revision identifier in run metadata and discrepancy/report outputs.
-- For import workflows, the orchestrator must stamp `IMPORT_KEYWORD_REVISION` into both:
+- For `import_btb_lc` Current Full Path, the orchestrator must stamp `IMPORT_KEYWORD_REVISION` into both:
   - run-level report/metadata payloads
   - mail-level report/discrepancy payloads for every processed mail
+- For `import_btb_lc` File Picker Path, `import_keyword_revision` may be `null` because subject-keyword relevance is not evaluated there.
 - Field name must be stable as `import_keyword_revision` so report consumers can join run/mail lineage without per-tool remapping.
 - Report consumers must be able to reconstruct which exact list revision produced each relevance or validation decision.
 
 ### Missing/malformed configuration behavior
 - If required deterministic list constants cannot be loaded, are empty when marked mandatory, or fail schema/shape validation at startup, the CLI must terminate with a **startup hard failure** before snapshot side effects.
-- Import keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`; malformed optional `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` must also hard-fail startup.
+- `import_btb_lc` Current Full Path keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`; malformed optional `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` must also hard-fail startup.
+- `import_btb_lc` File Picker Path does not use subject-keyword relevance and therefore must not require the keyword module as a launcher precondition.
 - Phase 1 must not silently fall back to permissive defaults for missing/malformed decision-driving lists.
 
 ## 10. Windows deployment and operations
@@ -506,7 +508,7 @@ This allows deterministic review of why a value was accepted or blocked.
 - Initial live deployment should default to hard block plus comprehensive reporting for any case that does not satisfy all specified parameters.
 - Outlook-driven workflows snapshot all messages currently in the `working` folder when the operator triggers the CLI.
 - Export-family verification should validate every extracted file number against ERP data rather than selecting a single primary file number. Family consistency is defined by LC/SC number, buyer, and LC/SC date; duplicate ERP rows may use any one duplicate row, and any partial family match is a hard block.
-- Import relevance uses case-insensitive substring matching on fabric subject keywords stored in code.
+- `import_btb_lc` Current Full Path uses case-insensitive substring matching on fabric subject keywords stored in code; `File Picker Path` bypasses subject relevance and starts from operator-selected stored PDFs.
 - Successfully processed export-team emails move to `UD and LC`; successfully processed import-team emails move to `Import`; blocked emails remain in `working`, and mail moves occur only after batched writes and printing finish.
 - Print grouping is based on the active run snapshot and staged successful write outcomes, but only newly saved PDF documents are included in each batch.
 
@@ -658,9 +660,9 @@ At minimum, the configuration layer must expose these keys:
 - `report_root`
 - `run_artifact_root`
 - `backup_root`
-- `outlook_profile`
+- `outlook_profile` for Outlook-backed launcher paths
 - `master_workbook_root`
-- `erp_base_url`
+- `erp_base_url` when the active workflow requires ERP access
 - `playwright_browser_channel` (if applicable)
 
 Write-capable workflows must also provide:
@@ -677,6 +679,9 @@ Optional placeholders may be used if a deployment intentionally wants generated 
 
 ### Workflow-specific required keys
 Workflow modules must declare their own required key list (for example import document storage root, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
+For `import_btb_lc`, this workflow-specific key set must distinguish between the two launcher paths:
+- `Current Full Path` requires the import storage base path plus Outlook folder mapping for intake/move operations
+- `File Picker Path` requires the import storage base path but does not require Outlook folder mapping
 
 ### Secrets handling (Windows-first)
 - Credentials must not be hard-coded in source files.
@@ -690,7 +695,7 @@ Before processing a run snapshot, startup must validate:
 - configured root path availability and permissions
 - implementations may create the managed operator-owned roots `report_root`, `run_artifact_root`, and `backup_root` on first use before writability validation; missing workbook roots/files still hard-fail
 - timezone parseability and canonicalization
-- destination Outlook folder mapping completeness for the active workflow
+- destination Outlook folder mapping completeness for the active Outlook-backed workflow/launcher path
 
 Any failure is a startup hard failure with structured diagnostics.
 
