@@ -795,7 +795,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - BTB LC value
 - PI number
 - related export LC number from clause text
-- attachment filename comparison against extracted BTB LC number as warning-only evidence
+- attachment filename comparison against extracted BTB LC number as warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
 - PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
 - if no import BTB LC PDF can be extracted deterministically from a relevant mail, the mail hard-blocks and the report must capture the missing/failed extraction evidence
@@ -825,6 +825,8 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
 - automatically open the generated HTML report in the default browser after terminal mail-move success
 - successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
+- duplicate-only import BTB LC PDFs inside a mixed mail do not block mail movement; the mail may still move when every import BTB LC in that mail finishes as either duplicate-only/no-write or successful non-hard-block
+- a mail containing only duplicate-only/no-write import BTB LC PDFs may still move to `Import` after run-report artifacts are persisted, even when the mail produced zero workbook writes
 
 ## Bangladesh Bank dashboard verification
 

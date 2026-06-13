@@ -257,7 +257,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack.
 - New PDFs are saved under a configured import storage base path organized by BTB LC year derived from the normalized BTB LC date.
 - Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value, PI number, and related export LC number from LC clauses.
-- Import attachment filename and extracted BTB LC number are expected to match; a mismatch is warning-only evidence captured in reports and must not block workbook write when all required extracted values and workbook-selection checks still pass.
+- Import attachment filename and extracted BTB LC number are expected to match; a mismatch is warning-only evidence captured in reports and must not block workbook write or mail movement when all other required extracted values and workbook-selection checks for the affected import BTB LC still pass.
 - The low-quality scanned PI and export-LC pages appended below the BTB LC are out of phase-1 PDF extraction scope; PI yarn quantity remains a future import-ERP integration input rather than a direct PDF extraction target.
 - Duplicate import BTB LC handling must detect already-recorded workbook `BTB L/C No.` values and same-run repeated BTB LC evidence across the same mail or different mails, treat exact duplicates as no-write successes, and hard-block only when duplicate evidence conflicts materially.
 - Candidate processing groups all validated import BTB LCs in the run by related export LC family, orders each family from highest to lowest normalized import BTB LC value, and excludes workbook rows already claimed earlier in the same run.
@@ -266,6 +266,8 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - If multiple workbook rows qualify for one import BTB LC, the selected row is the one with the highest normalized workbook export LC value; if a tie remains, the lowest workbook row index wins.
 - One import LC populates exactly one workbook row.
 - The workflow has no document print phase; it emits JSON and HTML reports that must include duplicate-only outcomes, filename-mismatch warnings, extraction misses, and no-qualified-row outcomes, and opens the HTML report automatically after terminal mail-move success.
+- A mail containing one or more duplicate-only import BTB LC PDFs may still complete post-run mail movement when every non-duplicate import BTB LC in that same mail reaches a successful non-hard-block terminal outcome.
+- A mail containing only duplicate-only import BTB LC PDFs and producing zero new workbook writes remains move-eligible after run-report artifact generation completes.
 - Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
 
 ### Bangladesh Bank dashboard verification CLI

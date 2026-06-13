@@ -445,7 +445,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Human-review routing is excluded from the initial live-deployment path; unspecified failures default to hard block with comprehensive reporting until recurring issue categories are formally classified.
 
 ## Initial exception-handling rule
-- Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment.
+- Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment, except for explicitly documented warning-only cases such as the `import_btb_lc` filename-versus-extracted-number mismatch when all other mandatory checks pass.
 - Business-approved exceptions should be implemented only inside workflow-specific rule-pack modules and should run after standard validation rules.
 - `warning` decisions are permitted in phase 1 only for explicitly defined, non-blocking exceptions where all required validation parameters still pass.
 - Warning-only outcomes may continue through downstream stages (workbook write when applicable, print, and post-run mail move) and must be captured in discrepancy/audit reporting with rule IDs and rationale.
@@ -455,7 +455,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Subject/attachment token formatting differs cosmetically (such as extra separators) but required identifiers and normalized entities match ERP/workbook context.
 - Buyer text includes harmless punctuation/case variation while canonical normalization confirms an exact business-entity match.
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
-- For `import_btb_lc`, attachment filename text does not match the extracted BTB LC number, but the extracted BTB LC data remains internally valid and deterministic workbook selection still passes.
+- For `import_btb_lc`, attachment filename text does not match the extracted BTB LC number, but the extracted BTB LC data remains internally valid and all other deterministic workbook-selection requirements still pass.
 
 ## Import relevance rule
 - Fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
@@ -475,7 +475,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Import BTB LC value comparison is numeric, not lexical. Implementations must normalize BTB LC values and workbook export `Amount` values to canonical decimals before evaluating the 40%-80% rule.
 - A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
 - For allocation, the run must group all validated import BTB LCs by related export LC and process each group from highest to lowest normalized import BTB LC value.
-- Attachment filename and extracted BTB LC number are expected to match for import BTB LC PDFs. A mismatch is warning-only evidence and must be preserved in run/mail reports; filename text must not replace or override extracted BTB LC values.
+- Attachment filename and extracted BTB LC number are expected to match for import BTB LC PDFs. A mismatch is warning-only evidence only when all other required extraction and workbook-selection checks for that import BTB LC pass, and it must be preserved in run/mail reports; filename text must not replace or override extracted BTB LC values.
 - Duplicate import BTB LC handling must check both:
   - already-recorded workbook `BTB L/C No.` values
   - import BTB LC values already accepted earlier in the same run, whether from the same mail or a different mail
@@ -494,6 +494,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - One import BTB LC maps to one workbook row only.
 - If an extracted import BTB LC produces zero value-eligible workbook rows, the result is `hard_block`; the report must include the normalized BTB LC value, related export LC, and compared candidate-row evidence.
 - If no deterministic import BTB LC PDF can be extracted from a relevant import mail, the mail is `hard_block` and the report must include attachment-level extraction-failure evidence.
+- If one mail contains multiple import BTB LC PDFs, duplicate-only/no-write results for one or more PDFs do not by themselves block post-run mail movement; the mail remains move-eligible only when no import BTB LC in that mail ends in `hard_block`.
+- If one mail contains only duplicate-only/no-write import BTB LC PDFs, the mail remains move-eligible after report generation even though it produced zero workbook writes.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
@@ -540,7 +542,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
 - Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
-- Successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; the generated HTML report opens automatically after terminal mail-move success.
+- Successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; duplicate-only/no-write import BTB LC PDFs inside an otherwise successful mail do not block that move, mails containing only duplicate-only/no-write import BTB LC PDFs are still move-eligible after report generation, and the generated HTML report opens automatically after terminal mail-move success.
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.
