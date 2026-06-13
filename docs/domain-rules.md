@@ -473,6 +473,15 @@ The dashboard column is verification-only and should not be used to drive other 
 
 ## Import BTB LC allocation rule
 - Import BTB LC value comparison is numeric, not lexical. Implementations must normalize BTB LC values and workbook export `Amount` values to canonical decimals before evaluating the 40%-80% rule.
+- Import BTB LC PDFs follow UCP clause structure, but clause placement and page formatting may vary significantly across banks and may show minor discrepancies even within the same bank.
+- BTB LC number extraction must validate against these bank-specific identifier shapes after deterministic normalization:
+  - The City Bank PLC: exactly 13 digits, beginning with `0742`
+  - Mutual Trust Bank Limited: exactly 16 digits, beginning with `0002228`
+  - Al-Arafah Islami Bank PLC: exactly 13 digits, beginning with `1080`
+  - Brac Bank PLC: exactly 13 digits, beginning with `3085`
+  - Standard Chartered Bank: exactly 14 characters total, beginning with `41101`, followed by numeric digits, and ending with the fixed suffix `-L`
+- Internal spaces are forbidden for all approved bank-specific BTB LC number shapes. If a candidate BTB LC number contains any embedded space, validation fails; implementations must not repair the value by removing spaces.
+- If an extracted candidate BTB LC number does not satisfy one of the approved bank-specific shapes, the BTB LC number is not valid for deterministic phase-1 write processing.
 - A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
 - For allocation, the run must group all validated import BTB LCs by related export LC and process each group from highest to lowest normalized import BTB LC value.
 - Attachment filename and extracted BTB LC number are expected to match for import BTB LC PDFs. A mismatch is warning-only evidence only when all other required extraction and workbook-selection checks for that import BTB LC pass, and it must be preserved in run/mail reports; filename text must not replace or override extracted BTB LC values.

@@ -791,6 +791,13 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Extraction targets
 - Extract only the import BTB LC portion from the first three pages of the PDF
 - BTB LC number
+- validate extracted BTB LC number against bank-specific identifier shapes:
+  - The City Bank PLC: 13 digits, prefix `0742`
+  - Mutual Trust Bank Limited: 16 digits, prefix `0002228`
+  - Al-Arafah Islami Bank PLC: 13 digits, prefix `1080`
+  - Brac Bank PLC: 13 digits, prefix `3085`
+  - Standard Chartered Bank: 14 characters total, prefix `41101`, numeric middle segment, suffix `-L`
+- internal spaces are never allowed inside the extracted BTB LC number; any embedded space is a validation failure
 - BTB LC date
 - BTB LC value
 - PI number
@@ -799,6 +806,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
 - PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
 - if no import BTB LC PDF can be extracted deterministically from a relevant mail, the mail hard-blocks and the report must capture the missing/failed extraction evidence
+- all import BTB LC clause parsing should assume UCP-style clause semantics even when bank-specific visual layout differs
 
 ### Candidate row rules
 - Normalize import BTB LC values and workbook export LC values to canonical numeric values before comparison
