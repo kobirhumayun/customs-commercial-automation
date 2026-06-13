@@ -21,6 +21,13 @@ For production export attachment storage, the configured `document_root` must be
 
 Policy precedence note (phase 1): if a case is unspecified, ambiguous, or not fully satisfied by explicit rule conditions, the outcome must be `hard_block` with comprehensive reporting (no human-review routing in phase 1).
 
+### Finalized workflow change-control guardrail
+- Already finalized workflows are behavior-frozen unless a later business-approved change explicitly reopens them.
+- For finalized workflows, existing runtime behavior and regression tests take precedence over stylistic cross-workflow consistency.
+- New workflow work must not silently reinterpret older workflow rules through shared helpers, shared schema cleanup, or shared recovery/phase-state rewrites.
+- If a shared component must change for a new workflow, the change should be additive and gated by workflow id, launcher path, or explicit feature applicability so finalized workflows preserve their current outputs.
+- Bug fixes for finalized workflows should be minimal and defect-targeted. Do not combine a bug fix with unrelated semantic cleanup, report-shape normalization, or refactoring that changes observed workflow behavior.
+
 ### Operator setup helper: Outlook folder EntryIDs
 Live Outlook workflows require real folder `EntryID` values in local config for keys such as:
 - `source_working_folder_entry_id`
