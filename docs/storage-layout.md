@@ -13,16 +13,29 @@ Implementations must use configured roots (see `docs/architecture.md`) and creat
 Under `run_artifact_root/<workflow_id>/<run_id>/`:
 
 - `run_metadata.json`
-- `mail_outcomes.jsonl`
+- `mail_outcomes.jsonl` (canonical mail-level JSON report stream)
 - `staged_write_plan.json`
 - `target_probes.jsonl`
+- `discrepancies.jsonl`
+- `logs/` (structured log fragments if enabled)
+
+Required only for `import_btb_lc`:
+- `import_btb_lc_report.html` (canonical workflow HTML summary report)
+- `source_documents/` for Current Full Path run-scoped attachment evidence before deterministic year-folder promotion
+
+`source_documents/` should use `<mail_id>/<attachment_index>/` subdirectories so same-named attachments never overwrite one another. Files in this tree are immutable run evidence:
+- validated import PDFs may also be copy-promoted to `<import_document_root>/<BTB LC year>/` through a temporary file and atomic rename
+- failed or unclassified PDFs remain only here
+- File Picker Path does not duplicate already stored source files into this tree, but reports their absolute path and SHA-256
+
+Required only when the workflow/launcher path includes a live print phase:
 - `print_plan.json`
 - `print_annotation_checklist.json`
 - `print_annotation_checklist.html`
 - `print_markers/` (one marker per print group)
+
+Required only when the workflow/launcher path includes post-run Outlook mail moves:
 - `mail_move_markers/` (one marker per mail move)
-- `discrepancies.jsonl`
-- `logs/` (structured log fragments if enabled)
 
 Under `backup_root/<workflow_id>/<run_id>/`:
 
@@ -51,7 +64,7 @@ Partial/truncated files are invalid artifacts and must trigger hard-block during
 - Purge jobs must emit a deletion audit log containing run id, workflow id, and deleted paths.
 
 ## 6) Corruption/missing artifact behavior
-If any required recovery artifact is missing, unreadable, hash-invalid, or malformed:
+If any required recovery artifact for the applicable workflow phases is missing, unreadable, hash-invalid, or malformed:
 - recovery outcome must be hard-block
 - no workbook write may start
 - discrepancy report must include exact missing/invalid paths and validation failures

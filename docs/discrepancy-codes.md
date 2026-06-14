@@ -70,7 +70,26 @@ Every discrepancy payload should include:
 | `export_family_inconsistent` | `hard_block` | export_lc_sc | Resolved ERP rows for extracted file numbers did not belong to one LC/SC family. |
 | `export_required_erp_field_missing` | `hard_block` | export_lc_sc | A canonical ERP row is missing one or more fields required for export workbook staging. |
 | `export_subject_family_mismatch` | `hard_block` | export_lc_sc | Parsed export subject fields did not match the verified ERP family. |
-| `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Import candidate resolution remained tied after all keys. |
+| `import_candidate_tie_after_full_tiebreak` | `hard_block` | import_btb_lc | Reserved for historical/defensive handling; normal import row allocation resolves a remaining value tie by lowest workbook row index. |
+| `import_duplicate_document_same_mail` | `warning` | import_btb_lc | Repeated import BTB LC evidence within one mail matched exactly and was treated as duplicate-only with no additional write. |
+| `import_duplicate_document_same_run` | `warning` | import_btb_lc | A later import BTB LC in the same run matched an earlier accepted import BTB LC exactly and was treated as duplicate-only with no additional write. |
+| `import_duplicate_document_in_workbook` | `warning` | import_btb_lc | Exactly one workbook row already contained the same BTB LC number, related export LC, and import amount, so the document was handled as duplicate-only with no write. |
+| `import_filename_number_mismatch` | `warning` | import_btb_lc | The import BTB LC attachment filename did not match the extracted BTB LC number, but all other required extraction and workbook-selection checks for that import BTB LC remained valid so processing continued. |
+| `import_duplicate_document_conflict` | `hard_block` | import_btb_lc | Duplicate import BTB LC evidence conflicted on required extracted values or deterministic workbook implications. |
+| `import_no_qualified_workbook_row` | `hard_block` | import_btb_lc | The extracted import BTB LC did not qualify any workbook row under the deterministic candidate rules. |
+| `import_required_document_missing` | `hard_block` | import_btb_lc | No deterministic import BTB LC PDF could be extracted from the relevant import mail. |
+| `import_btb_lc_number_invalid` | `hard_block` | import_btb_lc | Extracted BTB LC number was missing or did not match an approved bank-specific identifier shape. |
+| `import_btb_lc_date_invalid` | `hard_block` | import_btb_lc | BTB LC date was missing, ambiguous, or not a valid calendar date. |
+| `import_btb_lc_amount_invalid` | `hard_block` | import_btb_lc | BTB LC amount was missing, non-positive, ambiguous, or not a valid canonical decimal. |
+| `import_currency_missing_or_mismatch` | `hard_block` | import_btb_lc | Extracted currency was missing or differed from configured `import_amount_currency`. |
+| `import_pi_number_invalid` | `hard_block` | import_btb_lc | Seller PI number was missing or did not match an approved import PI pattern. |
+| `import_related_export_lc_invalid` | `hard_block` | import_btb_lc | Related export LC was missing or failed canonical LC/SC normalization. |
+| `import_workbook_duplicate_unverifiable` | `hard_block` | import_btb_lc | Workbook already contained the BTB LC number, but row count, related export LC, or import amount evidence could not prove one exact duplicate. |
+| `import_workbook_candidate_invalid` | `hard_block` | import_btb_lc | A matching-family workbook row had an invalid required export amount or a partial BTB-number/import-amount target state. |
+| `import_target_cell_already_populated` | `hard_block` | import_btb_lc | An import destination cell (`BTB L/C No.` or import `Amount` column 22) was populated when a blank target was required for staging or live pre-write validation; the batch must stop before any workbook mutation. |
+| `import_storage_filename_content_conflict` | `hard_block` | import_btb_lc | The destination filename already existed with different file content; the existing file was not overwritten. |
+| `import_file_picker_source_invalid` | `hard_block` | import_btb_lc | A selected File Picker source was not a regular PDF beneath the configured import document root. |
+| `import_report_browser_open_failed` | `warning` | import_btb_lc | The import BTB LC HTML report was generated successfully, but the system could not open it automatically in the default browser. |
 | `attachment_classification_ambiguous` | `hard_block` | shared | Required attachment class could not be uniquely selected. |
 
 ### OCR / extraction quality

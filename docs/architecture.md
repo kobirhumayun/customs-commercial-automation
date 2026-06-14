@@ -96,6 +96,8 @@ Each manually triggered CLI run should follow one explicit execution contract:
 
 This model is intentionally **run-level staged, but mail-level selective**: one blocked mail must not force unrelated validated mails in the same run to be discarded, yet no single mail may print or move ahead of the controlled workbook-write phase.
 
+For launcher paths that do not begin from Outlook mail objects, the workflow must still preserve the same downstream run/mail model by creating deterministic synthetic mail-level units. For `import_btb_lc` File Picker Path, each selected PDF file becomes one synthetic mail-level unit with a stable synthetic `mail_id`; workbook staging, duplicate handling, and report generation must use that synthetic unit exactly as the Current Full Path uses an Outlook-backed mail.
+
 ### Operator print-annotation checklist contract (normative)
 For workflows that require print-annotation handling, each run must produce an operator-facing checklist ordered by the same deterministic print sequence used for physical submission.
 
@@ -253,14 +255,40 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Write is blocked if matching rules are incomplete, contradictory, or leave unresolved discrepancies under the defined thresholds.
 
 ### Import / BTB LC CLI
-- Operator moves fabric-relevant emails from `temp-import` to `working`.
-- Relevance is determined by case-insensitive substring matching against the fabric subject keyword list stored in code.
-- New PDFs are saved into the designated import folder organized by year.
-- Extraction returns BTB LC number/date/value, PI yarn quantity, and related export LC number from clauses.
-- Candidate workbook rows are filtered by matching export LC with blank `UP No.` and blank BTB LC field.
-- Strict validation selects the first row where BTB LC value falls between 40% and 80% of export LC value.
+- The workflow must expose two operator-facing CMD launchers that share one deterministic extraction/validation/write/report core:
+  - **Current Full Path**: snapshots Outlook-driven mail intake, evaluates subject relevance, acquires eligible-mail PDFs into run evidence, promotes validated import PDFs under the configured import storage path, performs workbook updates, generates reports, and opens the HTML report in the browser.
+  - **File Picker Path**: starts from an operator file picker over previously stored files and bypasses all mail intake interactions.
+- Launcher applicability must be represented explicitly in workflow-scoped configuration/runtime context rather than by changing shared behavior for finalized workflows. Both paths set `launcher_path` to either `current_full` or `file_picker`.
+- For the File Picker Path, each selected PDF file must be represented downstream as one synthetic mail-level unit so run ordering, staged writes, duplicate handling, and report outputs remain structurally identical to the Current Full Path.
+- For the File Picker Path, deterministic synthetic-mail ordering is ascending normalized absolute file path. `snapshot_index`, synthetic `mail_id`, and persisted `mail_iteration_order` must all derive from that sorted file-path order rather than the picker click order or file timestamp values.
+- A File Picker Path synthetic `mail_id` is derived from the normalized absolute file path. The file SHA-256 remains separate integrity evidence so content replacement at the same path is detectable without making run ordering unstable.
+- Operator moves fabric-relevant emails from `temp-import` to `working` for the Current Full Path.
+- Relevance is determined by case-insensitive substring matching against the versioned import subject-keyword module owned by the `import_btb_lc` workflow rule pack for the Current Full Path; the File Picker Path assumes the operator directly selects candidate stored files instead of using mail-subject relevance.
+- Every Current Full Path snapshotted mail produces an import relevance decision. A subject-ineligible mail is retained in audit output with `processing_disposition=not_applicable`, performs no attachment acquisition/extraction/write/move, remains in `working`, and is excluded from pass/warning/hard-block processing counts.
+- Current Full Path PDFs are first copied into run-scoped source-evidence storage before extraction. After the BTB LC date is validated, successfully classified import PDFs are copy-promoted through a same-directory temporary file and atomic rename under the configured import storage base path organized by BTB LC year; immutable source evidence remains in the run tree. Failed/unclassified evidence is not promoted. The File Picker Path reads previously stored files and does not copy or promote them.
+- Phase-1 `import_btb_lc` candidate allocation is workbook-driven after extraction and does not require a separate ERP download/search step.
+- Extraction is limited to the first three pages of the import BTB LC PDF and returns BTB LC number/date/value/currency, PI number, and related export LC number from LC clauses.
+- For phase-1 import BTB LC processing, PI number extraction from LC clauses must match one of the approved case-insensitive regex patterns: `btl/\d{2}/\d{4}` or `kyl/\d{2}/\d{4}`.
+- Import BTB LC PDFs follow UCP clause structure, but bank formatting differs materially and minor same-bank formatting variation is expected; extraction must therefore validate BTB LC numbers against documented bank-specific identifier shapes rather than one generic layout.
+- Embedded spaces inside a BTB LC number are not allowed for any approved bank pattern; if a candidate number contains internal spaces, validation fails for deterministic phase-1 processing.
+- Import attachment filename and extracted BTB LC number are expected to match; a mismatch is warning-only evidence captured in reports and must not block workbook write or mail movement when all other required extracted values and workbook-selection checks for the affected import BTB LC still pass.
+- The low-quality scanned PI and export-LC pages appended below the BTB LC are out of phase-1 PDF extraction scope; PI yarn quantity remains a future import-ERP integration input rather than a direct PDF extraction target.
+- Each PDF emits one `import_document_outcome` record binding classification/disposition, storage lineage, extracted fields, provenance, duplicate status, candidate evidence, selected row, warnings, discrepancies, and write-operation ids. Legacy extracted-identifier arrays remain projections only and must not be used to reconstruct document relationships.
+- Duplicate import BTB LC handling must detect already-recorded workbook `BTB L/C No.` values and same-run repeated BTB LC evidence across the same mail or different mails. Workbook duplicate equality is provable only when exactly one existing row carries the normalized number and that row's canonical related export LC plus normalized import amount equal the extracted evidence. Same-run equality additionally requires equal BTB date, currency, and PI number. Unprovable or disagreeing duplicate evidence hard-blocks.
+- Candidate processing groups all validated, non-duplicate import BTB LCs in the run by canonical related export LC family. The complete allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, then source snapshot/attachment order. Rows already claimed earlier in that order are excluded.
+- Import mail writes are mail-atomic. Before allocation, exclude mails with intrinsic extraction/validation/duplicate conflicts. During allocation, if the first unresolved document in priority order has no qualified row, hard-block its parent mail, release every tentative reservation made by that mail, and restart same-run duplicate ownership plus row allocation from the baseline workbook without blocked mails. Repeat until a complete pass adds no newly blocked mail.
+- Candidate workbook rows are filtered by matching canonical export LC with blank `UP No.`, blank `BTB L/C No.`, and blank import `Amount` column 22.
+- `import_btb_lc` is strictly no-overwrite: it may write only its two destination cells, `BTB L/C No.` and import `Amount` column 22, and both must be blank during candidate evaluation and still blank during live pre-write validation. It must never clear, append to, merge with, or replace an already populated workbook cell.
+- A proven workbook duplicate is a duplicate-only/no-write outcome, not permission to rewrite the existing values. Any other populated import target cell hard-blocks before the batch write begins.
+- Strict validation selects a row only when the normalized BTB LC value falls between 40% and 80% of the normalized workbook export LC value, inclusive.
+- If multiple workbook rows qualify for one import BTB LC, the selected row is the one with the highest normalized workbook export LC value; if a tie remains, the lowest workbook row index wins.
+- BTB and workbook amount comparisons use exact decimal arithmetic with no floating-point tolerance or currency conversion. The extracted currency must equal the configured single workbook/import currency; missing or different currency hard-blocks.
 - One import LC populates exactly one workbook row.
-- Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase; blocked emails remain in `working`.
+- The workflow has no document print phase; it emits the standard run/mail JSON report artifacts plus an import HTML summary report that must include duplicate-only outcomes, filename-mismatch warnings, extraction misses, and no-qualified-row outcomes. The Current Full Path opens that HTML report after terminal mail-move success, while the File Picker Path opens it after report generation completes because no mail-move phase exists there.
+- A mail containing one or more duplicate-only import BTB LC PDFs may still complete post-run mail movement when every non-duplicate import BTB LC in that same mail reaches a successful non-hard-block terminal outcome.
+- A mail containing only duplicate-only import BTB LC PDFs and producing zero new workbook writes remains move-eligible after run-report artifact generation completes.
+- If any import document in a mail is hard-blocked, the mail is hard-blocked and contributes zero workbook writes; unrelated mails remain eligible through the allocation-restart rule.
+- Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase in the Current Full Path; the File Picker Path performs no mail interactions or mail moves.
 
 ### Bangladesh Bank dashboard verification CLI
 - Reads candidate rows where `UP No.` is blank, `UD No. & IP No.` exists, the first non-empty line does not begin with `EXP` or `IP`, and `Bangladesh Bank Dashboard` is blank or not already compliant.
@@ -380,6 +408,7 @@ The orchestrator should resolve the active workflow name from the invoked CLI co
 - Attachment filename contains a non-critical cosmetic variation (for example extra separator characters) but document classification and required extracted fields validate successfully.
 - Parsed buyer display text differs only by case/punctuation from ERP-normalized buyer while normalized canonical values match.
 - A duplicate informational attachment (not selected for extraction/write) is present in the email, while at least one required document is valid and all write-gating checks pass.
+- For `import_btb_lc`, the attachment filename does not equal the extracted BTB LC number, but required extracted values remain valid and deterministic workbook selection still passes.
 
 ### Examples of hard blocks
 - any extracted file number missing its ERP row
@@ -429,18 +458,20 @@ This allows deterministic review of why a value was accepted or blocked.
 - Duplicate PDF detection is by filename only.
 - Export files follow the hierarchy `Year / Buyer / LC-or-SC / All Attachments`.
 - Import files live under the designated import root organized by year.
-- JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, extracted file numbers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions, print metadata, timestamps, and operator context.
-- Run-level JSON metadata must persist deterministic `mail_iteration_order` (timezone-normalized `ReceivedTime` + `EntryID`) and final `print_group_order` (mail-group ids ranked by workbook row sequence).
+- JSON reports must include run id, per-mail job identifiers, workflow name, source-email snapshot, parsing outputs, workflow-specific extracted identifiers, saved paths, normalized entities, validation results, staged row targets, final write/blocked status, destination Outlook folder decisions when applicable, phase metadata, timestamps, and operator context.
+- Run-level JSON metadata must persist deterministic `mail_iteration_order` using the launcher-path ordering contract: Outlook-backed paths use timezone-normalized `ReceivedTime` + `EntryID`, while `import_btb_lc` File Picker Path uses ascending normalized absolute file path for its synthetic mail-level units.
 - Run-level and mail-level reports must include revision stamps for every active deterministic list/rule set used during evaluation (for example `import_subject_keyword_list_version`).
+- `import_btb_lc` run metadata must include `launcher_path`; Current Full Path run and mail outputs must also include `import_keyword_revision`. File Picker Path persists `import_keyword_revision=null`.
 
 ## Configuration layer policy (phase 1)
 
 ### Deterministic list location
 - Workflow keyword/rule lists that directly influence write/no-write decisions (including import relevance keywords) must live in **in-repo Python constants**, not operator-editable external config files, in phase 1.
 - Rationale: keeps behavior deterministic, code-reviewed, and tied to explicit release artifacts.
-- Import relevance keyword constants must use the canonical module path `project/workflows/import_btb_lc/keywords.py` (import path `project.workflows.import_btb_lc.keywords`) so startup validation and lineage stamping are deterministic across environments.
+- Import relevance keyword constants must use the canonical module path `project/rules/workflows/import_btb_lc/keywords.py` (import path `project.rules.workflows.import_btb_lc.keywords`) so startup validation and lineage stamping remain aligned with the workflow-specific rule-pack structure used by other finalized workflows.
 - The module must export both required constants:
   - `IMPORT_SUBJECT_KEYWORDS`
+  - `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` (optional)
   - `IMPORT_KEYWORD_REVISION`
 
 ### Ownership and update workflow
@@ -453,15 +484,17 @@ This allows deterministic review of why a value was accepted or blocked.
 - Each deterministic list/rule set must expose a stable revision identifier (for example semantic version or date+sequence token).
 - For import relevance keywords, revision format is required: `YYYY-MM-DD.N` (`N` is a positive integer sequence for that date).
 - The orchestrator must capture the active revision identifier in run metadata and discrepancy/report outputs.
-- For import workflows, the orchestrator must stamp `IMPORT_KEYWORD_REVISION` into both:
+- For `import_btb_lc` Current Full Path, the orchestrator must stamp `IMPORT_KEYWORD_REVISION` into both:
   - run-level report/metadata payloads
   - mail-level report/discrepancy payloads for every processed mail
+- For `import_btb_lc` File Picker Path, `import_keyword_revision` may be `null` because subject-keyword relevance is not evaluated there.
 - Field name must be stable as `import_keyword_revision` so report consumers can join run/mail lineage without per-tool remapping.
 - Report consumers must be able to reconstruct which exact list revision produced each relevance or validation decision.
 
 ### Missing/malformed configuration behavior
 - If required deterministic list constants cannot be loaded, are empty when marked mandatory, or fail schema/shape validation at startup, the CLI must terminate with a **startup hard failure** before snapshot side effects.
-- Import keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`.
+- `import_btb_lc` Current Full Path keyword startup validation must explicitly fail fast when `IMPORT_SUBJECT_KEYWORDS` or `IMPORT_KEYWORD_REVISION` is missing, malformed, mandatory-empty, or if `IMPORT_KEYWORD_REVISION` does not match `YYYY-MM-DD.N`; malformed optional `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` must also hard-fail startup.
+- `import_btb_lc` File Picker Path does not use subject-keyword relevance and therefore must not require the keyword module as a launcher precondition.
 - Phase 1 must not silently fall back to permissive defaults for missing/malformed decision-driving lists.
 
 ## 10. Windows deployment and operations
@@ -486,7 +519,7 @@ This allows deterministic review of why a value was accepted or blocked.
 - Initial live deployment should default to hard block plus comprehensive reporting for any case that does not satisfy all specified parameters.
 - Outlook-driven workflows snapshot all messages currently in the `working` folder when the operator triggers the CLI.
 - Export-family verification should validate every extracted file number against ERP data rather than selecting a single primary file number. Family consistency is defined by LC/SC number, buyer, and LC/SC date; duplicate ERP rows may use any one duplicate row, and any partial family match is a hard block.
-- Import relevance uses case-insensitive substring matching on fabric subject keywords stored in code.
+- `import_btb_lc` Current Full Path uses case-insensitive substring matching on fabric subject keywords stored in code; `File Picker Path` bypasses subject relevance and starts from operator-selected stored PDFs.
 - Successfully processed export-team emails move to `UD and LC`; successfully processed import-team emails move to `Import`; blocked emails remain in `working`, and mail moves occur only after batched writes and printing finish.
 - Print grouping is based on the active run snapshot and staged successful write outcomes, but only newly saved PDF documents are included in each batch.
 
@@ -512,18 +545,28 @@ Required fields:
 - `run_start_backup_hash` (string): lowercase hex SHA-256 digest.
 - `staged_write_plan_hash` (string|null): lowercase hex SHA-256 digest when write-capable workflow stages writes.
 - `write_phase_status` (string): workflow write phase checkpoint.
-- `print_phase_status` (string): workflow print checkpoint.
-- `mail_move_phase_status` (string): workflow mail-move checkpoint.
+- `print_phase_status` (string): workflow print checkpoint. Finalized workflows preserve their established phase semantics; both `import_btb_lc` launcher paths persist `completed` because import has no print phase.
+- `mail_move_phase_status` (string): workflow mail-move checkpoint. Finalized workflows preserve their established phase semantics; `import_btb_lc` File Picker Path persists `completed` because it has no mail-move phase.
+
+For `import_btb_lc`, run/report extensions also require:
+- `launcher_path` (`current_full` or `file_picker`)
+- `import_keyword_revision` (string for Current Full Path; null for File Picker Path)
+- `import_relevance_summary`
 
 ### `EmailMessage` (mail-level)
 Required fields:
-- `mail_id` (string): stable mail identifier derived from Outlook `EntryID`.
-- `entry_id` (string): raw Outlook `EntryID`.
-- `received_time_utc` (string): normalized ISO-8601 UTC timestamp.
-- `received_time_workflow_tz` (string): timestamp in configured workflow timezone.
-- `subject_raw` (string): original subject.
-- `sender_address` (string): canonical sender SMTP address when available.
+- `mail_id` (string): stable mail identifier derived from Outlook `EntryID`, or stable synthetic identifier for non-Outlook launcher paths.
+- `entry_id` (string): raw Outlook `EntryID` for Outlook-backed paths. The `import_btb_lc` File Picker adapter uses a deterministic, non-Outlook synthetic source identifier in a reserved namespace rather than weakening this established shared field to nullable.
+- `received_time_utc` (string): normalized ISO-8601 UTC timestamp; for `import_btb_lc` File Picker Path synthetic units, use the selected file's normalized last-modified timestamp for lineage only.
+- `received_time_workflow_tz` (string): timestamp in configured workflow timezone derived from the same source as `received_time_utc`.
+- `subject_raw` (string): original subject for Outlook-backed paths; synthetic descriptive label for file-picker-backed units.
+- `sender_address` (string): canonical sender SMTP address when available; File Picker synthetic units use an empty string and rely on `launcher_path=file_picker` plus import source-path lineage to establish non-mail origin.
 - `snapshot_index` (integer): position from deterministic run snapshot ordering.
+
+For `import_btb_lc` File Picker Path, one selected PDF file = one synthetic mail-level unit. Its construction must be owned by an import-specific adapter; finalized Outlook snapshot providers and their shared model behavior must remain unchanged.
+
+### `ImportDocumentOutcome` (`import_btb_lc` only)
+One record represents one processed PDF and is the authoritative relationship boundary for extracted BTB number/date/value/currency, PI number, related export LC, source provenance, duplicate classification, workbook candidate evidence, selected row, document decision, and write-operation ids. Mail-level identifier arrays are backward-compatible projections only.
 
 ### `SavedDocument`
 Required fields:
@@ -563,8 +606,16 @@ Required fields:
 - `moved_at_utc` (string|null): completion evidence timestamp.
 - `move_status` (string): `pending`, `moved`, or `inconsistent`.
 
+`MailMoveOperation` is produced only for workflows/launcher paths that interact with Outlook mail state. `import_btb_lc` File Picker Path does not produce mail-move operations.
+
+For `import_btb_lc`, intentionally absent downstream phases must still be explicit:
+- both launcher paths: `print_phase_status = completed`, `print_group_order = []`, no print plan/checklist artifacts, and empty print-marker collections
+- File Picker Path: `mail_move_phase_status = completed`, no mail-move operations, and empty mail-move-marker collections
+
+These are import workflow contracts, not retroactive normalization rules. Finalized workflows such as `bb_dashboard_verification` retain their established persisted phase values unless a separate behavioral change is explicitly approved.
+
 ## 16. Report schema/versioning contract (normative)
-All JSON report payloads must include `report_schema_version` using semantic versioning:
+All canonical shared run, mail-outcome, discrepancy, checklist, and recovery JSON payloads must include `schema_id`, `schema_version`, and `report_schema_version`. `schema_version` and `report_schema_version` use semantic versioning and must be equal for newly emitted payloads:
 - Patch: backward-compatible additive fields.
 - Minor: backward-compatible structural additions.
 - Major: breaking changes requiring consumer upgrade.
@@ -572,6 +623,8 @@ All JSON report payloads must include `report_schema_version` using semantic ver
 ### Required top-level run report object
 ```json
 {
+  "schema_id": "run_report",
+  "schema_version": "1.0.0",
   "report_schema_version": "1.0.0",
   "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
   "workflow_id": "export_lc_sc",
@@ -589,17 +642,29 @@ All JSON report payloads must include `report_schema_version` using semantic ver
 }
 ```
 
-### Required top-level mail report object
+### Required top-level mail outcome object
 ```json
 {
+  "schema_id": "mail_outcome_record",
+  "schema_version": "1.0.0",
   "report_schema_version": "1.0.0",
   "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
   "mail_id": "mail-01",
   "workflow_id": "export_lc_sc",
+  "snapshot_index": 0,
+  "processing_status": "validated",
   "rule_pack_id": "export_lc_sc.default",
   "rule_pack_version": "1.4.0",
   "applied_rule_ids": ["core.subject.buyer_lc_match.v1"],
   "final_decision": "warning",
+  "decision_reasons": ["cosmetic filename variation"],
+  "eligible_for_write": true,
+  "eligible_for_print": true,
+  "eligible_for_mail_move": true,
+  "source_entry_id": "00000000A1B2C3D4",
+  "subject_raw": "Export LC documents",
+  "sender_address": "sender@example.com",
+  "file_numbers_extracted": ["P/26/0042"],
   "discrepancies": [],
   "saved_documents": [],
   "staged_write_operations": [],
@@ -630,9 +695,9 @@ At minimum, the configuration layer must expose these keys:
 - `report_root`
 - `run_artifact_root`
 - `backup_root`
-- `outlook_profile`
+- `outlook_profile` for Outlook-backed launcher paths
 - `master_workbook_root`
-- `erp_base_url`
+- `erp_base_url` when the active workflow requires ERP access
 - `playwright_browser_channel` (if applicable)
 
 Write-capable workflows must also provide:
@@ -643,12 +708,22 @@ Write-capable workflows must also provide:
 `master_workbook_path_template` controls the expected yearly workbook filename.
 The normal production pattern is to store the exact real workbook filename in config and update it manually when the yearly workbook changes.
 
+`print_enabled` is a workstation-level live-print safety switch, not a workflow selector.
+- Workflows or launcher paths with no print phase ignore this setting.
+- Print-capable workflows consult it only when a live print execution path is actually requested.
+- Operators should not need to edit this value each time they switch workflows; leave it at the workstation's intended live-print policy.
+
 Optional placeholders may be used if a deployment intentionally wants generated naming:
 - `{year}`
 - `{workflow_id}`
 
 ### Workflow-specific required keys
-Workflow modules must declare their own required key list (for example import keyword controls, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
+Workflow modules must declare their own required key list (for example import document storage root, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
+For `import_btb_lc`, this workflow-specific key set must distinguish between the two launcher paths:
+- both paths require `import_document_root`, `import_amount_currency`, and the write-capable workbook keys
+- `Current Full Path` additionally requires `outlook_profile` plus Outlook folder mapping for intake/move operations and a valid import keyword module
+- `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
+- Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
 
 ### Secrets handling (Windows-first)
 - Credentials must not be hard-coded in source files.
@@ -662,7 +737,7 @@ Before processing a run snapshot, startup must validate:
 - configured root path availability and permissions
 - implementations may create the managed operator-owned roots `report_root`, `run_artifact_root`, and `backup_root` on first use before writability validation; missing workbook roots/files still hard-fail
 - timezone parseability and canonicalization
-- destination Outlook folder mapping completeness for the active workflow
+- destination Outlook folder mapping completeness for the active Outlook-backed workflow/launcher path
 
 Any failure is a startup hard failure with structured diagnostics.
 
@@ -680,6 +755,11 @@ playwright_browser_channel = "msedge"
 print_enabled = true
 excel_lock_timeout_seconds = 120
 ```
+
+Recommended interpretation:
+- `print_enabled = true` means this workstation allows live print execution for print-capable workflows such as `export_lc_sc` and `ud_ip_exp`
+- `print_enabled = false` disables live print execution even for print-capable workflows
+- non-print workflows such as `import_btb_lc` and `bb_dashboard_verification` ignore this setting
 
 ## 9. Artifact storage layout reference
 Run/recovery artifact locations, file naming, atomic persistence rules, and retention behavior are defined in `docs/storage-layout.md`. Implementations must treat that document as normative for persisted run state and recovery marker management.

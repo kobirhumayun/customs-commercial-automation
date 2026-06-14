@@ -10,6 +10,16 @@ run_artifact_root = "C:/customs-automation/state/runs"
 backup_root = "C:/customs-automation/state/backups"
 master_workbook_root = "C:/customs-automation/workbooks"
 
+# Optional workflow-specific storage roots.
+# Example for `import_btb_lc`:
+# import_document_root = "C:/customs-automation/import-documents"
+# import_amount_currency = "USD"
+# Import workflow storage shape:
+# <import_document_root>/<BTB LC year>/
+# Current Full Path first stores source evidence under the run artifact tree,
+# then promotes deterministically validated PDFs into the year folder.
+# File Picker Path accepts only PDFs that resolve beneath import_document_root.
+
 # Outlook / ERP / browser settings.
 outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
@@ -85,9 +95,15 @@ bb_dashboard_snapshot_poll_interval_ms = 100
 # master_workbook_path_template = "C:/customs-automation/workbooks/{workflow_id}-{year}.xlsx"
 master_workbook_path_template = "C:/customs-automation/workbooks/UP Issuing Status for the Period # 01-03-2026 to 28-02-2027.xlsx"
 excel_lock_timeout_seconds = 120
+# Workstation-level live-print safety switch.
+# Leave this unchanged when switching workflows:
+# - print-capable workflows (`export_lc_sc`, `ud_ip_exp`) consult it only for live print execution
+# - non-print workflows (`import_btb_lc`, `bb_dashboard_verification`) ignore it
+# Set `false` only if this workstation should block all live print execution.
 print_enabled = true
 
-# Required Outlook folder EntryIDs for the workflow being run.
+# Required Outlook folder EntryIDs only for Outlook-backed launcher paths.
+# `import_btb_lc` File Picker Path bypasses Outlook entirely and does not use these values.
 # Discover them with:
 # uv run python -m project inspect-outlook-folders --outlook-profile "outlook"
 #
@@ -98,6 +114,9 @@ print_enabled = true
 # Then copy the matching JSON `entry_id` values into the two fields below:
 # - source_working_folder_entry_id: the folder this workflow reads pending mails from
 # - destination_success_entry_id: the folder successful mails move to after completion
+# Finalized workflows keep their existing configuration requirements.
+# The `import_btb_lc` File Picker launcher may omit these values only through
+# its workflow-specific launcher/config adapter; generic validation is unchanged.
 source_working_folder_entry_id = "REPLACE_WITH_WORKFLOW_WORKING_FOLDER_ENTRY_ID"
 destination_success_entry_id = "REPLACE_WITH_WORKFLOW_SUCCESS_FOLDER_ENTRY_ID"
 
