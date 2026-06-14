@@ -109,7 +109,8 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
 
 #### `print_phase_status` enum
 - Allowed values: `not_started`, `planned`, `printing`, `completed`, `hard_blocked`, `uncertain_incomplete`.
-- Workflows or launcher paths with no live print phase must persist `print_phase_status = completed`, `print_group_order = []`, and no print artifacts or print markers.
+- Finalized workflows preserve their established persisted semantics for an inapplicable print phase.
+- Both `import_btb_lc` launcher paths must persist `print_phase_status = completed`, `print_group_order = []`, and no print artifacts or print markers.
 - Allowed transitions:
   1. `not_started` → `planned`
   2. `planned` → `printing`
@@ -120,7 +121,8 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
 
 #### `mail_move_phase_status` enum
 - Allowed values: `not_started`, `moving`, `completed`, `hard_blocked`, `uncertain_incomplete`.
-- Workflows or launcher paths with no post-run mail-move phase must persist `mail_move_phase_status = completed` and no mail-move artifacts or markers.
+- Finalized workflows preserve their established persisted semantics for an inapplicable mail-move phase.
+- `import_btb_lc` File Picker Path must persist `mail_move_phase_status = completed` and no mail-move artifacts or markers.
 - Allowed transitions:
   1. `not_started` → `moving`
   2. `moving` → `completed`
@@ -525,7 +527,7 @@ If any check fails, emit discrepancy and stop with no workbook mutation.
 Run-level reports and mail-level reports must include these required fields:
 
 Run-level:
-- `report_schema_version`
+- `schema_id`, `schema_version`, `report_schema_version`
 - `run_id`, `workflow_id`
 - `rule_pack_id`, `rule_pack_version`
 - `mail_iteration_order`, `print_group_order`
@@ -533,7 +535,7 @@ Run-level:
 - `hash_algorithm`, `run_start_backup_hash`, `staged_write_plan_hash`
 
 Mail-level:
-- `report_schema_version`
+- `schema_id`, `schema_version`, `report_schema_version`
 - `run_id`, `mail_id`, `workflow_id`
 - `rule_pack_id`, `rule_pack_version`
 - `applied_rule_ids`, `final_decision`
@@ -909,6 +911,9 @@ Before enabling either launcher in production, tests must cover:
 - include/exclude subject relevance and non-actionable ineligible-mail reporting
 - File Picker root enforcement, normalized-path ordering, duplicate selection collapse, and stable synthetic ids
 - report-schema `1.1.0` validation, per-document lineage, no-print state, and launcher-specific mail-move behavior
+- finalized workflow payloads still emit their established `schema_id`, `schema_version=1.0.0`, and `report_schema_version=1.0.0` fields
+- finalized no-print/no-mail workflows, including `bb_dashboard_verification`, retain their established persisted phase values
+- File Picker startup succeeds through import-scoped validation without relaxing shared configuration or Outlook message-model contracts used by finalized workflows
 
 ## Bangladesh Bank dashboard verification
 

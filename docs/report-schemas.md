@@ -1,21 +1,24 @@
 # Report Schemas (Normative)
 
-All workflows must emit versioned JSON payloads using the schema contracts in this document.
+All workflows must emit the canonical shared run, mail-outcome, discrepancy, checklist, and recovery JSON payloads using the schema contracts in this document.
 All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 
 ## 1) Schema versioning policy
-- Every payload includes `report_schema_version`.
-- Payload type is determined by the persisted artifact filename/context (`run_metadata.json`, `mail_outcomes.jsonl`, checklist artifact, recovery artifact, and so on); a separate `schema_id` field is not required.
+- Every payload governed by this document includes `schema_id`, `schema_version`, and `report_schema_version`.
+- `schema_id` remains a stable payload-type discriminator even when the artifact filename also identifies the payload.
+- `schema_version` is a backward-compatible identity field consumed by finalized workflows. New payloads must keep it equal to `report_schema_version`; it must not be removed from finalized workflow outputs.
 - `run_metadata.json` is the canonical persisted run-level JSON report artifact.
-- `mail_outcomes.jsonl` is the canonical persisted mail-level JSON report stream, with one mail-report-shaped object per line.
+- `mail_outcomes.jsonl` is the canonical persisted mail-level JSON report stream, with one `mail_outcome_record` object per line. The internal `mail_report` projection is not a replacement for this persisted contract.
 - Backward-compatible additive field changes increment **minor**.
 - Breaking changes increment **major**.
 - Patch changes are documentation/clarification only.
-- Existing finalized workflows may continue emitting `1.0.0` until an explicitly approved schema upgrade. The initial `import_btb_lc` implementation must emit `1.1.0` because its launcher, relevance, and per-document outcome fields are additive structural extensions.
+- Existing finalized workflows must continue emitting their current `1.0.0` identity/version fields until an explicitly approved schema upgrade. The initial `import_btb_lc` implementation must emit `schema_version=1.1.0` and `report_schema_version=1.1.0` because its launcher, relevance, and per-document outcome fields are additive structural extensions.
+- Implementing `import_btb_lc` must not change the shared `REPORT_SCHEMA_VERSION` value used by finalized workflows. Import version selection must be workflow-scoped.
 
 ## 2) Run-level report schema
-- Base finalized-workflow `report_schema_version`: `1.0.0`
-- `import_btb_lc` `report_schema_version`: `1.1.0`
+- `schema_id`: `run_report`
+- Base finalized-workflow `schema_version` and `report_schema_version`: `1.0.0`
+- `import_btb_lc` `schema_version` and `report_schema_version`: `1.1.0`
 
 ### Required fields
 - `run_id` (string)
@@ -29,8 +32,8 @@ All discrepancy `code` values must be sourced from `docs/discrepancy-codes.md`.
 - `mail_iteration_order` (array of mail ids in processing order)
 - `print_group_order` (array; must be empty when the workflow/launcher path has no print phase)
 - `write_phase_status` (enum)
-- `print_phase_status` (enum; workflows/launcher paths with no print phase persist `completed`)
-- `mail_move_phase_status` (enum; workflows/launcher paths with no mail-move phase persist `completed`)
+- `print_phase_status` (enum; finalized workflows preserve their established value semantics; `import_btb_lc` persists `completed` because it has no print phase)
+- `mail_move_phase_status` (enum; finalized workflows preserve their established value semantics; `import_btb_lc` File Picker Path persists `completed` because it has no mail-move phase)
 - `hash_algorithm` (`sha256`)
 - `run_start_backup_hash` (64-char lowercase hex)
 - `current_workbook_hash` (64-char lowercase hex)
@@ -54,20 +57,30 @@ The shared `summary.pass`, `summary.warning`, and `summary.hard_block` counts co
 
 Any undeclared enum value is schema-invalid and must be treated as a hard-block recovery/reporting condition.
 
-## 3) Mail-level report schema
-- Base finalized-workflow `report_schema_version`: `1.0.0`
-- `import_btb_lc` `report_schema_version`: `1.1.0`
+## 3) Mail-level outcome schema
+- Persisted `schema_id`: `mail_outcome_record`
+- Internal non-persisted projection `schema_id`: `mail_report`
+- Base finalized-workflow `schema_version` and `report_schema_version`: `1.0.0`
+- `import_btb_lc` `schema_version` and `report_schema_version`: `1.1.0`
 
 ### Required fields
 - `run_id` (string)
 - `mail_id` (string)
 - `workflow_id` (string)
+- `snapshot_index` (integer)
+- `processing_status` (`snapshotted` | `validation_pending` | `validated` | `blocked` | `staged_for_write` | `written` | `printed` | `moved`)
 - `rule_pack_id` (string)
 - `rule_pack_version` (string)
 - `applied_rule_ids` (ordered array of strings)
-- `final_decision` (`pass` | `warning` | `hard_block`)
+- `final_decision` (`pass` | `warning` | `hard_block`; nullable only in the initialized pre-validation artifact)
 - `decision_reasons` (array)
-- `file_numbers_extracted` (array; required for `export_lc_sc` and `ud_ip_exp`, optional/null otherwise)
+- `eligible_for_write` (boolean)
+- `eligible_for_print` (boolean)
+- `eligible_for_mail_move` (boolean)
+- `source_entry_id` (string; Outlook `EntryID` or an import-scoped synthetic source identifier)
+- `subject_raw` (string)
+- `sender_address` (string)
+- `file_numbers_extracted` (array; populated for `export_lc_sc` and `ud_ip_exp`, empty for `import_btb_lc`)
 - `btb_lc_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
 - `pi_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
 - `related_export_lc_numbers_extracted` (array; required for `import_btb_lc`, optional/null otherwise)
@@ -164,8 +177,9 @@ For `document_processing_disposition=candidate`, any null canonical required fie
 `candidate_rows` represents the decisive/final allocation attempt; `allocation_attempts` preserves earlier tentative selections and restart evidence.
 
 ## 4) Discrepancy report schema
-- Base finalized-workflow `report_schema_version`: `1.0.0`
-- `import_btb_lc` `report_schema_version`: `1.1.0`
+- `schema_id`: `discrepancy_report`
+- Base finalized-workflow `schema_version` and `report_schema_version`: `1.0.0`
+- `import_btb_lc` `schema_version` and `report_schema_version`: `1.1.0`
 
 ### Required fields
 - `run_id`
@@ -255,6 +269,8 @@ In that case:
 For dense structured UD matches, the selected candidate must still be present in `candidates[]` even when truncation is active.
 
 ## 5) Print-annotation checklist schema
+- `schema_id`: `print_annotation_checklist`
+- `schema_version`: `1.0.0`
 - `report_schema_version`: `1.0.0`
 
 ### Required fields
@@ -313,6 +329,8 @@ When `print_plan.json` includes `annotation_documents` for a print group, each i
 For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_documents` records and use older mail-level reconstruction fallbacks only for backward compatibility with older run artifacts.
 
 ## 6) Recovery/idempotency artifact schema
+- `schema_id`: `recovery_artifact`
+- `schema_version`: `1.0.0`
 - `report_schema_version`: `1.0.0`
 
 ### Required fields
@@ -334,6 +352,8 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
 ### Run report (minimal)
 ```json
 {
+  "schema_id": "run_report",
+  "schema_version": "1.0.0",
   "report_schema_version": "1.0.0",
   "run_id": "run-2026-03-24T09-30-00Z",
   "workflow_id": "export_lc_sc",
@@ -356,13 +376,17 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
 }
 ```
 
-### Mail report (full shape sketch)
+### Mail outcome record (full shape sketch)
 ```json
 {
+  "schema_id": "mail_outcome_record",
+  "schema_version": "1.1.0",
   "report_schema_version": "1.1.0",
   "run_id": "run-2026-03-24T09-30-00Z",
   "mail_id": "00000000A1B2C3D4",
   "workflow_id": "import_btb_lc",
+  "snapshot_index": 0,
+  "processing_status": "validated",
   "rule_pack_id": "import_btb_lc.default",
   "rule_pack_version": "1.2.0",
   "applied_rule_ids": ["core.x", "import.y"],
@@ -371,7 +395,13 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
     "attachment filename did not match extracted BTB LC number",
     "BTB LC was already recorded in the workbook with matching export LC and amount"
   ],
-  "file_numbers_extracted": null,
+  "eligible_for_write": false,
+  "eligible_for_print": false,
+  "eligible_for_mail_move": true,
+  "source_entry_id": "00000000A1B2C3D4",
+  "subject_raw": "Fabric BTB LC",
+  "sender_address": "sender@example.com",
+  "file_numbers_extracted": [],
   "btb_lc_numbers_extracted": ["0742123456789"],
   "pi_numbers_extracted": ["BTL/26/0042"],
   "related_export_lc_numbers_extracted": ["LC-1234-2026"],

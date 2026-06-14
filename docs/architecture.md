@@ -543,8 +543,8 @@ Required fields:
 - `run_start_backup_hash` (string): lowercase hex SHA-256 digest.
 - `staged_write_plan_hash` (string|null): lowercase hex SHA-256 digest when write-capable workflow stages writes.
 - `write_phase_status` (string): workflow write phase checkpoint.
-- `print_phase_status` (string): workflow print checkpoint; workflows or launcher paths with no live print phase must persist `completed`.
-- `mail_move_phase_status` (string): workflow mail-move checkpoint; workflows or launcher paths with no post-run mail-move phase must persist `completed`.
+- `print_phase_status` (string): workflow print checkpoint. Finalized workflows preserve their established phase semantics; both `import_btb_lc` launcher paths persist `completed` because import has no print phase.
+- `mail_move_phase_status` (string): workflow mail-move checkpoint. Finalized workflows preserve their established phase semantics; `import_btb_lc` File Picker Path persists `completed` because it has no mail-move phase.
 
 For `import_btb_lc`, run/report extensions also require:
 - `launcher_path` (`current_full` or `file_picker`)
@@ -554,14 +554,14 @@ For `import_btb_lc`, run/report extensions also require:
 ### `EmailMessage` (mail-level)
 Required fields:
 - `mail_id` (string): stable mail identifier derived from Outlook `EntryID`, or stable synthetic identifier for non-Outlook launcher paths.
-- `entry_id` (string|null): raw Outlook `EntryID` for Outlook-backed paths; `null` for synthetic mail-level units such as `import_btb_lc` File Picker Path.
+- `entry_id` (string): raw Outlook `EntryID` for Outlook-backed paths. The `import_btb_lc` File Picker adapter uses a deterministic, non-Outlook synthetic source identifier in a reserved namespace rather than weakening this established shared field to nullable.
 - `received_time_utc` (string): normalized ISO-8601 UTC timestamp; for `import_btb_lc` File Picker Path synthetic units, use the selected file's normalized last-modified timestamp for lineage only.
 - `received_time_workflow_tz` (string): timestamp in configured workflow timezone derived from the same source as `received_time_utc`.
 - `subject_raw` (string): original subject for Outlook-backed paths; synthetic descriptive label for file-picker-backed units.
-- `sender_address` (string|null): canonical sender SMTP address when available; `null` for file-picker-backed synthetic units.
+- `sender_address` (string): canonical sender SMTP address when available; File Picker synthetic units use an empty string and rely on `launcher_path=file_picker` plus import source-path lineage to establish non-mail origin.
 - `snapshot_index` (integer): position from deterministic run snapshot ordering.
 
-For `import_btb_lc` File Picker Path, one selected PDF file = one synthetic `EmailMessage` unit.
+For `import_btb_lc` File Picker Path, one selected PDF file = one synthetic mail-level unit. Its construction must be owned by an import-specific adapter; finalized Outlook snapshot providers and their shared model behavior must remain unchanged.
 
 ### `ImportDocumentOutcome` (`import_btb_lc` only)
 One record represents one processed PDF and is the authoritative relationship boundary for extracted BTB number/date/value/currency, PI number, related export LC, source provenance, duplicate classification, workbook candidate evidence, selected row, document decision, and write-operation ids. Mail-level identifier arrays are backward-compatible projections only.
@@ -606,12 +606,14 @@ Required fields:
 
 `MailMoveOperation` is produced only for workflows/launcher paths that interact with Outlook mail state. `import_btb_lc` File Picker Path does not produce mail-move operations.
 
-For workflows or launcher paths that intentionally skip a downstream phase, the persisted run/report state must still be explicit:
-- no-print paths: `print_phase_status = completed`, `print_group_order = []`, no print plan/checklist artifacts, and empty print-marker collections
-- no-mail-move paths: `mail_move_phase_status = completed`, no mail-move operations, and empty mail-move-marker collections
+For `import_btb_lc`, intentionally absent downstream phases must still be explicit:
+- both launcher paths: `print_phase_status = completed`, `print_group_order = []`, no print plan/checklist artifacts, and empty print-marker collections
+- File Picker Path: `mail_move_phase_status = completed`, no mail-move operations, and empty mail-move-marker collections
+
+These are import workflow contracts, not retroactive normalization rules. Finalized workflows such as `bb_dashboard_verification` retain their established persisted phase values unless a separate behavioral change is explicitly approved.
 
 ## 16. Report schema/versioning contract (normative)
-All JSON report payloads must include `report_schema_version` using semantic versioning:
+All canonical shared run, mail-outcome, discrepancy, checklist, and recovery JSON payloads must include `schema_id`, `schema_version`, and `report_schema_version`. `schema_version` and `report_schema_version` use semantic versioning and must be equal for newly emitted payloads:
 - Patch: backward-compatible additive fields.
 - Minor: backward-compatible structural additions.
 - Major: breaking changes requiring consumer upgrade.
@@ -619,6 +621,8 @@ All JSON report payloads must include `report_schema_version` using semantic ver
 ### Required top-level run report object
 ```json
 {
+  "schema_id": "run_report",
+  "schema_version": "1.0.0",
   "report_schema_version": "1.0.0",
   "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
   "workflow_id": "export_lc_sc",
@@ -636,17 +640,29 @@ All JSON report payloads must include `report_schema_version` using semantic ver
 }
 ```
 
-### Required top-level mail report object
+### Required top-level mail outcome object
 ```json
 {
+  "schema_id": "mail_outcome_record",
+  "schema_version": "1.0.0",
   "report_schema_version": "1.0.0",
   "run_id": "run-20260324T093000Z-export_lc_sc-a1b2c3d4",
   "mail_id": "mail-01",
   "workflow_id": "export_lc_sc",
+  "snapshot_index": 0,
+  "processing_status": "validated",
   "rule_pack_id": "export_lc_sc.default",
   "rule_pack_version": "1.4.0",
   "applied_rule_ids": ["core.subject.buyer_lc_match.v1"],
   "final_decision": "warning",
+  "decision_reasons": ["cosmetic filename variation"],
+  "eligible_for_write": true,
+  "eligible_for_print": true,
+  "eligible_for_mail_move": true,
+  "source_entry_id": "00000000A1B2C3D4",
+  "subject_raw": "Export LC documents",
+  "sender_address": "sender@example.com",
+  "file_numbers_extracted": ["P/26/0042"],
   "discrepancies": [],
   "saved_documents": [],
   "staged_write_operations": [],
@@ -705,6 +721,7 @@ For `import_btb_lc`, this workflow-specific key set must distinguish between the
 - both paths require `import_document_root`, `import_amount_currency`, and the write-capable workbook keys
 - `Current Full Path` additionally requires `outlook_profile` plus Outlook folder mapping for intake/move operations and a valid import keyword module
 - `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
+- Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
 
 ### Secrets handling (Windows-first)
 - Credentials must not be hard-coded in source files.
