@@ -154,6 +154,7 @@ Each `candidate_rows[]` item must include:
 - `up_no_blank`
 - `btb_lc_no_blank`
 - `import_amount_blank`
+- `target_cells_blank_at_evaluation` (boolean; true only when both import destination cells are blank)
 - `row_reserved_in_run`
 - `export_amount`
 - `lower_bound_40_percent`
@@ -168,6 +169,13 @@ Each `allocation_attempts[]` item must include:
 - `tentative_selected_row_index`
 - `reservation_released`
 - `restart_reason` (nullable)
+
+For every staged `import_btb_lc` write operation:
+- `column_key` must identify `btb_lc_no` or `import_lc_amount`; no other workbook column is writable by this workflow
+- `expected_pre_write_value` must be canonical blank
+- live target-prevalidation evidence must record the observed value for each destination cell
+- `import_target_cell_already_populated` details must include `sheet_name`, `row_index`, `column_key`, `expected_pre_write_value`, and `observed_value`
+- a populated target discovered after staging must produce zero applied workbook mutations for the complete atomic batch
 
 When `duplicate_classification` is `same_mail_exact` or `same_run_exact`, `duplicate_evidence` must include the primary `mail_id` and `import_document_outcome_id`. If that primary is later excluded by mail-level atomicity, the next restart must replace the stale duplicate evidence.
 

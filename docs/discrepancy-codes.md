@@ -86,6 +86,7 @@ Every discrepancy payload should include:
 | `import_related_export_lc_invalid` | `hard_block` | import_btb_lc | Related export LC was missing or failed canonical LC/SC normalization. |
 | `import_workbook_duplicate_unverifiable` | `hard_block` | import_btb_lc | Workbook already contained the BTB LC number, but row count, related export LC, or import amount evidence could not prove one exact duplicate. |
 | `import_workbook_candidate_invalid` | `hard_block` | import_btb_lc | A matching-family workbook row had an invalid required export amount or a partial BTB-number/import-amount target state. |
+| `import_target_cell_already_populated` | `hard_block` | import_btb_lc | An import destination cell (`BTB L/C No.` or import `Amount` column 22) was populated when a blank target was required for staging or live pre-write validation; the batch must stop before any workbook mutation. |
 | `import_storage_filename_content_conflict` | `hard_block` | import_btb_lc | The destination filename already existed with different file content; the existing file was not overwritten. |
 | `import_file_picker_source_invalid` | `hard_block` | import_btb_lc | A selected File Picker source was not a regular PDF beneath the configured import document root. |
 | `import_report_browser_open_failed` | `warning` | import_btb_lc | The import BTB LC HTML report was generated successfully, but the system could not open it automatically in the default browser. |

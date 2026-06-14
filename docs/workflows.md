@@ -868,6 +868,11 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - BTB LC target field blank
 - import `Amount` column 22 blank
 - row not already selected by an earlier import BTB LC allocation in the same run
+- the only cells `import_btb_lc` may write are `BTB L/C No.` and import `Amount` column 22; all other workbook cells are read-only inputs for this workflow
+- both destination cells must be blank when the row is evaluated, when write operations are staged, and when the live workbook is prevalidated immediately before batch apply
+- every staged import write operation must persist a blank `expected_pre_write_value`; a non-blank expected pre-write value is an invalid staged plan
+- if either destination cell becomes populated after allocation but before batch apply, emit `import_target_cell_already_populated` and hard-block the batch before any workbook mutation; do not reinterpret the late value as a duplicate
+- a proven workbook duplicate remains a duplicate-only/no-write outcome and must not generate staged write operations
 - if exactly one of `BTB L/C No.` and import `Amount` column 22 is blank on a matching-family row, hard-block as partial target state
 - if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row
 - eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
@@ -907,6 +912,10 @@ Before enabling either launcher in production, tests must cover:
 - mail-atomic reservation release and deterministic allocation restart
 - filename mismatch warning without replacement of extracted values
 - same-name/same-hash storage reuse and same-name/different-hash hard block
+- both import destination cells blank at candidate evaluation, staging, and live pre-write validation
+- either import destination cell populated initially, including partial target state, with no overwrite
+- either import destination cell populated after staging but before apply, causing whole-batch hard block with zero workbook mutation
+- exact workbook duplicate remains no-write and never rewrites existing cells
 - deterministic non-import exclusion, ambiguous attachment classification, and relevant mail with no valid import document
 - include/exclude subject relevance and non-actionable ineligible-mail reporting
 - File Picker root enforcement, normalized-path ordering, duplicate selection collapse, and stable synthetic ids
