@@ -13,8 +13,12 @@ master_workbook_root = "C:/customs-automation/workbooks"
 # Optional workflow-specific storage roots.
 # Example for `import_btb_lc`:
 # import_document_root = "C:/customs-automation/import-documents"
+# import_amount_currency = "USD"
 # Import workflow storage shape:
 # <import_document_root>/<BTB LC year>/
+# Current Full Path first stores source evidence under the run artifact tree,
+# then promotes deterministically validated PDFs into the year folder.
+# File Picker Path accepts only PDFs that resolve beneath import_document_root.
 
 # Outlook / ERP / browser settings.
 outlook_profile = "outlook"

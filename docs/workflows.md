@@ -454,11 +454,10 @@ If still tied after all keys: `hard_block` with discrepancy code `export_candida
 
 #### 2) Import candidate-row tie scenarios
 After 40%-80% validation, if more than one candidate row remains:
-1. prefer row with earliest row index
-2. if tied on row index (logical duplicates), prefer candidate with greatest blank-field compatibility for required target columns
-3. if still tied, choose stable candidate id (lexicographically smallest)
+1. prefer the row with the highest normalized workbook export `Amount` value
+2. if export values tie, choose the lowest workbook row index
 
-If fully tied: `hard_block` with discrepancy code `import_candidate_tie_after_full_tiebreak`.
+Workbook row indexes are unique, so this closes normal import candidate selection deterministically. `import_candidate_tie_after_full_tiebreak` remains reserved only as a defensive corruption/invariant code.
 
 #### 3) Attachment-to-document-type disambiguation
 If multiple attachments map to the same required class (for example two PI candidates):
@@ -794,16 +793,22 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ## Import / BTB LC processing
 
 ### Launcher paths
-- `Current Full Path`: load candidate mails from Outlook `working`, save new PDFs into the configured import storage hierarchy, run the shared import BTB LC extraction/validation/workbook/report flow, and open the generated HTML report after terminal success.
+- `Current Full Path`: snapshot mails from Outlook `working`, evaluate relevance, acquire eligible-mail PDFs into run evidence, copy-promote validated import PDFs into the configured storage hierarchy, run the shared import BTB LC validation/workbook/report flow, and open the generated HTML report after terminal success.
 - `File Picker Path`: start from an operator file picker over previously stored import BTB LC PDFs, bypass Outlook mail intake entirely, run the same shared import BTB LC extraction/validation/workbook/report flow, and generate the same JSON/HTML report outputs.
+- Persist `launcher_path=current_full` or `launcher_path=file_picker` in run metadata and all import mail outcomes.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
 - For the `File Picker Path`, deterministic snapshot ordering is ascending normalized absolute file path; `snapshot_index`, synthetic `mail_id`, and run-level `mail_iteration_order` must derive from that sorted order, while file timestamps are lineage evidence only and do not affect ordering.
+- A synthetic `mail_id` is derived from the normalized absolute path; the selected file SHA-256 is stored separately as integrity evidence.
+- File Picker selections must resolve to regular `.pdf` files beneath the configured `import_document_root`. Duplicate selections after normalized absolute-path resolution are collapsed deterministically and reported.
 - Core processing after file acquisition is identical between both launcher paths: extraction rules, bank-specific LC-number validation, PI-number validation, duplicate handling, workbook candidate selection, workbook write staging, and report generation must not diverge by launcher.
 
 ### Inputs
 - `Current Full Path`: Outlook folder `working` after operator triage from `temp-import`; snapshot all messages in the folder when the CLI is triggered
 - `Current Full Path`: fabric-related import/back-to-back LC emails identified by case-insensitive substring matching on fabric keywords in the subject, with the keyword list loaded from the workflow rule-pack keyword module
-- `Current Full Path`: attachment storage base path comes from workflow configuration and import PDFs are stored under the BTB LC year derived from the normalized BTB LC date
+- `Current Full Path`: every snapshotted mail receives an `import_relevance` record containing normalized subject, include hits, exclude hits, eligibility, and keyword revision
+- `Current Full Path`: a subject-ineligible mail is reported with `processing_disposition=not_applicable`, `final_decision=pass` for backward schema compatibility, no discrepancies, and no write/print/mail-move eligibility; it remains in `working` and is excluded from action-outcome pass counts
+- `Current Full Path`: acquire PDF bytes first into `run_artifact_root/import_btb_lc/<run_id>/source_documents/<mail_id>/<attachment_index>/`; after extraction validates the BTB LC date, copy to a same-directory temporary file under `<import_document_root>/<BTB LC year>/` and atomically rename it into place, leaving immutable source evidence intact
+- `Current Full Path`: PDFs that cannot be classified/extracted deterministically remain in source-evidence storage and are not promoted to the canonical import document hierarchy
 - `File Picker Path`: operator-selected previously stored PDF files; no Outlook folder access, message snapshot, or subject-keyword relevance filter applies
 - `File Picker Path`: each selected file is represented as one synthetic mail-level unit in run artifacts and mail-level reports
 - phase-1 `import_btb_lc` candidate selection is driven by extracted BTB LC data plus workbook state and does not require a separate ERP download/search step
@@ -812,43 +817,65 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - Extract only the import BTB LC portion from the first three pages of the PDF
 - BTB LC number
 - validate extracted BTB LC number against bank-specific identifier shapes:
-  - The City Bank PLC: 13 digits, prefix `0742`
-  - Mutual Trust Bank Limited: 16 digits, prefix `0002228`
-  - Al-Arafah Islami Bank PLC: 13 digits, prefix `1080`
-  - Brac Bank PLC: 13 digits, prefix `3085`
-  - Standard Chartered Bank: 14 characters total, prefix `41101`, numeric middle segment, suffix `-L`
+  - The City Bank PLC: `^0742\d{9}$`
+  - Mutual Trust Bank Limited: `^0002228\d{9}$`
+  - Al-Arafah Islami Bank PLC: `^1080\d{9}$`
+  - Brac Bank PLC: `^3085\d{9}$`
+  - Standard Chartered Bank: `^41101\d{7}-L$`
+- BTB number normalization may trim outer whitespace, uppercase ASCII letters, normalize Unicode dash variants to `-`, and remove zero-width/control characters; it must not remove or repair internal whitespace, separators, or digits
 - internal spaces are never allowed inside the extracted BTB LC number; any embedded space is a validation failure
 - BTB LC date
-- BTB LC value
+- parse the BTB LC date unambiguously as a valid calendar date and persist canonical ISO `YYYY-MM-DD`; ambiguous numeric dates use day-first interpretation and invalid dates hard-block
+- BTB LC value and currency
+- monetary values must be positive canonical decimals; grouping separators may be removed only when structurally valid, non-zero fractional precision must be preserved, and no float conversion, implicit rounding, or currency conversion is allowed
+- extracted currency is mandatory and must match configured `import_amount_currency`
 - PI number
 - validate extracted PI number from LC clauses against one of these case-insensitive regex patterns:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
 - these import seller PI references are distinct from the export PI profile `PDL-YY-NNNN` and must not be normalized with export PI rules
+- canonical import PI output uppercases ASCII letters and preserves slash separators
 - related export LC number from clause text
-- attachment filename comparison against extracted BTB LC number as warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
+- normalize related export LC using the shared LC/SC canonicalization profile before workbook matching
+- compare the entire attachment filename stem with the canonical extracted BTB LC number after the same safe case/dash/outer-whitespace normalization; prefixes, suffixes, and repaired separators do not count as a match
+- attachment filename mismatch is warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
 - PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
 - if no import BTB LC PDF can be extracted deterministically from a relevant mail, the mail hard-blocks and the report must capture the missing/failed extraction evidence
+- evaluate every PDF attachment for import classification from the allowed first-three-page evidence
+- a PDF deterministically classified as non-import may be ignored with audit evidence and is not promoted; a PDF that appears to be an import BTB LC but is missing/invalid on any required field is a document hard block and must not be downgraded to ignored
+- when no valid import BTB LC document remains after deterministic non-import exclusions, emit `import_required_document_missing`
 - all import BTB LC clause parsing should assume UCP-style clause semantics even when bank-specific visual layout differs
 
 ### Candidate row rules
-- Normalize import BTB LC values and workbook export LC values to canonical numeric values before comparison
+- Resolve import workbook headers explicitly: canonical export LC `L/C & S/C No.`, `UP No.`, export `Amount` at fixed column 6, `BTB L/C No.`, and import `Amount` at fixed column 22
+- Normalize import BTB LC values and workbook export LC values to exact canonical decimals before comparison; both are interpreted in configured `import_amount_currency`
 - Group all validated import BTB LCs in the run by related export LC
-- Within each related-export-LC group, process import BTB LCs from highest to lowest normalized import BTB LC value
+- Allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or synthetic source path ascending
+- Exclude any mail with intrinsic extraction, required-field, storage, or duplicate-conflict hard blocks before row allocation
+- Treat tentative row reservations as mail-atomic: when the first document in allocation order has no qualified row, hard-block its parent mail, release all rows tentatively reserved by that mail, and restart from the baseline workbook with blocked mails excluded
+- Every restart must recompute same-run duplicate ownership before row allocation; a later exact duplicate must become the surviving primary document when its earlier duplicate owner belonged to a newly blocked mail
+- Repeat the deterministic restart until one complete allocation pass adds no newly blocked mail; each restart and released reservation must remain visible in audit evidence
 - Before row allocation, detect duplicate import BTB LC evidence already present in the workbook and duplicate import BTB LC evidence repeated earlier in the same run across the same mail or different mails
-- If the normalized import BTB LC number is already present anywhere in workbook column `BTB L/C No.`, treat it as an immediate duplicate-only/no-write success before export-LC candidate-row filtering begins
-- Exact duplicate import BTB LC evidence is a duplicate-only/no-write success and must remain visible in reports
-- Conflicting duplicate import BTB LC evidence is a hard-block
+- Workbook duplicate-only success requires exactly one existing row with the normalized BTB LC number, the same canonical related export LC, and the same normalized import `Amount` column 22 value; workbook state cannot verify PI/date, so those fields remain new-source audit evidence only
+- Zero or multiple matching workbook rows, blank/unparseable existing import amount, related-export mismatch, or amount mismatch makes the existing-number evidence unprovable/conflicting and hard-blocks before candidate filtering
+- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, PI number, and related export LC; exact later evidence stages no additional write
+- Any disagreement in that same-run tuple is `import_duplicate_document_conflict`
 - export LC matches related export LC
 - `UP No.` blank
 - BTB LC target field blank
+- import `Amount` column 22 blank
 - row not already selected by an earlier import BTB LC allocation in the same run
+- if exactly one of `BTB L/C No.` and import `Amount` column 22 is blank on a matching-family row, hard-block as partial target state
+- if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row
 - eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
 - if multiple rows qualify, select the row with the highest normalized export LC value
 - if multiple remaining rows are still tied after the highest-export-value key, the lowest workbook row index wins
 - one import LC maps to one row only
 - if an extracted import BTB LC does not qualify any workbook row, that import BTB LC is hard-blocked and the report must include the failed candidate evidence
+- each PDF must emit one `import_document_outcome` object containing classification/disposition, source identity/hash, storage decision/path, extracted raw and canonical fields with provenance/confidence, duplicate classification, ordered candidate evidence, selected row, document decision, discrepancy codes, warning codes, and staged write-operation ids
+- the mail-level extracted identifier arrays remain backward-compatible projections from `import_document_outcomes` and are not authoritative relationship records
+- mail decision is the highest document severity; if any document is `hard_block`, discard all tentative writes for that mail
 
 ### Batch execution behavior
 - blocked emails remain in `working`
@@ -857,11 +884,31 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - no separate import-specific JSON summary artifact is required beyond the standard `run_metadata.json` and `mail_outcomes.jsonl`; the canonical import-specific summary artifact is `import_btb_lc_report.html`
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
 - automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
-- if the HTML report is generated successfully but the browser cannot be opened automatically, emit warning discrepancy `import_report_browser_open_failed` and keep the run outcome otherwise unchanged
-- successfully processed import-team emails move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
+- if the HTML report is generated successfully but the browser cannot be opened automatically, append run-scoped warning discrepancy `import_report_browser_open_failed`, atomically refresh run metadata, and keep mail decisions/moves unchanged
+- successfully processed import-team emails with staged writes move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
 - duplicate-only import BTB LC PDFs inside a mixed mail do not block mail movement; the mail may still move when every import BTB LC in that mail finishes as either duplicate-only/no-write or successful non-hard-block
-- a mail containing only duplicate-only/no-write import BTB LC PDFs may still move to `Import` after run-report artifacts are persisted, even when the mail produced zero workbook writes
+- a mail containing only duplicate-only/no-write import BTB LC PDFs may move to `Import` after run-report artifacts are persisted without requiring write-phase commit, because its staged write plan is empty
+- a run with no staged writes retains the shared zero-write write-phase behavior; duplicate-only move eligibility is established by `write_disposition=duplicate_only_noop`, not by fabricating a zero-operation workbook commit
+- subject-ineligible Current Full Path mails never move
 - in the `File Picker Path`, there is no Outlook mail movement stage; workbook and report phases still execute, `mail_move_phase_status` is recorded as `completed`, and no mail-move artifacts are produced
+
+### Minimum import regression matrix
+Before enabling either launcher in production, tests must cover:
+- every approved bank BTB-number shape plus wrong length/prefix/suffix and embedded-space rejection
+- both approved PI patterns, case normalization, and invalid seller PI values
+- valid/invalid dates, exact-decimal amount parsing, currency absence/mismatch, and no-rounding behavior
+- inclusive 40% and 80% boundaries plus values immediately outside each boundary
+- highest-export-value selection and lowest-row-index tie-break
+- equal-value document ordering across mails and attachments
+- exact workbook duplicate, multiple-row duplicate, related-LC mismatch, and amount mismatch
+- exact/conflicting same-mail and same-run duplicates
+- mail-atomic reservation release and deterministic allocation restart
+- filename mismatch warning without replacement of extracted values
+- same-name/same-hash storage reuse and same-name/different-hash hard block
+- deterministic non-import exclusion, ambiguous attachment classification, and relevant mail with no valid import document
+- include/exclude subject relevance and non-actionable ineligible-mail reporting
+- File Picker root enforcement, normalized-path ordering, duplicate selection collapse, and stable synthetic ids
+- report-schema `1.1.0` validation, per-document lineage, no-print state, and launcher-specific mail-move behavior
 
 ## Bangladesh Bank dashboard verification
 

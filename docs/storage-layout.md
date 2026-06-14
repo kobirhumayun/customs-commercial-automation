@@ -21,6 +21,12 @@ Under `run_artifact_root/<workflow_id>/<run_id>/`:
 
 Required only for `import_btb_lc`:
 - `import_btb_lc_report.html` (canonical workflow HTML summary report)
+- `source_documents/` for Current Full Path run-scoped attachment evidence before deterministic year-folder promotion
+
+`source_documents/` should use `<mail_id>/<attachment_index>/` subdirectories so same-named attachments never overwrite one another. Files in this tree are immutable run evidence:
+- validated import PDFs may also be copy-promoted to `<import_document_root>/<BTB LC year>/` through a temporary file and atomic rename
+- failed or unclassified PDFs remain only here
+- File Picker Path does not duplicate already stored source files into this tree, but reports their absolute path and SHA-256
 
 Required only when the workflow/launcher path includes a live print phase:
 - `print_plan.json`
