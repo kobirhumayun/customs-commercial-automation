@@ -830,6 +830,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - parse the BTB LC date unambiguously as a valid calendar date and persist canonical ISO `YYYY-MM-DD`; ambiguous numeric dates use day-first interpretation and invalid dates hard-block
 - BTB LC value and currency
 - monetary values must be positive canonical decimals; grouping separators may be removed only when structurally valid, non-zero fractional precision must be preserved, and no float conversion, implicit rounding, or currency conversion is allowed
+- for bank outputs that preserve SWIFT `d` amount syntax, a terminal decimal comma with no fractional digits is valid and canonicalizes to the exact integer value (for example, raw `41379,` becomes canonical `41379`); the raw value remains in provenance
 - extracted currency is mandatory and must match configured `import_amount_currency`
 - all distinct seller PI numbers in deterministic document-occurrence order
 - validate every extracted seller PI number from LC clauses against one of these case-insensitive regex patterns:

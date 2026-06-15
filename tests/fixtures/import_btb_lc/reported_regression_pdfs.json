@@ -51,5 +51,18 @@
     "seller_pi_numbers": [
       "BTL/26/4009"
     ]
+  },
+  "411012525148-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-01-06",
+    "btb_lc_number": "411012525148-L",
+    "btb_lc_value": "41379",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "cd7d88ac78f4c3604d936d8ec3e18ce203e982f9406c51ffad77d1f9feb7db3c",
+    "related_export_lc_number": "LC-DPCBD1166856",
+    "seller_pi_numbers": [
+      "KYL/26/0016"
+    ]
   }
 }

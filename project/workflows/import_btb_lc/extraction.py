@@ -777,7 +777,7 @@ def _canonicalize_amount(raw: str, *, bank_id: object) -> str | None:
             value,
             grouping_separator=".",
             decimal_separator=",",
-            decimal_places=(1, 2),
+            decimal_places=(0, 1, 2),
         )
     else:
         canonical_text = _parse_unambiguous_decimal(value)
@@ -801,7 +801,9 @@ def _parse_grouped_decimal(
         return None
     if decimal_separator in value:
         integer_part, fractional_part = value.rsplit(decimal_separator, 1)
-        if len(fractional_part) not in decimal_places or not fractional_part.isdigit():
+        if len(fractional_part) not in decimal_places:
+            return None
+        if fractional_part and not fractional_part.isdigit():
             return None
     else:
         integer_part, fractional_part = value, ""

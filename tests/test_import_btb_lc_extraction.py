@@ -99,6 +99,9 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_3085260404999(self) -> None:
         self._assert_reported_pdf("3085260404999.pdf")
 
+    def test_411012525148_l(self) -> None:
+        self._assert_reported_pdf("411012525148-L.pdf")
+
     def _assert_reported_pdf(self, filename: str) -> None:
         source_path = self.sample_root / filename
         if not source_path.exists():
@@ -274,6 +277,53 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
             indian_grouped["fields"]["btb_lc_value"]["canonical"],
             "104173.400",
         )
+
+        swift_zero_fraction = _extract_synthetic(
+            _sample_text(
+                btb_number="411012525148-L",
+                amount_text="USD41379,",
+                pi_text="KYL/26/0016",
+                related_text=(
+                    "EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER: "
+                    "DPCBD1166856 DATED: 30.12.2025"
+                ),
+            ).replace(
+                "City Bank PLC. Trade Services Division",
+                "Standard Chartered Bank",
+            ),
+            filename="411012525148-L.pdf",
+        )
+        self.assertEqual(swift_zero_fraction["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            swift_zero_fraction["fields"]["btb_lc_value"]["raw"],
+            "41379,",
+        )
+        self.assertEqual(
+            swift_zero_fraction["fields"]["btb_lc_value"]["canonical"],
+            "41379",
+        )
+
+        for malformed_amount in ("USD,", "USD41379,,", "USD41.37,"):
+            with self.subTest(malformed_swift_amount=malformed_amount):
+                malformed = _extract_synthetic(
+                    _sample_text(
+                        btb_number="411012525148-L",
+                        amount_text=malformed_amount,
+                        pi_text="KYL/26/0016",
+                        related_text=(
+                            "EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER: "
+                            "DPCBD1166856 DATED: 30.12.2025"
+                        ),
+                    ).replace(
+                        "City Bank PLC. Trade Services Division",
+                        "Standard Chartered Bank",
+                    ),
+                    filename="411012525148-L.pdf",
+                )
+                self.assertEqual(
+                    malformed["fields"]["btb_lc_value"]["validation"]["status"],
+                    "hard_block",
+                )
 
     def test_multiple_valid_pi_numbers_are_preserved_in_document_order(self) -> None:
         artifact = _extract_synthetic(
