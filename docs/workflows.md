@@ -840,6 +840,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - canonical import PI output uppercases ASCII letters and preserves slash separators
 - related export LC number from clause text
 - normalize related export LC using the shared LC/SC canonicalization profile before workbook matching
+- in BRAC's combined `L/C NUMBER WITH DATE AND EXPORT SALES CONTRACT NO.` clause, use the first reference after the combined label as the related export LC; preserve slash-delimited body segments and treat `DATE`, `DATED`, `DAT`, or `DT` as the following date boundary
 - compare the entire attachment filename stem with the canonical extracted BTB LC number after the same safe case/dash/outer-whitespace normalization; prefixes, suffixes, and repaired separators do not count as a match
 - attachment filename mismatch is warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets

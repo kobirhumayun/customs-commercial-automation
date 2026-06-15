@@ -52,6 +52,45 @@
       "BTL/26/4009"
     ]
   },
+  "3085260400651.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-01-22",
+    "btb_lc_number": "3085260400651",
+    "btb_lc_value": "48023.85",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "68a2af9c341b3ce058f3db807d583ef7e790c1620a83cc9ed63f187dd7d57d92",
+    "related_export_lc_number": "LC-21592604000048",
+    "seller_pi_numbers": [
+      "KYL/26/0403"
+    ]
+  },
+  "3085260400652.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-01-22",
+    "btb_lc_number": "3085260400652",
+    "btb_lc_value": "147964.20",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "71ca52c3a9de69b6a54b83d8c7f847d6e3b581cff473bef40cbfbb60eaf71adf",
+    "related_export_lc_number": "LC-2159260400031",
+    "seller_pi_numbers": [
+      "KYL/26/0402"
+    ]
+  },
+  "3085260404791.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-06-07",
+    "btb_lc_number": "3085260404791",
+    "btb_lc_value": "8130.75",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "95b218ea629ad252195089f558a2eda42dd66e8bbd8dc672572fb41cf46a8273",
+    "related_export_lc_number": "LC-PDL/INDOCHINE/2026/0002",
+    "seller_pi_numbers": [
+      "BTL/26/3909"
+    ]
+  },
   "411012525148-L.pdf": {
     "bank_id": "standard_chartered_bank",
     "btb_lc_date": "2026-01-06",

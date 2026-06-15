@@ -99,6 +99,15 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_3085260404999(self) -> None:
         self._assert_reported_pdf("3085260404999.pdf")
 
+    def test_3085260400651(self) -> None:
+        self._assert_reported_pdf("3085260400651.pdf")
+
+    def test_3085260400652(self) -> None:
+        self._assert_reported_pdf("3085260400652.pdf")
+
+    def test_3085260404791(self) -> None:
+        self._assert_reported_pdf("3085260404791.pdf")
+
     def test_411012525148_l(self) -> None:
         self._assert_reported_pdf("411012525148-L.pdf")
 
@@ -265,6 +274,19 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
             _canonicalize_related_export_lc("DPCBDA 033739", "LC"),
             "LC-DPCBDA-033739",
         )
+        self.assertEqual(
+            _canonicalize_related_export_lc(
+                "PDL/INDOCHINE/2026/0002",
+                "LC",
+            ),
+            "LC-PDL/INDOCHINE/2026/0002",
+        )
+        self.assertIsNone(
+            _canonicalize_related_export_lc(
+                "PDL//INDOCHINE/2026/0002",
+                "LC",
+            )
+        )
 
         indian_grouped = _extract_synthetic(
             _sample_text(
@@ -324,6 +346,29 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                     malformed["fields"]["btb_lc_value"]["validation"]["status"],
                     "hard_block",
                 )
+
+    def test_brac_combined_clause_uses_first_reference(self) -> None:
+        artifact = _extract_synthetic(
+            _sample_text(
+                btb_number="3085260400651",
+                pi_text="KYL/26/0403",
+                related_text=(
+                    "ALL SHIPPING DOCUMENTS MUST BEAR THE L/C NUMBER WITH DATE "
+                    "AND EXPORT SALES CONTRACT NO:21592604000048 "
+                    "DAT:12-JAN-2026 AND SALES CONTRACT NO."
+                    "VFL/TEDDY/2026/002 DATE 01-JAN-2026"
+                ),
+            ),
+            filename="3085260400651.pdf",
+        )
+
+        field = artifact["fields"]["related_export_lc_number"]
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(field["canonical"], "LC-21592604000048")
+        self.assertEqual(
+            [(match["raw"], match["page_number"]) for match in field["matches"]],
+            [("21592604000048", 1)],
+        )
 
     def test_multiple_valid_pi_numbers_are_preserved_in_document_order(self) -> None:
         artifact = _extract_synthetic(

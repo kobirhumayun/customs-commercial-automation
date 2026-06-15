@@ -483,8 +483,8 @@ def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
 def _collect_related_export_lc_candidates(
     pages: list[ExtractedPage],
 ) -> list[FieldCandidate]:
-    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DT\b)"
-    identifier = r"([A-Z0-9][A-Z0-9 -]{2,38}?[A-Z0-9])"
+    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT\b)"
+    identifier = r"([A-Z0-9][A-Z0-9 /-]{2,38}?[A-Z0-9])"
     patterns = (
         re.compile(
             r"(?is)\b(?:SALES\s+CONTRACT\s*/\s*)?"
@@ -867,7 +867,7 @@ def _canonicalize_related_export_lc(raw: str, hint: str | None) -> str | None:
         return None
     body = re.sub(r"\s+", "-", body)
     body = re.sub(r"-+", "-", body).strip("-")
-    if not re.fullmatch(r"[A-Z0-9]+(?:-[A-Z0-9]+)*", body):
+    if not re.fullmatch(r"[A-Z0-9]+(?:(?:-|/)[A-Z0-9]+)*", body):
         return None
     return f"{prefix}-{body}"
 
