@@ -831,8 +831,8 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - BTB LC value and currency
 - monetary values must be positive canonical decimals; grouping separators may be removed only when structurally valid, non-zero fractional precision must be preserved, and no float conversion, implicit rounding, or currency conversion is allowed
 - extracted currency is mandatory and must match configured `import_amount_currency`
-- PI number
-- validate extracted PI number from LC clauses against one of these case-insensitive regex patterns:
+- all distinct seller PI numbers in deterministic document-occurrence order
+- validate every extracted seller PI number from LC clauses against one of these case-insensitive regex patterns:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
 - these import seller PI references are distinct from the export PI profile `PDL-YY-NNNN` and must not be normalized with export PI rules
@@ -861,7 +861,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - Before row allocation, detect duplicate import BTB LC evidence already present in the workbook and duplicate import BTB LC evidence repeated earlier in the same run across the same mail or different mails
 - Workbook duplicate-only success requires exactly one existing row with the normalized BTB LC number, the same canonical related export LC, and the same normalized import `Amount` column 22 value; workbook state cannot verify PI/date, so those fields remain new-source audit evidence only
 - Zero or multiple matching workbook rows, blank/unparseable existing import amount, related-export mismatch, or amount mismatch makes the existing-number evidence unprovable/conflicting and hard-blocks before candidate filtering
-- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, PI number, and related export LC; exact later evidence stages no additional write
+- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, ordered canonical seller PI collection, and related export LC; exact later evidence stages no additional write
 - Any disagreement in that same-run tuple is `import_duplicate_document_conflict`
 - export LC matches related export LC
 - `UP No.` blank
@@ -902,7 +902,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Minimum import regression matrix
 Before enabling either launcher in production, tests must cover:
 - every approved bank BTB-number shape plus wrong length/prefix/suffix and embedded-space rejection
-- both approved PI patterns, case normalization, and invalid seller PI values
+- both approved PI patterns, case normalization, multiple valid PIs, repeated-PI deduplication, and invalid seller PI values
 - valid/invalid dates, exact-decimal amount parsing, currency absence/mismatch, and no-rounding behavior
 - inclusive 40% and 80% boundaries plus values immediately outside each boundary
 - highest-export-value selection and lowest-row-index tie-break

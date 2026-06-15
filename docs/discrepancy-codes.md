@@ -82,7 +82,7 @@ Every discrepancy payload should include:
 | `import_btb_lc_date_invalid` | `hard_block` | import_btb_lc | BTB LC date was missing, ambiguous, or not a valid calendar date. |
 | `import_btb_lc_amount_invalid` | `hard_block` | import_btb_lc | BTB LC amount was missing, non-positive, ambiguous, or not a valid canonical decimal. |
 | `import_currency_missing_or_mismatch` | `hard_block` | import_btb_lc | Extracted currency was missing or differed from configured `import_amount_currency`. |
-| `import_pi_number_invalid` | `hard_block` | import_btb_lc | Seller PI number was missing or did not match an approved import PI pattern. |
+| `import_pi_number_invalid` | `hard_block` | import_btb_lc | No seller PI was found, or at least one extracted seller PI-like value did not match an approved import PI pattern. |
 | `import_related_export_lc_invalid` | `hard_block` | import_btb_lc | Related export LC was missing or failed canonical LC/SC normalization. |
 | `import_workbook_duplicate_unverifiable` | `hard_block` | import_btb_lc | Workbook already contained the BTB LC number, but row count, related export LC, or import amount evidence could not prove one exact duplicate. |
 | `import_workbook_candidate_invalid` | `hard_block` | import_btb_lc | A matching-family workbook row had an invalid required export amount or a partial BTB-number/import-amount target state. |

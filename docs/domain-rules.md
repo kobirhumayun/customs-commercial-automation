@@ -496,11 +496,13 @@ The dashboard column is verification-only and should not be used to drive other 
 - BTB normalization may trim outer whitespace, uppercase ASCII, normalize Unicode dash variants to `-`, and remove zero-width/control characters. It must not remove or repair internal spaces, separators, or digits.
 - Internal spaces are forbidden for all approved bank-specific BTB LC number shapes. If a candidate BTB LC number contains any embedded space, validation fails; implementations must not repair the value by removing spaces.
 - If an extracted candidate BTB LC number does not satisfy one of the approved bank-specific shapes, the BTB LC number is not valid for deterministic phase-1 write processing.
-- PI number extraction for import BTB LC processing must come from LC clauses and match one of these approved case-insensitive regex patterns:
+- PI number extraction for import BTB LC processing must come from LC clauses. A single BTB LC may reference one or more seller PIs, and every distinct PI found in the inspected pages must be preserved in deterministic document-occurrence order.
+- Every extracted seller PI must match one of these approved case-insensitive regex patterns:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
 - Canonical import PI output uppercases ASCII letters and preserves slash separators, for example `BTL/26/0042`.
-- If the extracted import PI number does not satisfy one of the approved regex patterns, the PI number is not valid for deterministic phase-1 import processing.
+- Repeated mentions of the same canonical PI are deduplicated while their occurrence-level provenance remains available.
+- If no seller PI is found, or any extracted PI-like candidate from the applicable LC clauses does not satisfy an approved regex pattern, seller PI extraction is not valid for deterministic phase-1 import processing.
 - BTB LC date must parse unambiguously to a valid calendar date and be persisted as ISO `YYYY-MM-DD`; ambiguous numeric dates use day-first interpretation.
 - Related export LC must pass the shared LC/SC canonicalization profile and match workbook values by exact canonical equality.
 - A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
@@ -514,7 +516,7 @@ The dashboard column is verification-only and should not be used to drive other 
   - import BTB LC values already accepted earlier in the same run, whether from the same mail or a different mail
 - Workbook duplicate-only success requires exactly one row containing the normalized BTB LC number, and that row must have the same canonical related export LC plus the same normalized import amount in column 22. PI/date cannot be verified from workbook state and remain source audit evidence only.
 - Multiple matching workbook rows, blank/unparseable existing import amount, related-export mismatch, or amount mismatch is conflicting/unprovable duplicate evidence and hard-blocks before candidate filtering.
-- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, PI number, and related export LC. Any disagreement is a hard block.
+- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, the ordered canonical seller PI collection, and related export LC. Any disagreement is a hard block.
 - Candidate workbook rows for a given import BTB LC must satisfy all of:
   - workbook export LC matches the related export LC
   - `UP No.` is blank

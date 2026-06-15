@@ -127,6 +127,7 @@ from project.workflows.run_handoff_export import build_run_handoff_export
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
 from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadProvider
+from project.workflows.import_btb_lc import extract_import_btb_lc_path
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
@@ -233,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_run_live_smoke_test(args)
     if args.command == "execute-mail-moves":
         return _handle_execute_mail_moves(args)
+    if args.command == "extract-import-btb-lc":
+        return _handle_extract_import_btb_lc(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -313,6 +316,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--page-to",
         type=int,
         help="Optional 1-based last page for bounded search.",
+    )
+
+    extract_import_btb_lc_parser = subparsers.add_parser(
+        "extract-import-btb-lc",
+        help="Extract and validate import BTB LC fields from one PDF or a directory of PDFs.",
+    )
+    extract_import_btb_lc_parser.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Source PDF or directory containing PDFs. Source files are never modified.",
+    )
+    extract_import_btb_lc_parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Directory for deterministic versioned JSON verification artifacts.",
     )
 
     inspect_mail_snapshot_parser = subparsers.add_parser(
@@ -2644,6 +2664,33 @@ def _handle_inspect_document_analysis(args: argparse.Namespace) -> int:
         "analysis": to_jsonable(analysis),
     }
     print(pretty_json_dumps(payload), end="")
+    return 0
+
+
+def _handle_extract_import_btb_lc(args: argparse.Namespace) -> int:
+    try:
+        results = extract_import_btb_lc_path(
+            input_path=args.input,
+            output_directory=args.output,
+        )
+    except (ArtifactError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    summary = {
+        "schema_id": "import_btb_lc_extraction_batch_summary",
+        "schema_version": "1.1.0",
+        "report_schema_version": "1.1.0",
+        "input": str(args.input.resolve()),
+        "output_directory": str(args.output.resolve()),
+        "document_count": len(results),
+        "decision_counts": {
+            decision: sum(1 for result in results if result["decision"] == decision)
+            for decision in ("pass", "warning", "hard_block")
+        },
+        "documents": results,
+    }
+    print(pretty_json_dumps(summary), end="")
     return 0
 
 

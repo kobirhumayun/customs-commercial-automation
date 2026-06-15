@@ -132,8 +132,8 @@ Each `import_document_outcomes[]` item must include:
 - `btb_lc_value` (canonical decimal string, nullable when invalid/unavailable)
 - `currency_raw` (nullable when unavailable)
 - `currency` (nullable when invalid/unavailable)
-- `pi_number_raw` (nullable when unavailable)
-- `pi_number` (nullable when invalid/unavailable)
+- `pi_numbers_raw` (ordered array; empty when unavailable)
+- `pi_numbers` (ordered canonical array; empty when invalid/unavailable)
 - `related_export_lc_raw` (nullable when unavailable)
 - `related_export_lc` (nullable when invalid/unavailable)
 - `field_provenance` (object keyed by extracted field)
@@ -451,8 +451,8 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
       "btb_lc_value": "50000.00",
       "currency_raw": "USD",
       "currency": "USD",
-      "pi_number_raw": "BTL/26/0042",
-      "pi_number": "BTL/26/0042",
+      "pi_numbers_raw": ["BTL/26/0042"],
+      "pi_numbers": ["BTL/26/0042"],
       "related_export_lc_raw": "LC-1234-2026",
       "related_export_lc": "LC-1234-2026",
       "field_provenance": {},
