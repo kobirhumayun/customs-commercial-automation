@@ -130,6 +130,71 @@
       "BTL/26/1324"
     ]
   },
+  "3085260403287.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-04-20",
+    "btb_lc_number": "3085260403287",
+    "btb_lc_value": "91871.30",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "cfdbf29949c27f38974e0e9fa1e792417bfb29ad398598b33f6d9e0d71a4b70c",
+    "related_export_lc_number": "LC-PDL/INDOCHINE/2026/0001",
+    "seller_pi_numbers": [
+      "BTL/26/2568"
+    ]
+  },
+  "3085260403524.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-04-27",
+    "btb_lc_number": "3085260403524",
+    "btb_lc_value": "96196.35",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "3a49698a8b721b37ac39bf380770ccd04d6a8b51268b766f2126dd950546040d",
+    "related_export_lc_number": "LC-DPCBD1177867",
+    "seller_pi_numbers": [
+      "BTL/26/2872"
+    ]
+  },
+  "3085260403648.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-04-29",
+    "btb_lc_number": "3085260403648",
+    "btb_lc_value": "5867.60",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "b402570dcb67f95f08193d4761096d1f6dadb7d6e4817af61ed5e3d15256083c",
+    "related_export_lc_number": "LC-1335260401279",
+    "seller_pi_numbers": [
+      "BTL/26/3015"
+    ]
+  },
+  "3085260403650.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-04-29",
+    "btb_lc_number": "3085260403650",
+    "btb_lc_value": "12832.10",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "cdfb8a662c840fa568d0a8a37637ffd295b02c22ed408e258e2b9b91869669a6",
+    "related_export_lc_number": "LC-209026041176",
+    "seller_pi_numbers": [
+      "BTL/26/2974"
+    ]
+  },
+  "3085260403653.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-04-29",
+    "btb_lc_number": "3085260403653",
+    "btb_lc_value": "14352.35",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "b55de0e68332a6cee2f1819d6e5cc0a322934296e9380df1f96da4e0fa8baf52",
+    "related_export_lc_number": "LC-M04B52604BU00096",
+    "seller_pi_numbers": [
+      "BTL/26/2981"
+    ]
+  },
   "3085260404791.pdf": {
     "bank_id": "brac_bank_plc",
     "btb_lc_date": "2026-06-07",

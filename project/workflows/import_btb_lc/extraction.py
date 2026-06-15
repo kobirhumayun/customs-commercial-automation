@@ -509,7 +509,7 @@ def _collect_related_export_lc_candidates(
         ),
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
-            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]\s*"
+            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]?\s*"
             + identifier
             + date_boundary
         ),
@@ -556,13 +556,13 @@ def _collect_brac_primary_related_export_lc_candidate(
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
             r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE\s+AND\s+"
-            r"EXPORT\s+SALES\s+CONTRACT\s+(?:NO|NUMBER)\s*[.:#-]?\s*"
+            r"EXPORT\s+SALES\s+CONTRACT\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
             + identifier
             + date_boundary
         ),
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
-            r"EXPORT(?:\s+SALES\s+CONTRACT)?\s+(?:NO|NUMBER)\s*[.:#-]?\s*"
+            r"EXPORT(?:\s+SALES\s+CONTRACT)?\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
             + identifier
             + date_boundary
         ),
@@ -962,7 +962,21 @@ def _is_lc_message_page(text: str) -> bool:
             compact,
         )
     )
-    if field_codes:
+    if len(field_codes) >= 2:
+        return True
+    if re.search(
+        r"(?i)(?:^|\s):?(?:"
+        r"20:?\s+DOCUMENTARY\s+CREDIT\s+NUMBER|"
+        r"31C:?\s+DATE\s+OF\s+ISSUE|"
+        r"32B:?\s+CURRENCY\s+CODE|"
+        r"45A:?\s+DESCRIPTION\s+OF\s+GOODS|"
+        r"46A:?\s+DOCUMENTS\s+REQUIRED|"
+        r"47A:?\s+ADDITIONAL\s+CONDITIONS|"
+        r"71D:?\s+CHARGES|"
+        r"78:?\s+INSTRUCTIONS"
+        r")\b",
+        compact,
+    ):
         return True
     upper_text = compact.upper()
     return "MT700" in upper_text and "DOCUMENTARY CREDIT" in upper_text
