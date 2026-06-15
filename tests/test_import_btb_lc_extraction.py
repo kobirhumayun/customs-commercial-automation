@@ -105,6 +105,18 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_3085260400652(self) -> None:
         self._assert_reported_pdf("3085260400652.pdf")
 
+    def test_3085260401001(self) -> None:
+        self._assert_reported_pdf("3085260401001.pdf")
+
+    def test_3085260401116(self) -> None:
+        self._assert_reported_pdf("3085260401116.pdf")
+
+    def test_3085260401317(self) -> None:
+        self._assert_reported_pdf("3085260401317.pdf")
+
+    def test_3085260401631(self) -> None:
+        self._assert_reported_pdf("3085260401631.pdf")
+
     def test_3085260404791(self) -> None:
         self._assert_reported_pdf("3085260404791.pdf")
 
@@ -368,6 +380,29 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         self.assertEqual(
             [(match["raw"], match["page_number"]) for match in field["matches"]],
             [("21592604000048", 1)],
+        )
+
+    def test_brac_authoritative_clause_uses_first_occurrence(self) -> None:
+        artifact = _extract_synthetic(
+            _sample_text(
+                btb_number="3085260401116",
+                pi_text="BTL/26/0826",
+                related_text=(
+                    "ALL SHIPPING DOCUMENTS MUST BEAR THE EXPORT SALES "
+                    "CONTRACT NO. PDL/KENPARK/26/0001 DATED 29-JAN-2026. "
+                    "ALL SHIPPING DOCUMENTS MUST BEAR THE EXPORT NO. "
+                    "9999999999999 DATE 30-JAN-2026."
+                ),
+            ),
+            filename="3085260401116.pdf",
+        )
+
+        field = artifact["fields"]["related_export_lc_number"]
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(field["canonical"], "LC-PDL/KENPARK/26/0001")
+        self.assertEqual(
+            [(match["raw"], match["page_number"]) for match in field["matches"]],
+            [("PDL/KENPARK/26/0001", 1)],
         )
 
     def test_multiple_valid_pi_numbers_are_preserved_in_document_order(self) -> None:

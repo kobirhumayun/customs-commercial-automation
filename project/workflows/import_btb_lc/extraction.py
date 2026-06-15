@@ -485,6 +485,14 @@ def _collect_related_export_lc_candidates(
 ) -> list[FieldCandidate]:
     date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT\b)"
     identifier = r"([A-Z0-9][A-Z0-9 /-]{2,38}?[A-Z0-9])"
+    brac_candidate = _collect_brac_primary_related_export_lc_candidate(
+        pages=pages,
+        identifier=identifier,
+        date_boundary=date_boundary,
+    )
+    if brac_candidate is not None:
+        return [brac_candidate]
+
     patterns = (
         re.compile(
             r"(?is)\b(?:SALES\s+CONTRACT\s*/\s*)?"
@@ -528,6 +536,65 @@ def _collect_related_export_lc_candidates(
                     )
                 )
     return _dedupe_candidates(candidates)
+
+
+def _collect_brac_primary_related_export_lc_candidate(
+    *,
+    pages: list[ExtractedPage],
+    identifier: str,
+    date_boundary: str,
+) -> FieldCandidate | None:
+    if not _pages_identify_brac(pages):
+        return None
+    patterns = (
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]\s*"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE\s+AND\s+"
+            r"EXPORT\s+SALES\s+CONTRACT\s+(?:NO|NUMBER)\s*[.:#-]?\s*"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"EXPORT(?:\s+SALES\s+CONTRACT)?\s+(?:NO|NUMBER)\s*[.:#-]?\s*"
+            + identifier
+            + date_boundary
+        ),
+    )
+    matches = []
+    for page in pages:
+        compact = _compact_text(page.text)
+        for pattern in patterns:
+            for match in pattern.finditer(compact):
+                matches.append((page.page_number, match.start(), page, match))
+    if not matches:
+        return None
+    _page_number, _start, page, match = min(
+        matches,
+        key=lambda item: (item[0], item[1]),
+    )
+    return FieldCandidate(
+        raw=match.group(1),
+        page_number=page.page_number,
+        matched_text=match.group(0),
+        extraction_method=page.extraction_method,
+        confidence=_matched_token_confidence(page, match.group(1)),
+        hint="LC",
+    )
+
+
+def _pages_identify_brac(pages: list[ExtractedPage]) -> bool:
+    compact = _compact_text(" ".join(page.text for page in pages))
+    return bool(
+        re.search(r"(?<!\d)3085\d{9}(?!\d)", compact)
+        or re.search(r"(?i)\b(?:BRAKBDDH\w*|BRAC\s+BANK\s+PLC)\b", compact)
+    )
 
 
 def _resolve_field(
