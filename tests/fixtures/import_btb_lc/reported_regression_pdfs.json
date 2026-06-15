@@ -1,0 +1,55 @@
+{
+  "0002228260404815.pdf": {
+    "bank_id": "mutual_trust_bank_limited",
+    "btb_lc_date": "2026-06-14",
+    "btb_lc_number": "0002228260404815",
+    "btb_lc_value": "104173.400",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "46eb9373e3c35e9a031633824ba55f74c34d3d383900992f474c4e9a44b9e11c",
+    "related_export_lc_number": "LC-1558260300171",
+    "seller_pi_numbers": [
+      "BTL/26/4031",
+      "BTL/26/4032"
+    ]
+  },
+  "0742260401357.pdf": {
+    "bank_id": "the_city_bank_plc",
+    "btb_lc_date": "2026-06-04",
+    "btb_lc_number": "0742260401357",
+    "btb_lc_value": "111256.85",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "12c2b146bae0323ecd329482ea24b31380dfea632a274c6b599f96ed24270ac9",
+    "related_export_lc_number": "LC-DC-BD1181690",
+    "seller_pi_numbers": [
+      "KYL/26/1914"
+    ]
+  },
+  "0742260401365.pdf": {
+    "bank_id": "the_city_bank_plc",
+    "btb_lc_date": "2026-06-07",
+    "btb_lc_number": "0742260401365",
+    "btb_lc_value": "202156.50",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "3c37fe82e8066e381865b8c8ec918d969d21ebb0ab5c9a01d0e8a392103c10f7",
+    "related_export_lc_number": "LC-DC-BD1182670",
+    "seller_pi_numbers": [
+      "KYL/26/1930"
+    ]
+  },
+  "3085260404999.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-06-14",
+    "btb_lc_number": "3085260404999",
+    "btb_lc_value": "99781.00",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "1e7570dd48fc6f78c339440f27c69fcb63ea1d90b17a8e5906ac65d4739c7e84",
+    "related_export_lc_number": "LC-DPCBD1183097",
+    "seller_pi_numbers": [
+      "BTL/26/4009"
+    ]
+  }
+}

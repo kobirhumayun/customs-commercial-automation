@@ -21,7 +21,14 @@ from project.workflows.import_btb_lc.extraction import (
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "import_btb_lc" / "representative_pdfs.json"
+REPORTED_REGRESSION_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "import_btb_lc"
+    / "reported_regression_pdfs.json"
+)
 DEFAULT_SAMPLE_ROOT = Path(r"D:\customs-automation\workbooks\BTB LC for Extraction")
+DEFAULT_REPORTED_REGRESSION_ROOT = Path(r"D:\customs-automation\BTB extraction test")
 
 
 class RepresentativeImportBTBLCPDFTests(unittest.TestCase):
@@ -64,49 +71,39 @@ class RepresentativeImportBTBLCPDFTests(unittest.TestCase):
         source_path = self.sample_root / filename
         if not source_path.exists():
             self.skipTest(f"Representative PDF is not available: {source_path}")
-        expected = self.expected[filename]
+        _assert_pdf_fixture(self, source_path, self.expected[filename])
 
-        artifact = extract_import_btb_lc_pdf(pdf_path=source_path)
 
-        self.assertEqual(artifact["schema_version"], "1.1.0")
-        self.assertEqual(artifact["report_schema_version"], "1.1.0")
-        self.assertEqual(artifact["source"]["page_limit"], 3)
-        self.assertEqual(artifact["source"]["file_sha256"], expected["file_sha256"])
-        self.assertEqual(artifact["bank_detection"]["bank_id"], expected["bank_id"])
-        self.assertEqual(artifact["overall_extraction_decision"], expected["decision"])
-        self.assertTrue(artifact["filename_comparison"]["matches"])
-        self.assertEqual(
-            artifact["fields"]["btb_lc_number"]["canonical"],
-            expected["btb_lc_number"],
+class ReportedImportBTBLCRegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.expected = json.loads(
+            REPORTED_REGRESSION_FIXTURE_PATH.read_text(encoding="utf-8")
         )
-        self.assertEqual(
-            artifact["fields"]["btb_lc_date"]["canonical"],
-            expected["btb_lc_date"],
-        )
-        self.assertEqual(
-            artifact["fields"]["btb_lc_value"]["canonical"],
-            expected["btb_lc_value"],
-        )
-        self.assertEqual(
-            artifact["fields"]["currency"]["canonical"],
-            expected["currency"],
-        )
-        self.assertEqual(
-            artifact["fields"]["seller_pi_numbers"]["canonical"],
-            expected["seller_pi_numbers"],
-        )
-        self.assertEqual(
-            artifact["fields"]["related_export_lc_number"]["canonical"],
-            expected["related_export_lc_number"],
-        )
-        self.assertTrue(
-            all(
-                field.get("page_number") is not None
-                or field.get("values")
-                or field["validation"]["status"] == "hard_block"
-                for field in artifact["fields"].values()
+        cls.sample_root = Path(
+            os.environ.get(
+                "BTB_LC_REPORTED_REGRESSION_DIR",
+                DEFAULT_REPORTED_REGRESSION_ROOT,
             )
         )
+
+    def test_0002228260404815(self) -> None:
+        self._assert_reported_pdf("0002228260404815.pdf")
+
+    def test_0742260401357(self) -> None:
+        self._assert_reported_pdf("0742260401357.pdf")
+
+    def test_0742260401365(self) -> None:
+        self._assert_reported_pdf("0742260401365.pdf")
+
+    def test_3085260404999(self) -> None:
+        self._assert_reported_pdf("3085260404999.pdf")
+
+    def _assert_reported_pdf(self, filename: str) -> None:
+        source_path = self.sample_root / filename
+        if not source_path.exists():
+            self.skipTest(f"Reported regression PDF is not available: {source_path}")
+        _assert_pdf_fixture(self, source_path, self.expected[filename])
 
 
 class ImportBTBLCExtractionTests(unittest.TestCase):
@@ -261,7 +258,22 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
             _canonicalize_related_export_lc("DPCBDA033739", "LC"),
             "LC-DPCBDA033739",
         )
-        self.assertIsNone(_canonicalize_related_export_lc("DPCBDA 033739", "LC"))
+        self.assertEqual(
+            _canonicalize_related_export_lc("DPCBDA 033739", "LC"),
+            "LC-DPCBDA-033739",
+        )
+
+        indian_grouped = _extract_synthetic(
+            _sample_text(
+                btb_number="0002228260404815",
+                amount_text="USD1,04,173.400",
+            ),
+            filename="0002228260404815.pdf",
+        )
+        self.assertEqual(
+            indian_grouped["fields"]["btb_lc_value"]["canonical"],
+            "104173.400",
+        )
 
     def test_multiple_valid_pi_numbers_are_preserved_in_document_order(self) -> None:
         artifact = _extract_synthetic(
@@ -297,6 +309,61 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         self.assertEqual(
             artifact["fields"]["seller_pi_numbers"]["validation"]["code"],
             "import_pi_number_invalid",
+        )
+
+    def test_pi_candidates_from_appended_non_lc_page_are_ignored(self) -> None:
+        provider = _StaticPageProvider(
+            embedded=[
+                ExtractedPage(
+                    1,
+                    _sample_text(
+                        btb_number="3085260404999",
+                        pi_text="BTL/26/4009",
+                        related_text=(
+                            "ALL SHIPPING DOCUMENTS MUST BEAR THE L/C NUMBER "
+                            "WITH DATE AND EXPORT SALES CONTRACT NO. "
+                            "DPCBD1183097 DATE 07-06-2026"
+                        ),
+                    ),
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+                ExtractedPage(
+                    2,
+                    "47A: Additional Conditions",
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+                ExtractedPage(
+                    3,
+                    "PROFORMA INVOICE NO. BTL/ 26/4009",
+                    "ocr",
+                    0.99,
+                    False,
+                ),
+            ],
+            ocr=[],
+        )
+
+        artifact = _extract_synthetic(
+            "",
+            filename="3085260404999.pdf",
+            provider=provider,
+        )
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["seller_pi_numbers"]["canonical"],
+            ["BTL/26/4009"],
+        )
+        self.assertEqual(
+            {
+                match["page_number"]
+                for match in artifact["fields"]["seller_pi_numbers"]["matches"]
+            },
+            {1},
         )
 
     def test_filename_mismatch_is_warning_only_when_all_fields_pass(self) -> None:
@@ -412,6 +479,51 @@ def _extract_synthetic(
             pdf_path=pdf_path,
             page_provider=active_provider,
         )
+
+
+def _assert_pdf_fixture(
+    test_case: unittest.TestCase,
+    source_path: Path,
+    expected: dict,
+) -> None:
+    artifact = extract_import_btb_lc_pdf(pdf_path=source_path)
+
+    test_case.assertEqual(artifact["schema_version"], "1.1.0")
+    test_case.assertEqual(artifact["report_schema_version"], "1.1.0")
+    test_case.assertEqual(artifact["source"]["page_limit"], 3)
+    test_case.assertEqual(
+        artifact["source"]["file_sha256"],
+        expected["file_sha256"],
+    )
+    test_case.assertEqual(
+        artifact["bank_detection"]["bank_id"],
+        expected["bank_id"],
+    )
+    test_case.assertEqual(
+        artifact["overall_extraction_decision"],
+        expected["decision"],
+    )
+    test_case.assertTrue(artifact["filename_comparison"]["matches"])
+    for field_name in (
+        "btb_lc_number",
+        "btb_lc_date",
+        "btb_lc_value",
+        "currency",
+        "seller_pi_numbers",
+        "related_export_lc_number",
+    ):
+        test_case.assertEqual(
+            artifact["fields"][field_name]["canonical"],
+            expected[field_name],
+        )
+    test_case.assertTrue(
+        all(
+            field.get("page_number") is not None
+            or field.get("values")
+            or field["validation"]["status"] == "hard_block"
+            for field in artifact["fields"].values()
+        )
+    )
 
 
 def _sample_text(

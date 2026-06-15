@@ -496,7 +496,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - BTB normalization may trim outer whitespace, uppercase ASCII, normalize Unicode dash variants to `-`, and remove zero-width/control characters. It must not remove or repair internal spaces, separators, or digits.
 - Internal spaces are forbidden for all approved bank-specific BTB LC number shapes. If a candidate BTB LC number contains any embedded space, validation fails; implementations must not repair the value by removing spaces.
 - If an extracted candidate BTB LC number does not satisfy one of the approved bank-specific shapes, the BTB LC number is not valid for deterministic phase-1 write processing.
-- PI number extraction for import BTB LC processing must come from LC clauses. A single BTB LC may reference one or more seller PIs, and every distinct PI found in the inspected pages must be preserved in deterministic document-occurrence order.
+- PI number extraction for import BTB LC processing must come from LC clauses on pages that contain deterministic LC-message structure. Appended proforma-invoice or other non-LC pages are excluded even when they contain PI-like text. A single BTB LC may reference one or more seller PIs, and every distinct PI found in the applicable LC pages must be preserved in deterministic document-occurrence order.
 - Every extracted seller PI must match one of these approved case-insensitive regex patterns:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
@@ -504,7 +504,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Repeated mentions of the same canonical PI are deduplicated while their occurrence-level provenance remains available.
 - If no seller PI is found, or any extracted PI-like candidate from the applicable LC clauses does not satisfy an approved regex pattern, seller PI extraction is not valid for deterministic phase-1 import processing.
 - BTB LC date must parse unambiguously to a valid calendar date and be persisted as ISO `YYYY-MM-DD`; ambiguous numeric dates use day-first interpretation.
-- Related export LC must pass the shared LC/SC canonicalization profile and match workbook values by exact canonical equality.
+- Related export LC must pass the shared LC/SC canonicalization profile and match workbook values by exact canonical equality. When an import LC clause omits the `LC` prefix, the extractor supplies that clause-defined prefix; whitespace separating alphanumeric body segments is normalized to `-`, while the raw clause value and provenance remain unchanged.
 - A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
 - The complete allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or normalized synthetic source path ascending.
 - Mail-level write atomicity applies before run-level batch atomicity. Mails with intrinsic hard blocks are excluded before allocation. If a document later has no qualified row, hard-block its parent mail, release all tentative row reservations for that mail, and restart same-run duplicate ownership plus deterministic allocation from the baseline workbook without blocked mails. Continue until a full pass introduces no new blocked mail.

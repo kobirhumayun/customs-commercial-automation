@@ -472,6 +472,8 @@ def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
     )
     candidates = []
     for page in pages:
+        if not _is_lc_message_page(page.text):
+            continue
         compact = _compact_text(page.text)
         for match in pattern.finditer(compact):
             candidates.append(_candidate(page, match.group(0), match.group(0)))
@@ -481,19 +483,33 @@ def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
 def _collect_related_export_lc_candidates(
     pages: list[ExtractedPage],
 ) -> list[FieldCandidate]:
+    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DT\b)"
+    identifier = r"([A-Z0-9][A-Z0-9 -]{2,38}?[A-Z0-9])"
     patterns = (
         re.compile(
-            r"(?is)\bEXPORT\s+(?:L\s*/\s*C|LC)(?:\s*/\s*SC)?\s*"
-            r"(?:NO|NUMBER)\s*[.:#-]?\s*([A-Z0-9][A-Z0-9-]{3,39})"
+            r"(?is)\b(?:SALES\s+CONTRACT\s*/\s*)?"
+            r"EXPORT\s+(?:L\s*/\s*C|LC)(?:\s*/\s*SC)?\s*"
+            r"(?:NO|NUMBER)\s*[.:#-]?\s*"
+            + identifier
+            + date_boundary
         ),
         re.compile(
             r"(?is)\bEXPORT\s+CONTRACT\s+NUMBER\s*/\s*EXPORT\s+"
-            r"(?:L\s*/\s*C|LC)\s+NUMBER\s*:\s*([A-Z0-9][A-Z0-9-]{3,39})"
+            r"(?:L\s*/\s*C|LC)\s+NUMBER\s*:\s*"
+            + identifier
+            + date_boundary
         ),
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
-            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]?\s*"
-            r"([A-Z0-9][A-Z0-9-]{3,39})"
+            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]\s*"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bL\s*/\s*C\s+NUMBER\s+WITH\s+DATE\s+AND\s+"
+            r"EXPORT\s+SALES\s+CONTRACT\s+(?:NO|NUMBER)\s*[.:#-]?\s*"
+            + identifier
+            + date_boundary
         ),
     )
     candidates = []
@@ -791,9 +807,7 @@ def _parse_grouped_decimal(
         integer_part, fractional_part = value, ""
     if grouping_separator in integer_part:
         groups = integer_part.split(grouping_separator)
-        if not groups[0].isdigit() or not 1 <= len(groups[0]) <= 3:
-            return None
-        if any(len(group) != 3 or not group.isdigit() for group in groups[1:]):
+        if not _valid_grouped_integer(groups):
             return None
         integer_digits = "".join(groups)
     else:
@@ -849,11 +863,40 @@ def _canonicalize_related_export_lc(raw: str, hint: str | None) -> str | None:
         body = value
     else:
         return None
-    if any(character.isspace() for character in body):
-        return None
+    body = re.sub(r"\s+", "-", body)
+    body = re.sub(r"-+", "-", body).strip("-")
     if not re.fullmatch(r"[A-Z0-9]+(?:-[A-Z0-9]+)*", body):
         return None
     return f"{prefix}-{body}"
+
+
+def _valid_grouped_integer(groups: list[str]) -> bool:
+    if len(groups) < 2:
+        return False
+    if not groups[0].isdigit() or not 1 <= len(groups[0]) <= 3:
+        return False
+    if any(not group.isdigit() for group in groups[1:]):
+        return False
+    western_grouping = all(len(group) == 3 for group in groups[1:])
+    indian_grouping = (
+        len(groups[-1]) == 3
+        and all(len(group) == 2 for group in groups[1:-1])
+    )
+    return western_grouping or indian_grouping
+
+
+def _is_lc_message_page(text: str) -> bool:
+    compact = _compact_text(text)
+    field_codes = set(
+        re.findall(
+            r"(?i)(?:^|\s):?(20|31C|32B|45A|46A|47A|71D|78):?(?=\s)",
+            compact,
+        )
+    )
+    if field_codes:
+        return True
+    upper_text = compact.upper()
+    return "MT700" in upper_text and "DOCUMENTARY CREDIT" in upper_text
 
 
 def _detect_bank(
