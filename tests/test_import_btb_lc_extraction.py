@@ -135,6 +135,9 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_3085260403653(self) -> None:
         self._assert_reported_pdf("3085260403653.pdf")
 
+    def test_3085260404285(self) -> None:
+        self._assert_reported_pdf("3085260404285.pdf")
+
     def test_3085260404791(self) -> None:
         self._assert_reported_pdf("3085260404791.pdf")
 
@@ -450,6 +453,27 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                 self.assertEqual(
                     artifact["fields"]["related_export_lc_number"]["canonical"],
                     expected,
+                )
+
+    def test_brac_standalone_export_label_accepts_optional_the(self) -> None:
+        for article in ("THE ", ""):
+            with self.subTest(article=article):
+                artifact = _extract_synthetic(
+                    _sample_text(
+                        btb_number="3085260404285",
+                        pi_text="KYL/26/1732",
+                        related_text=(
+                            "ALL SHIPPING DOCUMENTS MUST BEAR "
+                            f"{article}EXPORT SALES CONTRACT NO: "
+                            "0000223260400954 DATED 11-05-2026"
+                        ),
+                    ),
+                    filename="3085260404285.pdf",
+                )
+                self.assertEqual(artifact["overall_extraction_decision"], "pass")
+                self.assertEqual(
+                    artifact["fields"]["related_export_lc_number"]["canonical"],
+                    "LC-0000223260400954",
                 )
 
     def test_brac_combined_export_lc_label_does_not_capture_with(self) -> None:

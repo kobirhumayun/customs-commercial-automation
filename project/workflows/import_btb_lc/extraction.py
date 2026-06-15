@@ -577,7 +577,7 @@ def _collect_brac_primary_related_export_lc_candidate(
             + date_boundary
         ),
         re.compile(
-            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+(?:THE\s+)?"
             r"EXPORT(?:\s+SALES\s+CONTRACT)?\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
             + identifier
             + date_boundary

@@ -208,6 +208,19 @@
       "BTL/26/2981"
     ]
   },
+  "3085260404285.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-05-18",
+    "btb_lc_number": "3085260404285",
+    "btb_lc_value": "8421.45",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "8337d4e86ec84118ae52d2133931350dcb2e3db09e7eb39f756818c33f24ad79",
+    "related_export_lc_number": "LC-0000223260400954",
+    "seller_pi_numbers": [
+      "KYL/26/1732"
+    ]
+  },
   "3085260404791.pdf": {
     "bank_id": "brac_bank_plc",
     "btb_lc_date": "2026-06-07",
