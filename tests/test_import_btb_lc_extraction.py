@@ -105,6 +105,9 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_3085260400652(self) -> None:
         self._assert_reported_pdf("3085260400652.pdf")
 
+    def test_3085260400020(self) -> None:
+        self._assert_reported_pdf("3085260400020.pdf")
+
     def test_3085260401001(self) -> None:
         self._assert_reported_pdf("3085260401001.pdf")
 
@@ -447,6 +450,39 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                 self.assertEqual(
                     artifact["fields"]["related_export_lc_number"]["canonical"],
                     expected,
+                )
+
+    def test_brac_combined_export_lc_label_does_not_capture_with(self) -> None:
+        cases = {
+            "with_and": (
+                "ALL SHIPPING DOCUMENTS MUST BEAR THE L/C NUMBER WITH "
+                "DATE AND EXPORT LC NO.BBCCHG518207 DATE 28-DEC-2025 "
+                "AND SALES CONTRACT NO. UJL-PVH-2024-01",
+                "LC-BBCCHG518207",
+            ),
+            "without_and": (
+                "ALL SHIPPING DOCUMENTS MUST BEAR THE L/C NUMBER WITH "
+                "DATE EXPORT LC NO:1335260400838 DATED 08/03/2026 "
+                "AND EXPORT SALES CONTRACT NO. CWL/WRANGLER/2026",
+                "LC-1335260400838",
+            ),
+        }
+        for name, (related_text, expected) in cases.items():
+            with self.subTest(case=name):
+                artifact = _extract_synthetic(
+                    _sample_text(
+                        btb_number="3085260400020",
+                        pi_text="BTL/25/6675",
+                        related_text=related_text,
+                    ),
+                    filename="3085260400020.pdf",
+                )
+                field = artifact["fields"]["related_export_lc_number"]
+                self.assertEqual(artifact["overall_extraction_decision"], "pass")
+                self.assertEqual(field["canonical"], expected)
+                self.assertNotIn(
+                    "WITH",
+                    [match["raw"] for match in field["matches"]],
                 )
 
     def test_incidental_single_field_number_does_not_make_invoice_an_lc_page(

@@ -1,4 +1,17 @@
 {
+  "3085260400020.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-01-01",
+    "btb_lc_number": "3085260400020",
+    "btb_lc_value": "7177.25",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "5afc0920d71dd6b352c8c95871326b01953eb57a2bab23a85487729a14ca1c11",
+    "related_export_lc_number": "LC-BBCCHG518207",
+    "seller_pi_numbers": [
+      "BTL/25/6675"
+    ]
+  },
   "0002228260404815.pdf": {
     "bank_id": "mutual_trust_bank_limited",
     "btb_lc_date": "2026-06-14",

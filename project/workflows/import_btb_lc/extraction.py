@@ -549,7 +549,8 @@ def _collect_brac_primary_related_export_lc_candidate(
     patterns = (
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
-            r"L\s*/\s*C\s+NUMBER(?:\s+WITH\s+DATE)?\s*[:#-]\s*"
+            r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE(?:\s+AND)?\s+"
+            r"EXPORT\s+(?:L\s*/\s*C|LC)\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
             + identifier
             + date_boundary
         ),
@@ -557,6 +558,21 @@ def _collect_brac_primary_related_export_lc_candidate(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
             r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE\s+AND\s+"
             r"EXPORT\s+SALES\s+CONTRACT\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
+            r"(?:EXPORT\s+(?:L\s*/\s*C|LC)\s+"
+            r"(?:NO|NUMBER)\s*[.:#-]*\s*)?"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE\s*[:#-]?\s*"
+            r"(?!AND\b)"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"L\s*/\s*C\s+NUMBER(?!\s+WITH\b)\s*[:#-]\s*"
             + identifier
             + date_boundary
         ),
