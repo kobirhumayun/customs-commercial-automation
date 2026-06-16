@@ -797,6 +797,9 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 ### Launcher paths
 - `Current Full Path`: snapshot mails from Outlook `working`, evaluate relevance, acquire eligible-mail PDFs into run evidence, copy-promote validated import PDFs into the configured storage hierarchy, run the shared import BTB LC validation/workbook/report flow, and open the generated HTML report after terminal success.
 - `File Picker Path`: start from an operator file picker over previously stored import BTB LC PDFs, bypass Outlook mail intake entirely, run the same shared import BTB LC extraction/validation/workbook/report flow, and generate the same JSON/HTML report outputs.
+- Bundled Windows CMD launchers:
+  - Current Full Path: `scripts/run_import_btb_lc_current_live.cmd`
+  - File Picker Path: `scripts/run_import_btb_lc_file_picker_live.cmd`
 - Persist `launcher_path=current_full` or `launcher_path=file_picker` in run metadata and all import mail outcomes.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
 - For the `File Picker Path`, deterministic snapshot ordering is ascending normalized absolute file path; `snapshot_index`, synthetic `mail_id`, and run-level `mail_iteration_order` must derive from that sorted order, while file timestamps are lineage evidence only and do not affect ordering.

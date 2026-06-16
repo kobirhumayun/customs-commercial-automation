@@ -356,8 +356,17 @@ def _build_parser() -> argparse.ArgumentParser:
     run_import_btb_lc_parser.add_argument(
         "--input",
         type=Path,
+        action="append",
         required=True,
-        help="Source PDF, extraction JSON, or directory. Source files are never modified.",
+        help=(
+            "Source PDF, extraction JSON, or directory. May be repeated for a File Picker batch. "
+            "Source files are never modified."
+        ),
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--import-document-root",
+        type=Path,
+        help="Optional canonical import document root; when supplied, all selected PDFs must resolve beneath it.",
     )
     run_import_btb_lc_parser.add_argument(
         "--output",
@@ -2791,6 +2800,7 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
             output_directory=args.output,
             workbook_snapshot=workbook_snapshot,
             run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
+            import_document_root=args.import_document_root,
             apply_live_writes=args.apply_live_writes,
             workbook_path=args.workbook,
         )

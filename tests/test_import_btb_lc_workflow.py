@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -299,6 +299,82 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertFalse(summary["html_report_open_requested"])
         self.assertFalse(summary["html_report_opened"])
+
+    def test_cli_file_picker_accepts_repeated_inputs_as_one_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            first = input_dir / "first.json"
+            second = input_dir / "second.json"
+            first.write_text(json.dumps(_artifact(path=str(input_dir / "first.pdf"))), encoding="utf-8")
+            second.write_text(json.dumps(_artifact(path=str(input_dir / "second.pdf"))), encoding="utf-8")
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch("project.cli.open_import_btb_lc_report_in_browser"):
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-import-btb-lc-file-picker",
+                            "--input",
+                            str(second),
+                            "--input",
+                            str(first),
+                            "--output",
+                            str(output_dir),
+                            "--workbook-json",
+                            str(workbook_path),
+                            "--run-id",
+                            "run-import-test",
+                            "--no-open-report",
+                        ]
+                    )
+            summary = json.loads(stdout.getvalue())
+            report = json.loads(
+                (output_dir / "run-import-test.import-btb-lc.workflow.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["document_count"], 2)
+        self.assertEqual(summary["input_paths"], sorted(summary["input_paths"], key=str.casefold))
+        self.assertEqual(report["document_outcomes"][0]["filename"], "first.pdf")
+        self.assertEqual(report["document_outcomes"][1]["filename"], "second.pdf")
+
+    def test_cli_file_picker_rejects_pdf_outside_import_document_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            import_root = root / "import_docs"
+            outside = root / "outside"
+            output_dir = root / "output"
+            import_root.mkdir()
+            outside.mkdir()
+            pdf_path = outside / "0742260401049.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\nsynthetic\n")
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "run-import-btb-lc-file-picker",
+                        "--input",
+                        str(pdf_path),
+                        "--output",
+                        str(output_dir),
+                        "--workbook-json",
+                        str(workbook_path),
+                        "--import-document-root",
+                        str(import_root),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("must resolve beneath import_document_root", stderr.getvalue())
 
     def test_cli_file_picker_reports_browser_open_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

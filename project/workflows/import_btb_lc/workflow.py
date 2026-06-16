@@ -125,10 +125,11 @@ class DirectoryAttachmentContentProvider:
 
 def run_import_btb_lc_file_picker(
     *,
-    input_path: Path,
+    input_path: Path | Iterable[Path],
     output_directory: Path,
     workbook_snapshot: WorkbookSnapshot,
     run_id: str,
+    import_document_root: Path | None = None,
     apply_live_writes: bool = False,
     workbook_path: Path | None = None,
     mutation_session_provider: WorkbookMutationSessionProvider | None = None,
@@ -140,7 +141,11 @@ def run_import_btb_lc_file_picker(
     extraction_directory.mkdir(parents=True, exist_ok=True)
 
     documents: list[ImportBTBLCDocument] = []
-    for index, source in enumerate(_resolve_import_inputs(input_path)):
+    resolved_inputs = _resolve_import_inputs(
+        input_path,
+        import_document_root=import_document_root,
+    )
+    for index, source in enumerate(resolved_inputs):
         artifact = _load_or_extract_artifact(source, extraction_directory=extraction_directory)
         documents.append(
             _document_from_artifact(
@@ -192,7 +197,8 @@ def run_import_btb_lc_file_picker(
         "schema_version": IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION,
         "report_schema_version": IMPORT_BTB_LC_REPORT_SCHEMA_VERSION,
         "run_id": run_id,
-        "input_path": str(input_path.resolve()),
+        "input_path": str(resolved_inputs[0]) if len(resolved_inputs) == 1 else None,
+        "input_paths": [str(path) for path in resolved_inputs],
         "output_path": str(output_path.resolve()),
         "html_output_path": str(html_path.resolve()),
         "overall_decision": report["overall_decision"],
@@ -1384,25 +1390,54 @@ def _load_or_extract_artifact(source: Path, *, extraction_directory: Path) -> di
     return artifact
 
 
-def _resolve_import_inputs(input_path: Path) -> list[Path]:
-    resolved = input_path.resolve()
-    if resolved.is_file():
-        if resolved.suffix.casefold() not in {".pdf", ".json"}:
-            raise ValueError(f"Input file must be a PDF or import extraction JSON: {input_path}")
-        return [resolved]
-    if not resolved.is_dir():
-        raise ValueError(f"Input path does not exist: {input_path}")
-    paths = sorted(
-        (
-            path.resolve()
-            for path in resolved.iterdir()
-            if path.is_file() and path.suffix.casefold() in {".pdf", ".json"}
-        ),
-        key=lambda path: (path.suffix.casefold() != ".pdf", path.name.casefold(), str(path)),
-    )
+def _resolve_import_inputs(
+    input_path: Path | Iterable[Path],
+    *,
+    import_document_root: Path | None = None,
+) -> list[Path]:
+    inputs = _coerce_import_input_paths(input_path)
+    root = import_document_root.resolve() if import_document_root is not None else None
+    paths_by_key: dict[str, Path] = {}
+    for raw_input in inputs:
+        resolved = raw_input.resolve()
+        if resolved.is_file():
+            if resolved.suffix.casefold() not in {".pdf", ".json"}:
+                raise ValueError(f"Input file must be a PDF or import extraction JSON: {raw_input}")
+            _validate_file_picker_source_root(resolved, root=root)
+            paths_by_key.setdefault(os.path.normcase(str(resolved)), resolved)
+            continue
+        if not resolved.is_dir():
+            raise ValueError(f"Input path does not exist: {raw_input}")
+        for path in resolved.iterdir():
+            child = path.resolve()
+            if child.is_file() and child.suffix.casefold() in {".pdf", ".json"}:
+                _validate_file_picker_source_root(child, root=root)
+                paths_by_key.setdefault(os.path.normcase(str(child)), child)
+    paths = sorted(paths_by_key.values(), key=lambda path: os.path.normcase(str(path)))
     if not paths:
-        raise ValueError(f"Input directory contains no PDF or JSON files: {input_path}")
+        raise ValueError("Input path contains no PDF or JSON files.")
     return paths
+
+
+def _coerce_import_input_paths(input_path: Path | Iterable[Path]) -> list[Path]:
+    if isinstance(input_path, (str, os.PathLike)):
+        return [Path(input_path)]
+    paths = [Path(path) for path in input_path]
+    if not paths:
+        raise ValueError("At least one import BTB LC input path is required.")
+    return paths
+
+
+def _validate_file_picker_source_root(path: Path, *, root: Path | None) -> None:
+    if root is None or path.suffix.casefold() == ".json":
+        return
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "Selected import BTB LC PDFs must resolve beneath import_document_root. "
+            f"Source: {path}; import_document_root: {root}"
+        ) from exc
 
 
 def load_import_workbook_snapshot(
