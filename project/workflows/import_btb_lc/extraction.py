@@ -483,7 +483,7 @@ def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
 def _collect_related_export_lc_candidates(
     pages: list[ExtractedPage],
 ) -> list[FieldCandidate]:
-    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT\b|DTED\b)"
+    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT(?=\b|[.:/-]|\d)|DTED\b)"
     identifier = r"([A-Z0-9][A-Z0-9 /-]{2,38}?[A-Z0-9])"
     brac_candidate = _collect_brac_primary_related_export_lc_candidate(
         pages=pages,

@@ -90,6 +90,9 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_0002228260404815(self) -> None:
         self._assert_reported_pdf("0002228260404815.pdf")
 
+    def test_0002228260400993(self) -> None:
+        self._assert_reported_pdf("0002228260400993.pdf")
+
     def test_0742260401357(self) -> None:
         self._assert_reported_pdf("0742260401357.pdf")
 
@@ -554,6 +557,26 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         self.assertEqual(
             artifact["fields"]["related_export_lc_number"]["canonical"],
             "LC-0000201260400909",
+        )
+
+    def test_mtb_related_export_lc_accepts_compact_dt_boundary(self) -> None:
+        artifact = _extract_synthetic(
+            _sample_text(
+                btb_number="0002228260400993",
+                amount_text="USD13,928.850",
+                pi_text="BTL/26/0747",
+                related_text=(
+                    "EXPORT LC/SC NO.1019260400080 DT21.01.2026 "
+                    "AND EXPORT CONTRACT NO. SSL/H AND M/307/2025"
+                ),
+            ),
+            filename="0002228260400993.pdf",
+        )
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["related_export_lc_number"]["canonical"],
+            "LC-1019260400080",
         )
 
     def test_brac_combined_export_lc_label_does_not_capture_with(self) -> None:

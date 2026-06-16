@@ -12,6 +12,19 @@
       "BTL/25/6675"
     ]
   },
+  "0002228260400993.pdf": {
+    "bank_id": "mutual_trust_bank_limited",
+    "btb_lc_date": "2026-02-02",
+    "btb_lc_number": "0002228260400993",
+    "btb_lc_value": "13928.850",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "c325f54d2a47cb967b0f2a32d1075233513edb378bfdaa3c3bca4cffac7e853b",
+    "related_export_lc_number": "LC-1019260400080",
+    "seller_pi_numbers": [
+      "BTL/26/0747"
+    ]
+  },
   "0002228260404815.pdf": {
     "bank_id": "mutual_trust_bank_limited",
     "btb_lc_date": "2026-06-14",

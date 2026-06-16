@@ -840,6 +840,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - canonical import PI output uppercases ASCII letters and preserves slash separators
 - related export LC number from clause text
 - normalize related export LC using the shared LC/SC canonicalization profile before workbook matching
+- in Mutual Trust Bank Limited `EXPORT LC/SC NO.` clauses, accept compact `DT` date boundaries without an intervening space
 - in Standard Chartered Bank `EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER:` clauses, allow the value to continue onto the immediately following inspected page and accept `DTED` as an observed date-label boundary
 - in BRAC `ALL SHIPPING DOCUMENTS MUST BEAR...` clauses, use the first occurrence of `L/C NUMBER [WITH DATE]`, `L/C NUMBER WITH DATE AND EXPORT SALES CONTRACT NO.`, `EXPORT NO.`, or `EXPORT SALES CONTRACT NO.` as the authoritative related export LC clause; preserve slash-delimited body segments and treat `DATE`, `DATED`, `DAT`, or `DT` as the following date boundary
 - compare the entire attachment filename stem with the canonical extracted BTB LC number after the same safe case/dash/outer-whitespace normalization; prefixes, suffixes, and repaired separators do not count as a match
