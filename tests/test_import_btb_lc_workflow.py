@@ -9,10 +9,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.cli import main
+from project.workflows.snapshot import SourceAttachmentRecord, SourceEmailRecord, build_email_snapshot
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
+from project.workflows.import_btb_lc.extraction import ExtractedPage
 from project.workflows.import_btb_lc.workflow import (
+    DirectoryAttachmentContentProvider,
     _document_from_artifact,
     allocate_import_btb_lc_documents,
+    evaluate_import_mail_relevance,
+    load_import_relevance_keywords,
+    run_import_btb_lc_current_full,
     resolve_import_btb_lc_header_mapping,
 )
 
@@ -332,6 +338,145 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertFalse(summary["html_report_opened"])
         self.assertEqual(summary["warnings"][0]["code"], "import_report_browser_open_failed")
 
+    def test_keyword_relevance_uses_include_and_exclude_hits(self) -> None:
+        keywords = load_import_relevance_keywords()
+        mail = _mail_snapshot()[0]
+
+        relevant = evaluate_import_mail_relevance(mail, keywords=keywords)
+        excluded = evaluate_import_mail_relevance(
+            _mail_snapshot(subject="Fabric BTB cancel notice")[0],
+            keywords={**keywords, "exclude_keywords": ["cancel"]},
+        )
+
+        self.assertTrue(relevant["eligible"])
+        self.assertIn("fabric", relevant["include_keyword_hits"])
+        self.assertFalse(excluded["eligible"])
+        self.assertEqual(excluded["exclude_keyword_hits"], ["cancel"])
+
+    def test_current_full_acquires_promotes_allocates_and_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            attachment_root = root / "attachments"
+            attachment_root.mkdir()
+            mail_snapshot = _mail_snapshot()
+            (attachment_root / "0742260401049.pdf").write_bytes(b"%PDF-1.4\nsynthetic\n")
+            output_dir = root / "out"
+            import_root = root / "import_docs"
+            provider = _StaticPageProvider(
+                embedded=[ExtractedPage(1, _sample_text(), "embedded_text", 1.0, True)],
+                ocr=[],
+            )
+
+            summary = run_import_btb_lc_current_full(
+                mail_snapshot=mail_snapshot,
+                attachment_provider=DirectoryAttachmentContentProvider(attachment_root),
+                output_directory=output_dir,
+                workbook_snapshot=_workbook_snapshot(),
+                import_document_root=import_root,
+                run_id="run-current-test",
+                page_provider=provider,
+            )
+            report = json.loads(
+                (output_dir / "run-current-test.import-btb-lc.current-full.json").read_text(encoding="utf-8")
+            )
+            promoted_exists = (import_root / "2026" / "0742260401049.pdf").exists()
+
+        self.assertEqual(summary["overall_decision"], "pass")
+        self.assertEqual(summary["relevant_mail_count"], 1)
+        self.assertEqual(summary["document_count"], 1)
+        self.assertEqual(summary["selected_rows"][0]["selected_row_index"], 3)
+        self.assertTrue(promoted_exists)
+        self.assertEqual(report["mail_outcomes"][0]["final_decision"], "pass")
+        self.assertEqual(report["mail_outcomes"][0]["write_disposition"], "new_writes_staged")
+        self.assertEqual(report["mail_relevance"][0]["import_keyword_revision"], "2026-06-16.1")
+
+    def test_current_full_subject_ineligible_mail_is_not_actioned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            attachment_root = root / "attachments"
+            attachment_root.mkdir()
+            mail_snapshot = _mail_snapshot(subject="ordinary message")
+            (attachment_root / "0742260401049.pdf").write_bytes(b"%PDF-1.4\nsynthetic\n")
+
+            summary = run_import_btb_lc_current_full(
+                mail_snapshot=mail_snapshot,
+                attachment_provider=DirectoryAttachmentContentProvider(attachment_root),
+                output_directory=root / "out",
+                workbook_snapshot=_workbook_snapshot(),
+                import_document_root=root / "import_docs",
+                run_id="run-current-test",
+                page_provider=_StaticPageProvider(
+                    embedded=[ExtractedPage(1, _sample_text(), "embedded_text", 1.0, True)],
+                    ocr=[],
+                ),
+            )
+
+        self.assertEqual(summary["overall_decision"], "pass")
+        self.assertEqual(summary["relevant_mail_count"], 0)
+        self.assertEqual(summary["document_count"], 0)
+        self.assertEqual(summary["write_disposition_counts"]["not_applicable"], 1)
+
+    def test_cli_current_full_uses_snapshot_and_attachment_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks", "attachments", "import_docs"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = _config_path(root)
+            snapshot_path = root / "snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-1",
+                            "received_time": "2026-06-16T08:00:00+06:00",
+                            "subject_raw": "Fabric BTB LC",
+                            "sender_address": "import@example.com",
+                            "attachments": [{"attachment_name": "0742260401049.pdf"}],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "attachments" / "0742260401049.pdf").write_bytes(b"%PDF-1.4\nsynthetic\n")
+            workbook_json = root / "workbook.json"
+            workbook_json.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch(
+                "project.workflows.import_btb_lc.workflow.extract_import_btb_lc_pdf",
+                return_value=_artifact(path=str(root / "attachments" / "0742260401049.pdf")),
+            ):
+                with patch("project.cli.open_import_btb_lc_report_in_browser") as open_mock:
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "run-import-btb-lc-current",
+                                "--config",
+                                str(config_path),
+                                "--snapshot-json",
+                                str(snapshot_path),
+                                "--attachment-directory",
+                                str(root / "attachments"),
+                                "--output",
+                                str(root / "reports"),
+                                "--import-document-root",
+                                str(root / "import_docs"),
+                                "--workbook-json",
+                                str(workbook_json),
+                                "--run-id",
+                                "run-current-test",
+                            ]
+                        )
+                    open_mock.assert_called_once()
+            summary = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["launcher_path"], "current_full")
+        self.assertEqual(summary["overall_decision"], "pass")
+        self.assertTrue(summary["html_report_opened"])
+
 
 def _document(artifact: dict, *, snapshot_index: int = 0):
     return _document_from_artifact(
@@ -433,6 +578,80 @@ def _workbook_manifest() -> dict:
             for row in snapshot.rows
         ],
     }
+
+
+class _StaticPageProvider:
+    def __init__(self, *, embedded: list[ExtractedPage], ocr: list[ExtractedPage]) -> None:
+        self._embedded = embedded
+        self._ocr = ocr
+
+    def embedded_pages(self, *, pdf_path: Path, page_limit: int) -> list[ExtractedPage]:
+        del pdf_path
+        return [page for page in self._embedded if page.page_number <= page_limit]
+
+    def ocr_pages(self, *, pdf_path: Path, page_numbers: list[int]) -> list[ExtractedPage]:
+        del pdf_path
+        return [page for page in self._ocr if page.page_number in page_numbers]
+
+
+def _mail_snapshot(*, subject: str = "Fabric BTB LC"):
+    return build_email_snapshot(
+        [
+            SourceEmailRecord(
+                entry_id="entry-1",
+                received_time="2026-06-16T08:00:00+06:00",
+                subject_raw=subject,
+                sender_address="import@example.com",
+                attachments=[SourceAttachmentRecord(attachment_name="0742260401049.pdf")],
+            )
+        ],
+        state_timezone="Asia/Dhaka",
+    )
+
+
+def _sample_text() -> str:
+    return "\n".join(
+        [
+            "City Bank PLC. Trade Services Division",
+            "20:",
+            "Documentary Credit Number",
+            "0742260401049",
+            "31C: Date of Issue",
+            "260505",
+            "32B: Currency Code, Amount",
+            "USD50000,00",
+            "41D: Available With ... By ...",
+            "45A: Description of Goods and/or Services",
+            "AS PER PROFORMA INVOICE NO. BTL/26/3183 DATED 01-01-2026",
+            "47A: Additional Conditions",
+            "EXPORT L/C NO. 1883260400042 DATE: 26-04-2026",
+        ]
+    )
+
+
+def _config_path(root: Path) -> Path:
+    config_path = root / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'state_timezone = "Asia/Dhaka"',
+                f'report_root = "{(root / "reports").as_posix()}"',
+                f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                f'backup_root = "{(root / "backups").as_posix()}"',
+                'outlook_profile = "outlook"',
+                f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                'erp_base_url = "https://erp.local"',
+                'playwright_browser_channel = "msedge"',
+                f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                "excel_lock_timeout_seconds = 60",
+                "print_enabled = true",
+                'source_working_folder_entry_id = "src-folder"',
+                'destination_success_entry_id = "dst-folder"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
 
 
 if __name__ == "__main__":

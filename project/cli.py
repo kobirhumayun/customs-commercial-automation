@@ -128,9 +128,11 @@ from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
 from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadProvider
 from project.workflows.import_btb_lc import (
+    DirectoryAttachmentContentProvider,
     extract_import_btb_lc_path,
     load_import_workbook_snapshot,
     open_import_btb_lc_report_in_browser,
+    run_import_btb_lc_current_full,
     run_import_btb_lc_file_picker,
 )
 from project.workflows.retention_reporting import build_retention_report
@@ -243,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_extract_import_btb_lc(args)
     if args.command == "run-import-btb-lc-file-picker":
         return _handle_run_import_btb_lc_file_picker(args)
+    if args.command == "run-import-btb-lc-current":
+        return _handle_run_import_btb_lc_current(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -384,6 +388,35 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-open-report",
         action="store_true",
         help="Do not open the generated HTML report after the run completes.",
+    )
+
+    run_import_btb_lc_current_parser = subparsers.add_parser(
+        "run-import-btb-lc-current",
+        help=(
+            "Run the Outlook/current-folder import BTB LC path: relevance, PDF acquisition, "
+            "storage promotion, workbook allocation/write, report, and optional mail moves."
+        ),
+    )
+    run_import_btb_lc_current_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
+    run_import_btb_lc_current_parser.add_argument("--output", type=Path, required=True, help="Directory for current-full import reports/evidence.")
+    run_import_btb_lc_current_parser.add_argument("--import-document-root", type=Path, required=True, help="Canonical import document storage root.")
+    run_import_btb_lc_current_parser.add_argument("--snapshot-json", type=Path, help="Optional deterministic mail snapshot manifest.")
+    run_import_btb_lc_current_parser.add_argument("--live-outlook-snapshot", action="store_true", help="Load source mails from the configured Outlook working folder.")
+    run_import_btb_lc_current_parser.add_argument("--attachment-directory", type=Path, help="Directory containing attachment files for --snapshot-json verification.")
+    run_import_btb_lc_current_parser.add_argument("--workbook-json", type=Path, help="Optional workbook snapshot JSON manifest.")
+    run_import_btb_lc_current_parser.add_argument("--workbook", type=Path, help="Optional live workbook path. Defaults to config yearly workbook when --workbook-json is absent.")
+    run_import_btb_lc_current_parser.add_argument("--run-id", help="Optional stable run id for repeatable verification output names.")
+    run_import_btb_lc_current_parser.add_argument("--apply-live-writes", action="store_true", help="Apply staged import writes to --workbook after live prevalidation succeeds.")
+    run_import_btb_lc_current_parser.add_argument("--move-mails", action="store_true", help="Move successful import mails after report/write completion.")
+    run_import_btb_lc_current_parser.add_argument("--live-mail-moves", action="store_true", help="Use live Outlook for --move-mails.")
+    run_import_btb_lc_current_parser.add_argument("--simulate-mail-moves", action="store_true", help="Use simulated mail moves for verification.")
+    run_import_btb_lc_current_parser.add_argument("--no-open-report", action="store_true", help="Do not open the generated HTML report after the run completes.")
+    run_import_btb_lc_current_parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override a config value with KEY=VALUE syntax. May be repeated.",
     )
 
     inspect_mail_snapshot_parser = subparsers.add_parser(
@@ -2786,6 +2819,110 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
                     }
                 )
     except (ArtifactError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(pretty_json_dumps(summary), end="")
+    return 0
+
+
+def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
+    try:
+        descriptor = _descriptor_from_args(WorkflowId.IMPORT_BTB_LC.value)
+        config = load_workflow_config(
+            descriptor=descriptor,
+            config_path=args.config,
+            overrides=_parse_overrides(args.overrides),
+        )
+        if args.snapshot_json is not None and args.live_outlook_snapshot:
+            raise ValueError("Choose either --snapshot-json or --live-outlook-snapshot, not both")
+        if args.snapshot_json is None and not args.live_outlook_snapshot:
+            raise ValueError("Current Full Path requires --snapshot-json or --live-outlook-snapshot")
+        if args.move_mails and args.live_mail_moves and args.simulate_mail_moves:
+            raise ValueError("Choose either --live-mail-moves or --simulate-mail-moves, not both")
+
+        mail_snapshot = (
+            JsonManifestMailSnapshotProvider(args.snapshot_json).load_snapshot(
+                state_timezone=config.state_timezone
+            )
+            if args.snapshot_json is not None
+            else Win32ComMailSnapshotProvider(
+                source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")).strip(),
+                outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None,
+            ).load_snapshot(state_timezone=config.state_timezone)
+        )
+        if args.live_outlook_snapshot:
+            attachment_provider = Win32ComAttachmentContentProvider(
+                outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None,
+            )
+        else:
+            if args.attachment_directory is None:
+                raise ValueError("--snapshot-json requires --attachment-directory for attachment bytes")
+            attachment_provider = DirectoryAttachmentContentProvider(args.attachment_directory)
+
+        workbook_path = args.workbook
+        if args.workbook_json is None and workbook_path is None:
+            workbook_path = _resolve_live_workbook_path(config)
+        workbook_snapshot = load_import_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            workbook_path=workbook_path,
+        )
+
+        mail_move_provider = None
+        if args.move_mails:
+            if args.live_mail_moves:
+                mail_move_provider = Win32ComMailMoveProvider(
+                    outlook_profile=str(config.values.get("outlook_profile", "")).strip() or None,
+                )
+            elif args.simulate_mail_moves:
+                mail_move_provider = SimulatedMailMoveProvider(
+                    {
+                        mail.entry_id: str(config.values.get("source_working_folder_entry_id", "")).strip()
+                        for mail in mail_snapshot
+                    }
+                )
+            else:
+                raise ValueError("--move-mails requires --live-mail-moves or --simulate-mail-moves")
+
+        summary = run_import_btb_lc_current_full(
+            mail_snapshot=mail_snapshot,
+            attachment_provider=attachment_provider,
+            output_directory=args.output,
+            workbook_snapshot=workbook_snapshot,
+            import_document_root=args.import_document_root,
+            run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
+            source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")).strip(),
+            destination_folder_entry_id=str(config.values.get("destination_success_entry_id", "")).strip(),
+            apply_live_writes=args.apply_live_writes,
+            workbook_path=workbook_path,
+            move_mails=args.move_mails,
+            mail_move_provider=mail_move_provider,
+        )
+        summary["html_report_open_requested"] = not args.no_open_report
+        summary["html_report_opened"] = False
+        if not args.no_open_report:
+            try:
+                open_import_btb_lc_report_in_browser(
+                    html_path=Path(str(summary["html_output_path"]))
+                )
+                summary["html_report_opened"] = True
+            except Exception as exc:
+                summary.setdefault("warnings", [])
+                summary["warnings"].append(
+                    {
+                        "code": "import_report_browser_open_failed",
+                        "severity": "warning",
+                        "message": (
+                            "The import BTB LC HTML report was generated successfully, "
+                            "but the system could not open it automatically."
+                        ),
+                        "details": {
+                            "html_path": summary["html_output_path"],
+                            "error": str(exc),
+                        },
+                    }
+                )
+    except (ArtifactError, ConfigError, OSError, RulePackError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

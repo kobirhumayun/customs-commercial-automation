@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import webbrowser
 from html import escape
 from dataclasses import dataclass
@@ -9,10 +12,12 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
-from project.models import WorkbookSessionPreflight, WorkflowId, WriteOperation
+from project.models import EmailMessage, MailMoveOperation, WorkflowId, WriteOperation
+from project.outlook import MailMoveProvider
+from project.storage import AttachmentContentProvider
 from project.storage.artifacts import atomic_write_text
-from project.utils.hashing import canonical_json_hash
-from project.utils.ids import build_write_operation_id
+from project.utils.hashing import canonical_json_hash, sha256_file
+from project.utils.ids import build_mail_move_operation_id, build_write_operation_id
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.utils.time import utc_timestamp
 from project.workbook import (
@@ -81,6 +86,41 @@ class ImportBTBLCDocument:
 class ImportBTBLCAllocationResult:
     workflow_report: dict[str, object]
     staged_write_plan: list[WriteOperation]
+
+
+@dataclass(slots=True, frozen=True)
+class DirectoryAttachmentContentProvider:
+    attachment_root: Path
+
+    def save_attachment(
+        self,
+        *,
+        mail: EmailMessage,
+        attachment_index: int,
+        destination_path: Path,
+    ) -> None:
+        attachment = next(
+            (
+                item
+                for item in mail.attachments
+                if item.attachment_index == attachment_index
+            ),
+            None,
+        )
+        if attachment is None:
+            raise ValueError(f"Mail {mail.mail_id} has no attachment index {attachment_index}.")
+        candidates = [
+            self.attachment_root / mail.mail_id / attachment.normalized_filename,
+            self.attachment_root / mail.entry_id / attachment.normalized_filename,
+            self.attachment_root / attachment.normalized_filename,
+        ]
+        source_path = next((path for path in candidates if path.is_file()), None)
+        if source_path is None:
+            raise ValueError(
+                "Attachment source file was not found in the attachment directory: "
+                + ", ".join(str(path) for path in candidates)
+            )
+        shutil.copy2(source_path, destination_path)
 
 
 def run_import_btb_lc_file_picker(
@@ -164,6 +204,208 @@ def run_import_btb_lc_file_picker(
         "write_execution_status": write_execution["status"],
     }
     return summary
+
+
+def run_import_btb_lc_current_full(
+    *,
+    mail_snapshot: list[EmailMessage],
+    attachment_provider: AttachmentContentProvider,
+    output_directory: Path,
+    workbook_snapshot: WorkbookSnapshot,
+    import_document_root: Path,
+    run_id: str,
+    source_folder_entry_id: str | None = None,
+    destination_folder_entry_id: str | None = None,
+    apply_live_writes: bool = False,
+    workbook_path: Path | None = None,
+    mutation_session_provider: WorkbookMutationSessionProvider | None = None,
+    move_mails: bool = False,
+    mail_move_provider: MailMoveProvider | None = None,
+    page_provider=None,
+) -> dict[str, object]:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    source_documents_root = output_directory / "source_documents"
+    extraction_directory = output_directory / "extraction"
+    source_documents_root.mkdir(parents=True, exist_ok=True)
+    extraction_directory.mkdir(parents=True, exist_ok=True)
+
+    keywords = load_import_relevance_keywords()
+    relevance_by_mail_id = {
+        mail.mail_id: evaluate_import_mail_relevance(mail, keywords=keywords)
+        for mail in mail_snapshot
+    }
+    documents: list[ImportBTBLCDocument] = []
+    document_mail_id: dict[str, str] = {}
+    acquisition_records: list[dict[str, object]] = []
+    acquisition_discrepancies: list[dict[str, object]] = []
+
+    for mail in mail_snapshot:
+        relevance = relevance_by_mail_id[mail.mail_id]
+        if not relevance["eligible"]:
+            continue
+        pdf_attachments = [
+            attachment
+            for attachment in sorted(mail.attachments, key=lambda item: item.attachment_index)
+            if attachment.normalized_filename.lower().endswith(".pdf")
+        ]
+        if not pdf_attachments:
+            acquisition_discrepancies.append(
+                _mail_discrepancy(
+                    mail_id=mail.mail_id,
+                    code="import_required_document_missing",
+                    message="Relevant import mail contained no PDF attachments.",
+                    details={"subject_raw": mail.subject_raw},
+                )
+            )
+            continue
+        for attachment in pdf_attachments:
+            saved_path = (
+                source_documents_root
+                / mail.mail_id
+                / f"{attachment.attachment_index:03d}"
+                / attachment.normalized_filename
+            )
+            saved_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                attachment_provider.save_attachment(
+                    mail=mail,
+                    attachment_index=attachment.attachment_index,
+                    destination_path=saved_path,
+                )
+                artifact = extract_import_btb_lc_pdf(
+                    pdf_path=saved_path,
+                    page_provider=page_provider,
+                )
+                extraction_path = extraction_directory / f"{mail.mail_id}.{attachment.attachment_index:03d}.{saved_path.name}.import-btb-lc.json"
+                atomic_write_text(extraction_path, pretty_json_dumps(artifact))
+                document = _document_from_artifact(
+                    artifact=artifact,
+                    snapshot_index=mail.snapshot_index,
+                    attachment_index=attachment.attachment_index,
+                )
+                documents.append(document)
+                document_mail_id[document.document_id] = mail.mail_id
+                promotion = _promote_import_document_if_valid(
+                    source_path=saved_path,
+                    artifact=artifact,
+                    import_document_root=import_document_root,
+                )
+                acquisition_records.append(
+                    {
+                        "mail_id": mail.mail_id,
+                        "attachment_index": attachment.attachment_index,
+                        "attachment_name": attachment.attachment_name,
+                        "source_evidence_path": str(saved_path.resolve()),
+                        "extraction_artifact_path": str(extraction_path.resolve()),
+                        "promotion": promotion,
+                    }
+                )
+                if promotion.get("status") == "hard_block":
+                    acquisition_discrepancies.append(
+                        _mail_discrepancy(
+                            mail_id=mail.mail_id,
+                            code=str(promotion["code"]),
+                            message=str(promotion["message"]),
+                            details=dict(promotion),
+                        )
+                    )
+            except Exception as exc:
+                acquisition_discrepancies.append(
+                    _mail_discrepancy(
+                        mail_id=mail.mail_id,
+                        code="import_required_document_missing",
+                        message="Import BTB LC PDF could not be acquired or extracted deterministically.",
+                        details={
+                            "attachment_index": attachment.attachment_index,
+                            "attachment_name": attachment.attachment_name,
+                            "error": str(exc),
+                        },
+                    )
+                )
+
+    allocation = allocate_import_btb_lc_documents(
+        documents=documents,
+        workbook_snapshot=workbook_snapshot,
+        run_id=run_id,
+    )
+    report = dict(allocation.workflow_report)
+    report["launcher_path"] = "current_full"
+    report["import_keyword_revision"] = keywords["revision"]
+    report["mail_relevance"] = list(relevance_by_mail_id.values())
+    report["source_document_acquisition"] = acquisition_records
+    report["acquisition_discrepancies"] = acquisition_discrepancies
+    report["document_mail_index"] = dict(document_mail_id)
+
+    write_execution = {
+        "requested": bool(apply_live_writes),
+        "status": "not_requested",
+        "target_probes": [],
+        "commit_marker": None,
+        "discrepancies": [],
+    }
+    if apply_live_writes:
+        if workbook_path is None:
+            raise ValueError("--apply-live-writes requires --workbook")
+        write_execution = execute_import_btb_lc_writes(
+            run_id=run_id,
+            workbook_snapshot=workbook_snapshot,
+            staged_write_plan=allocation.staged_write_plan,
+            workbook_path=workbook_path,
+            mutation_session_provider=mutation_session_provider,
+        )
+    report["write_execution"] = write_execution
+    mail_outcomes = _build_current_full_mail_outcomes(
+        mail_snapshot=mail_snapshot,
+        relevance_by_mail_id=relevance_by_mail_id,
+        document_outcomes=report["document_outcomes"],
+        document_mail_id=document_mail_id,
+        acquisition_discrepancies=acquisition_discrepancies,
+        run_id=run_id,
+    )
+    mail_move = _execute_import_current_mail_moves(
+        run_id=run_id,
+        mail_outcomes=mail_outcomes,
+        source_folder_entry_id=source_folder_entry_id,
+        destination_folder_entry_id=destination_folder_entry_id,
+        move_mails=move_mails,
+        mail_move_provider=mail_move_provider,
+        write_execution=write_execution,
+        staged_write_plan=allocation.staged_write_plan,
+    )
+    report["mail_outcomes"] = mail_outcomes
+    report["mail_move"] = mail_move
+    report["overall_decision"] = _current_full_overall_decision(
+        mail_outcomes=mail_outcomes,
+        write_execution=write_execution,
+        mail_move=mail_move,
+    )
+    report["completed_at_utc"] = utc_timestamp()
+    report["staged_write_plan_hash"] = canonical_json_hash(to_jsonable(allocation.staged_write_plan))
+
+    output_path = output_directory / f"{run_id}.import-btb-lc.current-full.json"
+    atomic_write_text(output_path, pretty_json_dumps(report))
+    html_path = output_directory / f"{run_id}.import-btb-lc.current-full.html"
+    atomic_write_text(html_path, render_import_btb_lc_html_report(report))
+    return {
+        "schema_id": IMPORT_BTB_LC_WORKFLOW_SCHEMA_ID,
+        "schema_version": IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION,
+        "report_schema_version": IMPORT_BTB_LC_REPORT_SCHEMA_VERSION,
+        "run_id": run_id,
+        "launcher_path": "current_full",
+        "output_path": str(output_path.resolve()),
+        "html_output_path": str(html_path.resolve()),
+        "overall_decision": report["overall_decision"],
+        "mail_count": len(mail_snapshot),
+        "relevant_mail_count": sum(1 for item in relevance_by_mail_id.values() if item["eligible"]),
+        "document_count": len(documents),
+        "decision_counts": _mail_decision_counts(mail_outcomes),
+        "write_disposition_counts": _mail_write_disposition_counts(mail_outcomes),
+        "selected_rows": _selected_row_summary(report["document_outcomes"]),
+        "staged_write_operation_count": len(allocation.staged_write_plan),
+        "write_execution_status": write_execution["status"],
+        "mail_move_status": mail_move["status"],
+        "mail_move_operation_count": len(mail_move["operations"]),
+    }
 
 
 def allocate_import_btb_lc_documents(
@@ -573,6 +815,143 @@ def open_import_btb_lc_report_in_browser(*, html_path: Path) -> None:
         raise FileNotFoundError(str(html_path))
     if not webbrowser.open(html_path.resolve().as_uri()):
         raise RuntimeError(f"Browser open request was not acknowledged for {html_path}")
+
+
+def load_import_relevance_keywords() -> dict[str, object]:
+    try:
+        from project.rules.workflows.import_btb_lc import keywords as keyword_module
+    except ImportError as exc:
+        raise ValueError("Import BTB LC keyword module could not be loaded.") from exc
+
+    include_keywords = _validate_keyword_sequence(
+        getattr(keyword_module, "IMPORT_SUBJECT_KEYWORDS", None),
+        name="IMPORT_SUBJECT_KEYWORDS",
+        required_non_empty=True,
+    )
+    exclude_keywords = _validate_keyword_sequence(
+        getattr(keyword_module, "IMPORT_SUBJECT_EXCLUDE_KEYWORDS", ()),
+        name="IMPORT_SUBJECT_EXCLUDE_KEYWORDS",
+        required_non_empty=False,
+    )
+    revision = getattr(keyword_module, "IMPORT_KEYWORD_REVISION", None)
+    if not isinstance(revision, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}\.[1-9]\d*", revision.strip()):
+        raise ValueError("IMPORT_KEYWORD_REVISION must match YYYY-MM-DD.N")
+    return {
+        "revision": revision.strip(),
+        "include_keywords": include_keywords,
+        "exclude_keywords": exclude_keywords,
+    }
+
+
+def evaluate_import_mail_relevance(
+    mail: EmailMessage,
+    *,
+    keywords: dict[str, object],
+) -> dict[str, object]:
+    normalized_subject = _normalize_subject(mail.subject_raw)
+    include_keywords = list(keywords.get("include_keywords", []))
+    exclude_keywords = list(keywords.get("exclude_keywords", []))
+    include_hits = [
+        keyword
+        for keyword in include_keywords
+        if str(keyword).casefold() in normalized_subject
+    ]
+    exclude_hits = [
+        keyword
+        for keyword in exclude_keywords
+        if str(keyword).casefold() in normalized_subject
+    ]
+    eligible = bool(include_hits) and not exclude_hits
+    return {
+        "mail_id": mail.mail_id,
+        "snapshot_index": mail.snapshot_index,
+        "subject_raw": mail.subject_raw,
+        "normalized_subject": normalized_subject,
+        "include_keyword_hits": include_hits,
+        "exclude_keyword_hits": exclude_hits,
+        "eligible": eligible,
+        "import_keyword_revision": keywords["revision"],
+    }
+
+
+def _validate_keyword_sequence(
+    value: object,
+    *,
+    name: str,
+    required_non_empty: bool,
+) -> list[str]:
+    if not isinstance(value, (tuple, list)):
+        raise ValueError(f"{name} must be a sequence of non-empty strings")
+    normalized = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{name} must contain only non-empty strings")
+        keyword = " ".join(item.strip().casefold().split())
+        if keyword in seen:
+            raise ValueError(f"{name} contains duplicate keyword after normalization: {item}")
+        seen.add(keyword)
+        normalized.append(keyword)
+    if required_non_empty and not normalized:
+        raise ValueError(f"{name} must contain at least one keyword")
+    return normalized
+
+
+def _normalize_subject(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _promote_import_document_if_valid(
+    *,
+    source_path: Path,
+    artifact: dict[str, object],
+    import_document_root: Path,
+) -> dict[str, object]:
+    if artifact.get("overall_extraction_decision") == "hard_block":
+        return {
+            "status": "not_promoted",
+            "reason": "extraction_hard_block",
+        }
+    fields = artifact.get("fields")
+    if not isinstance(fields, dict):
+        return {"status": "not_promoted", "reason": "missing_fields"}
+    date_value = _field_canonical(fields, "btb_lc_date")
+    if date_value is None:
+        return {"status": "not_promoted", "reason": "missing_btb_lc_date"}
+    try:
+        year = date.fromisoformat(date_value).year
+    except ValueError:
+        return {"status": "not_promoted", "reason": "invalid_btb_lc_date"}
+
+    destination_directory = import_document_root / str(year)
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    destination_path = destination_directory / source_path.name
+    source_hash = sha256_file(source_path)
+    if destination_path.exists():
+        destination_hash = sha256_file(destination_path)
+        if destination_hash == source_hash:
+            return {
+                "status": "reused_existing",
+                "destination_path": str(destination_path.resolve()),
+                "file_sha256": source_hash,
+            }
+        return {
+            "status": "hard_block",
+            "code": "import_storage_filename_content_conflict",
+            "message": "Import document destination filename already exists with different file content.",
+            "destination_path": str(destination_path.resolve()),
+            "source_file_sha256": source_hash,
+            "destination_file_sha256": destination_hash,
+        }
+
+    temp_path = destination_directory / f"{destination_path.name}.{os.getpid()}.tmp"
+    shutil.copy2(source_path, temp_path)
+    os.replace(temp_path, destination_path)
+    return {
+        "status": "promoted",
+        "destination_path": str(destination_path.resolve()),
+        "file_sha256": source_hash,
+    }
 
 
 def _allocate_one_document(
@@ -1257,6 +1636,297 @@ def _summarize_outcomes(outcomes: list[dict[str, object]]) -> dict[str, int]:
         "hard_block": sum(1 for outcome in outcomes if outcome.get("decision") == "hard_block"),
         "staged": sum(1 for outcome in outcomes if outcome.get("write_disposition") == "new_writes_staged"),
         "duplicate_only": sum(1 for outcome in outcomes if outcome.get("write_disposition") == "duplicate_only_noop"),
+    }
+
+
+def _build_current_full_mail_outcomes(
+    *,
+    mail_snapshot: list[EmailMessage],
+    relevance_by_mail_id: dict[str, dict[str, object]],
+    document_outcomes: object,
+    document_mail_id: dict[str, str],
+    acquisition_discrepancies: list[dict[str, object]],
+    run_id: str,
+) -> list[dict[str, object]]:
+    outcome_list = document_outcomes if isinstance(document_outcomes, list) else []
+    documents_by_mail: dict[str, list[dict[str, object]]] = {}
+    for outcome in outcome_list:
+        if not isinstance(outcome, dict):
+            continue
+        mail_id = document_mail_id.get(str(outcome.get("document_id", "")))
+        if mail_id is None:
+            continue
+        documents_by_mail.setdefault(mail_id, []).append(outcome)
+    acquisition_by_mail: dict[str, list[dict[str, object]]] = {}
+    for discrepancy in acquisition_discrepancies:
+        mail_id = str(discrepancy.get("mail_id", ""))
+        acquisition_by_mail.setdefault(mail_id, []).append(discrepancy)
+
+    mail_outcomes: list[dict[str, object]] = []
+    for mail in sorted(mail_snapshot, key=lambda item: item.snapshot_index):
+        relevance = relevance_by_mail_id[mail.mail_id]
+        documents = documents_by_mail.get(mail.mail_id, [])
+        mail_acquisition_discrepancies = acquisition_by_mail.get(mail.mail_id, [])
+        if not relevance["eligible"]:
+            decision = "pass"
+            processing_disposition = "not_applicable"
+            write_disposition = "not_applicable"
+            reasons = ["Mail subject did not match import BTB LC relevance keywords."]
+        elif mail_acquisition_discrepancies or any(document.get("decision") == "hard_block" for document in documents):
+            decision = "hard_block"
+            processing_disposition = "blocked"
+            write_disposition = "not_staged"
+            reasons = ["One or more import BTB LC documents in the mail hard-blocked."]
+        elif not documents:
+            decision = "hard_block"
+            processing_disposition = "blocked"
+            write_disposition = "not_staged"
+            mail_acquisition_discrepancies = [
+                _mail_discrepancy(
+                    mail_id=mail.mail_id,
+                    code="import_required_document_missing",
+                    message="No deterministic import BTB LC PDF was extracted from the relevant mail.",
+                    details={"subject_raw": mail.subject_raw},
+                )
+            ]
+            reasons = ["Relevant mail did not produce a deterministic import BTB LC document."]
+        else:
+            decisions = {str(document.get("decision")) for document in documents}
+            decision = "warning" if "warning" in decisions else "pass"
+            processing_disposition = "validated"
+            write_disposition = _mail_write_disposition(documents)
+            reasons = ["Import BTB LC mail processed without hard-block discrepancies."]
+        mail_outcomes.append(
+            {
+                "run_id": run_id,
+                "mail_id": mail.mail_id,
+                "workflow_id": WorkflowId.IMPORT_BTB_LC.value,
+                "snapshot_index": mail.snapshot_index,
+                "source_entry_id": mail.entry_id,
+                "subject_raw": mail.subject_raw,
+                "sender_address": mail.sender_address,
+                "import_relevance": relevance,
+                "import_keyword_revision": relevance["import_keyword_revision"],
+                "processing_disposition": processing_disposition,
+                "final_decision": decision,
+                "write_disposition": write_disposition,
+                "eligible_for_mail_move": bool(relevance["eligible"] and decision != "hard_block"),
+                "document_ids": [document.get("document_id") for document in documents],
+                "btb_lc_numbers_extracted": _mail_field_projection(documents, "btb_lc_number"),
+                "pi_numbers_extracted": _mail_pi_projection(documents),
+                "related_export_lc_numbers_extracted": _mail_field_projection(documents, "related_export_lc_number"),
+                "discrepancies": list(mail_acquisition_discrepancies)
+                + [
+                    discrepancy
+                    for document in documents
+                    for discrepancy in document.get("hard_block_discrepancies", [])
+                    if isinstance(discrepancy, dict)
+                ],
+                "warnings": [
+                    warning
+                    for document in documents
+                    for warning in document.get("warnings", [])
+                    if isinstance(warning, dict)
+                ],
+                "decision_reasons": reasons,
+            }
+        )
+    return mail_outcomes
+
+
+def _mail_write_disposition(documents: list[dict[str, object]]) -> str:
+    dispositions = {str(document.get("write_disposition", "")) for document in documents}
+    if dispositions == {"duplicate_only_noop"}:
+        return "duplicate_only_noop"
+    if "new_writes_staged" in dispositions and "duplicate_only_noop" in dispositions:
+        return "mixed_duplicate_and_new_writes"
+    if "new_writes_staged" in dispositions:
+        return "new_writes_staged"
+    return "no_write_noop"
+
+
+def _mail_field_projection(documents: list[dict[str, object]], field_name: str) -> list[str]:
+    values = []
+    for document in documents:
+        fields = document.get("extracted_fields")
+        if not isinstance(fields, dict):
+            continue
+        value = fields.get(field_name)
+        if isinstance(value, str) and value:
+            values.append(value)
+    return values
+
+
+def _mail_pi_projection(documents: list[dict[str, object]]) -> list[str]:
+    values = []
+    for document in documents:
+        fields = document.get("extracted_fields")
+        if not isinstance(fields, dict):
+            continue
+        pi_numbers = fields.get("seller_pi_numbers")
+        if isinstance(pi_numbers, list):
+            values.extend(str(value) for value in pi_numbers if str(value).strip())
+    return values
+
+
+def _mail_discrepancy(
+    *,
+    mail_id: str,
+    code: str,
+    message: str,
+    details: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "mail_id": mail_id,
+        "code": code,
+        "severity": "hard_block",
+        "message": message,
+        "details": details,
+    }
+
+
+def _execute_import_current_mail_moves(
+    *,
+    run_id: str,
+    mail_outcomes: list[dict[str, object]],
+    source_folder_entry_id: str | None,
+    destination_folder_entry_id: str | None,
+    move_mails: bool,
+    mail_move_provider: MailMoveProvider | None,
+    write_execution: dict[str, object],
+    staged_write_plan: list[WriteOperation],
+) -> dict[str, object]:
+    operations = []
+    if not move_mails:
+        return {"requested": False, "status": "not_requested", "operations": operations, "discrepancies": []}
+    if not source_folder_entry_id or not destination_folder_entry_id:
+        return {
+            "requested": True,
+            "status": "hard_blocked",
+            "operations": operations,
+            "discrepancies": [
+                {
+                    "code": "mail_move_gate_unsatisfied",
+                    "severity": "hard_block",
+                    "message": "Import mail move requires configured source and destination folders.",
+                    "details": {},
+                }
+            ],
+        }
+    write_status = str(write_execution.get("status", ""))
+    if staged_write_plan and write_status != "committed":
+        return {
+            "requested": True,
+            "status": "hard_blocked",
+            "operations": operations,
+            "discrepancies": [
+                {
+                    "code": "mail_move_gate_unsatisfied",
+                    "severity": "hard_block",
+                    "message": "Import mail move is blocked until staged workbook writes commit.",
+                    "details": {"write_execution_status": write_status},
+                }
+            ],
+        }
+    if mail_move_provider is None:
+        return {
+            "requested": True,
+            "status": "hard_blocked",
+            "operations": operations,
+            "discrepancies": [
+                {
+                    "code": "mail_move_runtime_error",
+                    "severity": "hard_block",
+                    "message": "No import mail move provider was supplied.",
+                    "details": {},
+                }
+            ],
+        }
+    for outcome in mail_outcomes:
+        if not outcome.get("eligible_for_mail_move"):
+            continue
+        operation = MailMoveOperation(
+            mail_move_operation_id=build_mail_move_operation_id(
+                run_id,
+                str(outcome["source_entry_id"]),
+                destination_folder_entry_id,
+            ),
+            run_id=run_id,
+            mail_id=str(outcome["mail_id"]),
+            entry_id=str(outcome["source_entry_id"]),
+            source_folder=source_folder_entry_id,
+            destination_folder=destination_folder_entry_id,
+            moved_at_utc=None,
+            move_status="pending",
+        )
+        try:
+            receipt = mail_move_provider.move_mail(operation)
+        except Exception as exc:
+            return {
+                "requested": True,
+                "status": "uncertain_incomplete",
+                "operations": operations,
+                "discrepancies": [
+                    {
+                        "code": "mail_move_runtime_error",
+                        "severity": "hard_block",
+                        "message": "A runtime error interrupted import mail movement.",
+                        "details": {"mail_id": outcome["mail_id"], "error": str(exc)},
+                    }
+                ],
+            }
+        operations.append(
+            {
+                **to_jsonable(operation),
+                "move_status": "moved",
+                "move_execution_receipt": to_jsonable(receipt),
+                "moved_at_utc": utc_timestamp(),
+            }
+        )
+    return {
+        "requested": True,
+        "status": "completed",
+        "operations": operations,
+        "discrepancies": [],
+    }
+
+
+def _current_full_overall_decision(
+    *,
+    mail_outcomes: list[dict[str, object]],
+    write_execution: dict[str, object],
+    mail_move: dict[str, object],
+) -> str:
+    if any(outcome.get("final_decision") == "hard_block" for outcome in mail_outcomes):
+        return "hard_block"
+    if write_execution.get("status") in {"hard_blocked_no_write", "uncertain_not_committed"}:
+        return "hard_block"
+    if mail_move.get("status") in {"hard_blocked", "uncertain_incomplete"}:
+        return "hard_block"
+    if any(outcome.get("final_decision") == "warning" for outcome in mail_outcomes):
+        return "warning"
+    return "pass"
+
+
+def _mail_decision_counts(mail_outcomes: list[dict[str, object]]) -> dict[str, int]:
+    return {
+        decision: sum(1 for outcome in mail_outcomes if outcome.get("final_decision") == decision)
+        for decision in ("pass", "warning", "hard_block")
+    }
+
+
+def _mail_write_disposition_counts(mail_outcomes: list[dict[str, object]]) -> dict[str, int]:
+    dispositions = (
+        "new_writes_staged",
+        "mixed_duplicate_and_new_writes",
+        "duplicate_only_noop",
+        "no_write_noop",
+        "not_staged",
+        "not_applicable",
+    )
+    return {
+        disposition: sum(1 for outcome in mail_outcomes if outcome.get("write_disposition") == disposition)
+        for disposition in dispositions
     }
 
 
