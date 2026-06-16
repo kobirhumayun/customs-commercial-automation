@@ -171,7 +171,7 @@ Each `allocation_attempts[]` item must include:
 - `restart_reason` (nullable)
 
 For every staged `import_btb_lc` write operation:
-- `column_key` must identify `btb_lc_no` or `import_lc_amount`; no other workbook column is writable by this workflow
+- `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, or `import_lc_amount`; no other workbook column is writable by this workflow
 - `expected_pre_write_value` must be canonical blank
 - live target-prevalidation evidence must record the observed value for each destination cell
 - `import_target_cell_already_populated` details must include `sheet_name`, `row_index`, `column_key`, `expected_pre_write_value`, and `observed_value`

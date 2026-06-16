@@ -854,7 +854,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - all import BTB LC clause parsing should assume UCP-style clause semantics even when bank-specific visual layout differs
 
 ### Candidate row rules
-- Resolve import workbook headers explicitly: canonical export LC `L/C & S/C No.`, `UP No.`, export `Amount` at fixed column 6, `BTB L/C No.`, and import `Amount` at fixed column 22
+- Resolve import workbook headers explicitly: canonical export LC `L/C & S/C No.`, `UP No.`, export `Amount` at fixed column 6, `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` at fixed column 22
 - Normalize import BTB LC values and workbook export LC values to exact canonical decimals before comparison; both are interpreted in configured `import_amount_currency`
 - Group all validated import BTB LCs in the run by related export LC
 - Allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or synthetic source path ascending
@@ -870,12 +870,13 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - export LC matches related export LC
 - `UP No.` blank
 - BTB LC target field blank
+- `BTB LC Issue Date` target field blank
 - import `Amount` column 22 blank
 - row not already selected by an earlier import BTB LC allocation in the same run
-- the only cells `import_btb_lc` may write are `BTB L/C No.` and import `Amount` column 22; all other workbook cells are read-only inputs for this workflow
-- both destination cells must be blank when the row is evaluated, when write operations are staged, and when the live workbook is prevalidated immediately before batch apply
+- the only cells `import_btb_lc` may write are `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` column 22; all other workbook cells are read-only inputs for this workflow
+- all three destination cells must be blank when the row is evaluated, when write operations are staged, and when the live workbook is prevalidated immediately before batch apply
 - every staged import write operation must persist a blank `expected_pre_write_value`; a non-blank expected pre-write value is an invalid staged plan
-- if either destination cell becomes populated after allocation but before batch apply, emit `import_target_cell_already_populated` and hard-block the batch before any workbook mutation; do not reinterpret the late value as a duplicate
+- if any destination cell becomes populated after allocation but before batch apply, emit `import_target_cell_already_populated` and hard-block the batch before any workbook mutation; do not reinterpret the late value as a duplicate
 - a proven workbook duplicate remains a duplicate-only/no-write outcome and must not generate staged write operations
 - if exactly one of `BTB L/C No.` and import `Amount` column 22 is blank on a matching-family row, hard-block as partial target state
 - if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row

@@ -26,6 +26,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(mapping.up_no, 7)
         self.assertEqual(mapping.export_amount, 6)
         self.assertEqual(mapping.btb_lc_no, 21)
+        self.assertEqual(mapping.btb_lc_issue_date, 20)
         self.assertEqual(mapping.import_amount, 22)
 
     def test_allocation_selects_highest_eligible_export_amount_row(self) -> None:
@@ -47,10 +48,10 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
 
         self.assertEqual(outcome["decision"], "pass")
         self.assertEqual(outcome["selected_row_index"], 4)
-        self.assertEqual(len(result.staged_write_plan), 2)
+        self.assertEqual(len(result.staged_write_plan), 3)
         self.assertEqual(
             [operation.column_key for operation in result.staged_write_plan],
-            ["btb_lc_no", "import_amount"],
+            ["btb_lc_no", "btb_lc_issue_date", "import_amount"],
         )
 
     def test_allocation_hard_blocks_when_no_qualified_row(self) -> None:
@@ -81,6 +82,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                     lc="LC-1883260400042",
                     export_amount="100000",
                     btb="0742260401049",
+                    issue_date="2026-05-05",
                     import_amount="50000.00",
                 )
             ]
@@ -148,7 +150,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(outcomes[0]["decision"], "pass")
         self.assertEqual(outcomes[1]["decision"], "warning")
         self.assertEqual(outcomes[1]["warnings"][0]["code"], "import_duplicate_document_same_run")
-        self.assertEqual(len(result.staged_write_plan), 2)
+        self.assertEqual(len(result.staged_write_plan), 3)
 
     def test_same_run_duplicate_conflict_is_hard_block(self) -> None:
         snapshot = _workbook_snapshot(
@@ -243,7 +245,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertTrue(summary["html_output_path"].endswith(".html"))
         self.assertEqual(report["summary"]["staged"], 1)
         self.assertEqual(report["write_execution"]["status"], "not_requested")
-        self.assertEqual(len(report["staged_write_plan"]), 2)
+        self.assertEqual(len(report["staged_write_plan"]), 3)
         self.assertIn("0742260401049", html)
 
 
@@ -300,6 +302,7 @@ def _workbook_snapshot(*, rows: list[WorkbookRow] | None = None) -> WorkbookSnap
             WorkbookHeader(column_index=4, text="L/C & S/C No."),
             WorkbookHeader(column_index=6, text="Amount"),
             WorkbookHeader(column_index=7, text="UP No."),
+            WorkbookHeader(column_index=20, text="BTB LC Issue Date"),
             WorkbookHeader(column_index=21, text="BTB L/C No."),
             WorkbookHeader(column_index=22, text="Amount"),
         ],
@@ -314,6 +317,7 @@ def _row(
     export_amount: str,
     up_no: str = "",
     btb: str = "",
+    issue_date: str = "",
     import_amount: str = "",
 ) -> WorkbookRow:
     return WorkbookRow(
@@ -322,6 +326,7 @@ def _row(
             4: lc,
             6: export_amount,
             7: up_no,
+            20: issue_date,
             21: btb,
             22: import_amount,
         },

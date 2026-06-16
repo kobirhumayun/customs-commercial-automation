@@ -262,6 +262,7 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by exact LC-value group matching |
 | `import_btb_lc` | `export_amount` | `Amount` (column 6) | `never_write` | exact-decimal 40%-80% candidate validation |
 | `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule; target blank at evaluation, staging, and live pre-write validation; never overwrite |
+| `import_btb_lc` | `btb_lc_issue_date` | `BTB LC Issue Date` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule; source BTB LC date normalized to workbook date representation; target blank at evaluation, staging, and live pre-write validation; never overwrite |
 | `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation; target blank at evaluation, staging, and live pre-write validation; never overwrite |
 | `bb_dashboard_verification` | `dashboard_status` | `Bangladesh Bank Dashboard` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
 | `bb_dashboard_verification` | `shipment_date` | `Shipment Date` | `update_from_erp_after_lookup_comparison` | row eligible by workflow filters and the family reached dashboard lookup/comparison; applies to successful families (`OK`, `OK (KGS)`) and warning/failure families produced after lookup/comparison, but not upstream ERP/input hard-block families; source ERP `Ship. DT.` formatted to workbook date representation |
@@ -524,14 +525,15 @@ The dashboard column is verification-only and should not be used to drive other 
   - workbook export LC matches the related export LC
   - `UP No.` is blank
   - import `BTB L/C No.` target is blank
+  - import `BTB LC Issue Date` target is blank
   - import `Amount` column 22 target is blank
   - row has not already been reserved by an earlier import BTB LC allocation in the same run
-- The import workflow may write only `BTB L/C No.` and import `Amount` column 22. Every other workbook cell is read-only evidence for import evaluation.
-- The two import destination cells are append-only blank targets. Both must remain blank at candidate evaluation, staged-plan construction, target prevalidation, and immediately before live batch apply. The workflow must never clear, append to, merge with, or replace a populated cell.
+- The import workflow may write only `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` column 22. Every other workbook cell is read-only evidence for import evaluation.
+- The three import destination cells are append-only blank targets. All must remain blank at candidate evaluation, staged-plan construction, target prevalidation, and immediately before live batch apply. The workflow must never clear, append to, merge with, or replace a populated cell.
 - Every staged operation for either import destination must use a canonical blank `expected_pre_write_value`. If a staged plan contains a non-blank expected value, the plan is invalid and hard-blocks before apply.
 - If a destination cell is observed populated during live prevalidation after it was blank during allocation, emit `import_target_cell_already_populated`, abort the complete atomic write batch before the first mutation, and retain the observed value as discrepancy evidence. Do not convert this race into a duplicate-only outcome.
 - The only successful case involving already populated import destination cells is a duplicate proven before candidate allocation under the workbook duplicate rule. That case stages no writes and leaves every existing cell unchanged.
-- Within the matching related-export-LC family, a row where exactly one of `BTB L/C No.` and import `Amount` column 22 is blank is an invalid partial target state and hard-blocks the affected import document.
+- Within the matching related-export-LC family, a row where exactly one of `BTB L/C No.` and import `Amount` column 22 is blank is an invalid partial target state and hard-blocks the affected import document. A populated `BTB LC Issue Date` target on an otherwise candidate row also prevents new write allocation because import targets are no-overwrite cells.
 - Any matching-family row whose required export amount cannot be normalized to a positive canonical decimal hard-blocks the affected import document rather than being silently excluded.
 - A workbook row is value-eligible only when the normalized import BTB LC value is between 40% and 80% of the normalized workbook export `Amount` value, inclusive.
 - If multiple rows are value-eligible for one import BTB LC, choose the row with the highest normalized workbook export `Amount` value.

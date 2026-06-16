@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from html import escape
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
@@ -43,6 +44,7 @@ class ImportBTBLCHeaderMapping:
     up_no: int
     export_amount: int
     btb_lc_no: int
+    btb_lc_issue_date: int
     import_amount: int
 
     def as_dict(self) -> dict[str, int]:
@@ -51,6 +53,7 @@ class ImportBTBLCHeaderMapping:
             "up_no": self.up_no,
             "export_amount": self.export_amount,
             "btb_lc_no": self.btb_lc_no,
+            "btb_lc_issue_date": self.btb_lc_issue_date,
             "import_amount": self.import_amount,
         }
 
@@ -249,12 +252,24 @@ def resolve_import_btb_lc_header_mapping(
             "Back-to-Back L/C No.",
         ),
     )
+    btb_lc_issue_date = _resolve_header(
+        snapshot.headers,
+        "BTB LC Issue Date",
+        (
+            "BTB L/C Issue Date",
+            "BTB LC Issue Dt.",
+            "BTB L/C Issue Dt.",
+            "BTB LC Date",
+            "BTB L/C Date",
+        ),
+    )
     export_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=6)
     import_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=22)
     if (
         lc_sc_no is None
         or up_no is None
         or btb_lc_no is None
+        or btb_lc_issue_date is None
         or len(export_amount_headers) != 1
         or len(import_amount_headers) != 1
     ):
@@ -264,6 +279,7 @@ def resolve_import_btb_lc_header_mapping(
         up_no=up_no,
         export_amount=export_amount_headers[0],
         btb_lc_no=btb_lc_no,
+        btb_lc_issue_date=btb_lc_issue_date,
         import_amount=import_amount_headers[0],
     )
 
@@ -346,7 +362,10 @@ def execute_import_btb_lc_writes(
                 sheet_name=operation.sheet_name,
                 row_index=operation.row_index,
                 column_index=column_by_key[operation.column_key],
-                value=operation.expected_post_write_value,
+                value=_coerce_import_write_value(
+                    operation.expected_post_write_value,
+                    number_format=operation.number_format,
+                ),
                 number_format=operation.number_format,
             )
         post_probes = _collect_import_post_write_probes(
@@ -505,6 +524,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
                 f"<td>{escape(str(outcome.get('decision', '')))}</td>"
                 f"<td>{escape(str(outcome.get('filename', '')))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
+                f"<td>{escape(str(fields.get('btb_lc_date', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_value', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(fields.get('related_export_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(outcome.get('selected_row_index', '') or ''))}</td>"
@@ -533,7 +553,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
             f"<p><strong>Decision:</strong> {escape(str(report.get('overall_decision', '')))}</p>",
             f"<p><strong>Summary:</strong> {escape(json.dumps(summary, sort_keys=True))}</p>",
             "<table>",
-            "<thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>Value</th><th>Related Export LC</th><th>Row</th><th>Disposition</th></tr></thead>",
+            "<thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Related Export LC</th><th>Row</th><th>Disposition</th></tr></thead>",
             "<tbody>",
             *rows,
             "</tbody>",
@@ -675,9 +695,11 @@ def _stage_import_write_operations(
     row_index: int,
 ) -> list[WriteOperation]:
     assert document.btb_lc_number is not None
+    assert document.btb_lc_date is not None
     assert document.btb_lc_value_text is not None
     values = (
         ("btb_lc_no", document.btb_lc_number, None),
+        ("btb_lc_issue_date", document.btb_lc_date, IMPORT_BTB_LC_DATE_NUMBER_FORMAT),
         ("import_amount", document.btb_lc_value_text, IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT),
     )
     operations: list[WriteOperation] = []
@@ -729,10 +751,12 @@ def _select_candidate_row(
         export_amount = _parse_workbook_decimal(row.values.get(mapping.export_amount, ""))
         btb_value = _parse_workbook_decimal(row.values.get(mapping.import_amount, ""))
         btb_no = row.values.get(mapping.btb_lc_no, "").strip()
+        issue_date_raw = row.values.get(mapping.btb_lc_issue_date, "").strip()
         import_amount_raw = row.values.get(mapping.import_amount, "").strip()
         partial = related_match and (bool(btb_no) != bool(import_amount_raw))
         up_blank = not row.values.get(mapping.up_no, "").strip()
-        targets_blank = not btb_no and not import_amount_raw
+        issue_date_blank = not issue_date_raw
+        targets_blank = not btb_no and issue_date_blank and not import_amount_raw
         value_ratio = None
         value_eligible = False
         if export_amount is not None and document.btb_lc_value is not None and export_amount > 0:
@@ -745,6 +769,7 @@ def _select_candidate_row(
             "related_export_lc_matches": related_match,
             "up_no_blank": up_blank,
             "btb_lc_no_blank": not btb_no,
+            "btb_lc_issue_date_blank": issue_date_blank,
             "import_amount_blank": not import_amount_raw,
             "partial_import_target_state": partial,
             "reserved_in_run": row.row_index in reserved_rows,
@@ -776,6 +801,7 @@ def _select_candidate_row(
         if candidate["related_export_lc_matches"]
         and candidate["up_no_blank"]
         and candidate["btb_lc_no_blank"]
+        and candidate["btb_lc_issue_date_blank"]
         and candidate["import_amount_blank"]
         and not candidate["reserved_in_run"]
         and candidate["value_eligible_40_to_80"]
@@ -823,6 +849,7 @@ def _classify_workbook_duplicate(
         if raw_btb != document.btb_lc_number:
             continue
         import_amount = _parse_workbook_decimal(row.values.get(mapping.import_amount, ""))
+        issue_date = _normalize_date_value(row.values.get(mapping.btb_lc_issue_date, ""))
         related = _canonicalize_workbook_lc(row.values.get(mapping.lc_sc_no, ""))
         matches.append(
             {
@@ -832,8 +859,13 @@ def _classify_workbook_duplicate(
                 "related_export_lc_canonical": related,
                 "import_amount_raw": row.values.get(mapping.import_amount, ""),
                 "import_amount_canonical": str(import_amount) if import_amount is not None else None,
+                "btb_lc_issue_date_raw": row.values.get(mapping.btb_lc_issue_date, ""),
+                "btb_lc_issue_date_canonical": issue_date,
                 "matches_related_export_lc": related == document.related_export_lc_number,
                 "matches_import_amount": import_amount == document.btb_lc_value,
+                "matches_btb_lc_issue_date": (
+                    issue_date is None or issue_date == document.btb_lc_date
+                ),
             }
         )
     if not matches:
@@ -841,7 +873,9 @@ def _classify_workbook_duplicate(
     exact = [
         match
         for match in matches
-        if match["matches_related_export_lc"] and match["matches_import_amount"]
+        if match["matches_related_export_lc"]
+        and match["matches_import_amount"]
+        and match["matches_btb_lc_issue_date"]
     ]
     if len(matches) == 1 and len(exact) == 1:
         return {
@@ -1108,6 +1142,7 @@ def _normalize_header(value: str) -> str:
 def _import_column_index_by_key(mapping: ImportBTBLCHeaderMapping) -> dict[str, int]:
     return {
         "btb_lc_no": mapping.btb_lc_no,
+        "btb_lc_issue_date": mapping.btb_lc_issue_date,
         "import_amount": mapping.import_amount,
     }
 
@@ -1158,11 +1193,50 @@ def _collect_import_post_write_probes(
 
 
 def _post_write_value_matches(observed: object, expected: object) -> bool:
+    observed_date = _normalize_date_value(observed)
+    expected_date = _normalize_date_value(expected)
+    if observed_date is not None and expected_date is not None:
+        return observed_date == expected_date
     observed_decimal = _parse_workbook_decimal(observed)
     expected_decimal = _parse_workbook_decimal(expected)
     if observed_decimal is not None and expected_decimal is not None:
         return observed_decimal == expected_decimal
     return str(observed or "").strip() == str(expected or "").strip()
+
+
+def _coerce_import_write_value(value: object, *, number_format: str | None) -> object:
+    if value is None or number_format is None:
+        return value
+    normalized_format = number_format.lower()
+    if "d" not in normalized_format or "y" not in normalized_format:
+        return value
+    normalized_date = _normalize_date_value(value)
+    if normalized_date is None:
+        return value
+    return date.fromisoformat(normalized_date)
+
+
+def _normalize_date_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed_datetime = datetime.fromisoformat(text)
+        return parsed_datetime.date().isoformat()
+    except ValueError:
+        pass
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%b-%Y", "%d-%b-%y"):
+        try:
+            return datetime.strptime(text, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 
 def _summarize_outcomes(outcomes: list[dict[str, object]]) -> dict[str, int]:
