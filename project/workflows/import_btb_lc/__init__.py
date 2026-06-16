@@ -10,6 +10,7 @@ from project.workflows.import_btb_lc.workflow import (
     IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION,
     allocate_import_btb_lc_documents,
     load_import_workbook_snapshot,
+    open_import_btb_lc_report_in_browser,
     run_import_btb_lc_file_picker,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "extract_import_btb_lc_pdf",
     "extract_import_btb_lc_path",
     "load_import_workbook_snapshot",
+    "open_import_btb_lc_report_in_browser",
     "run_import_btb_lc_file_picker",
 ]

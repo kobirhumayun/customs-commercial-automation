@@ -130,6 +130,7 @@ from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadP
 from project.workflows.import_btb_lc import (
     extract_import_btb_lc_path,
     load_import_workbook_snapshot,
+    open_import_btb_lc_report_in_browser,
     run_import_btb_lc_file_picker,
 )
 from project.workflows.retention_reporting import build_retention_report
@@ -378,6 +379,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--apply-live-writes",
         action="store_true",
         help="Apply staged import writes to --workbook after live prevalidation succeeds.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--no-open-report",
+        action="store_true",
+        help="Do not open the generated HTML report after the run completes.",
     )
 
     inspect_mail_snapshot_parser = subparsers.add_parser(
@@ -2755,6 +2761,30 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
             apply_live_writes=args.apply_live_writes,
             workbook_path=args.workbook,
         )
+        summary["html_report_open_requested"] = not args.no_open_report
+        summary["html_report_opened"] = False
+        if not args.no_open_report:
+            try:
+                open_import_btb_lc_report_in_browser(
+                    html_path=Path(str(summary["html_output_path"]))
+                )
+                summary["html_report_opened"] = True
+            except Exception as exc:
+                summary.setdefault("warnings", [])
+                summary["warnings"].append(
+                    {
+                        "code": "import_report_browser_open_failed",
+                        "severity": "warning",
+                        "message": (
+                            "The import BTB LC HTML report was generated successfully, "
+                            "but the system could not open it automatically."
+                        ),
+                        "details": {
+                            "html_path": summary["html_output_path"],
+                            "error": str(exc),
+                        },
+                    }
+                )
     except (ArtifactError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

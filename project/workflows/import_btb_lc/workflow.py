@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import webbrowser
 from html import escape
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -156,6 +157,9 @@ def run_import_btb_lc_file_picker(
         "html_output_path": str(html_path.resolve()),
         "overall_decision": report["overall_decision"],
         "document_count": len(documents),
+        "decision_counts": _decision_counts(report["document_outcomes"]),
+        "write_disposition_counts": _write_disposition_counts(report["document_outcomes"]),
+        "selected_rows": _selected_row_summary(report["document_outcomes"]),
         "staged_write_operation_count": len(allocation.staged_write_plan),
         "write_execution_status": write_execution["status"],
     }
@@ -562,6 +566,13 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
             "</html>",
         ]
     )
+
+
+def open_import_btb_lc_report_in_browser(*, html_path: Path) -> None:
+    if not html_path.exists():
+        raise FileNotFoundError(str(html_path))
+    if not webbrowser.open(html_path.resolve().as_uri()):
+        raise RuntimeError(f"Browser open request was not acknowledged for {html_path}")
 
 
 def _allocate_one_document(
@@ -1247,6 +1258,54 @@ def _summarize_outcomes(outcomes: list[dict[str, object]]) -> dict[str, int]:
         "staged": sum(1 for outcome in outcomes if outcome.get("write_disposition") == "new_writes_staged"),
         "duplicate_only": sum(1 for outcome in outcomes if outcome.get("write_disposition") == "duplicate_only_noop"),
     }
+
+
+def _decision_counts(outcomes: object) -> dict[str, int]:
+    outcome_list = outcomes if isinstance(outcomes, list) else []
+    return {
+        decision: sum(
+            1
+            for outcome in outcome_list
+            if isinstance(outcome, dict) and outcome.get("decision") == decision
+        )
+        for decision in ("pass", "warning", "hard_block")
+    }
+
+
+def _write_disposition_counts(outcomes: object) -> dict[str, int]:
+    outcome_list = outcomes if isinstance(outcomes, list) else []
+    dispositions = ("new_writes_staged", "duplicate_only_noop", "not_staged")
+    return {
+        disposition: sum(
+            1
+            for outcome in outcome_list
+            if isinstance(outcome, dict) and outcome.get("write_disposition") == disposition
+        )
+        for disposition in dispositions
+    }
+
+
+def _selected_row_summary(outcomes: object) -> list[dict[str, object]]:
+    outcome_list = outcomes if isinstance(outcomes, list) else []
+    rows: list[dict[str, object]] = []
+    for outcome in outcome_list:
+        if not isinstance(outcome, dict) or outcome.get("selected_row_index") is None:
+            continue
+        fields = outcome.get("extracted_fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        rows.append(
+            {
+                "document_id": outcome.get("document_id"),
+                "filename": outcome.get("filename"),
+                "btb_lc_number": fields.get("btb_lc_number"),
+                "btb_lc_issue_date": fields.get("btb_lc_date"),
+                "btb_lc_value": fields.get("btb_lc_value"),
+                "related_export_lc_number": fields.get("related_export_lc_number"),
+                "selected_row_index": outcome.get("selected_row_index"),
+            }
+        )
+    return rows
 
 
 def _overall_decision_from_document_outcomes(

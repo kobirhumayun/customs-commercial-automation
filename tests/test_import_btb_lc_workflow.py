@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from project.cli import main
 from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
@@ -219,21 +220,23 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
 
             stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                exit_code = main(
-                    [
-                        "run-import-btb-lc-file-picker",
-                        "--input",
-                        str(input_dir),
-                        "--output",
-                        str(output_dir),
-                        "--workbook-json",
-                        str(workbook_path),
-                        "--run-id",
-                        "run-import-test",
-                    ]
-                )
-
+            with patch("project.cli.open_import_btb_lc_report_in_browser") as open_mock:
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-import-btb-lc-file-picker",
+                            "--input",
+                            str(input_dir),
+                            "--output",
+                            str(output_dir),
+                            "--workbook-json",
+                            str(workbook_path),
+                            "--run-id",
+                            "run-import-test",
+                        ]
+                    )
+                open_mock.assert_called_once()
+                opened_path = Path(open_mock.call_args.kwargs["html_path"])
             summary = json.loads(stdout.getvalue())
             report = json.loads(
                 (output_dir / "run-import-test.import-btb-lc.workflow.json").read_text(encoding="utf-8")
@@ -241,12 +244,93 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             html = (output_dir / "run-import-test.import-btb-lc.workflow.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
+        self.assertEqual(opened_path.name, "run-import-test.import-btb-lc.workflow.html")
         self.assertEqual(summary["overall_decision"], "pass")
+        self.assertTrue(summary["html_report_open_requested"])
+        self.assertTrue(summary["html_report_opened"])
         self.assertTrue(summary["html_output_path"].endswith(".html"))
+        self.assertEqual(summary["decision_counts"], {"pass": 1, "warning": 0, "hard_block": 0})
+        self.assertEqual(summary["write_disposition_counts"]["new_writes_staged"], 1)
+        self.assertEqual(summary["selected_rows"][0]["selected_row_index"], 3)
         self.assertEqual(report["summary"]["staged"], 1)
         self.assertEqual(report["write_execution"]["status"], "not_requested")
         self.assertEqual(len(report["staged_write_plan"]), 3)
         self.assertIn("0742260401049", html)
+
+    def test_cli_file_picker_can_skip_report_browser_open(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            (input_dir / "0742260401049.pdf.import-btb-lc.json").write_text(
+                json.dumps(_artifact(path=str(input_dir / "0742260401049.pdf"))),
+                encoding="utf-8",
+            )
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch("project.cli.open_import_btb_lc_report_in_browser") as open_mock:
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-import-btb-lc-file-picker",
+                            "--input",
+                            str(input_dir),
+                            "--output",
+                            str(output_dir),
+                            "--workbook-json",
+                            str(workbook_path),
+                            "--run-id",
+                            "run-import-test",
+                            "--no-open-report",
+                        ]
+                    )
+                open_mock.assert_not_called()
+            summary = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(summary["html_report_open_requested"])
+        self.assertFalse(summary["html_report_opened"])
+
+    def test_cli_file_picker_reports_browser_open_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            (input_dir / "0742260401049.pdf.import-btb-lc.json").write_text(
+                json.dumps(_artifact(path=str(input_dir / "0742260401049.pdf"))),
+                encoding="utf-8",
+            )
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch(
+                "project.cli.open_import_btb_lc_report_in_browser",
+                side_effect=RuntimeError("browser unavailable"),
+            ):
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-import-btb-lc-file-picker",
+                            "--input",
+                            str(input_dir),
+                            "--output",
+                            str(output_dir),
+                            "--workbook-json",
+                            str(workbook_path),
+                            "--run-id",
+                            "run-import-test",
+                        ]
+                    )
+            summary = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(summary["html_report_opened"])
+        self.assertEqual(summary["warnings"][0]["code"], "import_report_browser_open_failed")
 
 
 def _document(artifact: dict, *, snapshot_index: int = 0):
