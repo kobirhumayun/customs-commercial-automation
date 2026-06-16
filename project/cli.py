@@ -50,7 +50,7 @@ from project.reporting.persistence import (
 )
 from project.rules import load_rule_pack
 from project.storage import Win32ComAttachmentContentProvider, write_json
-from project.utils.ids import build_saved_document_id
+from project.utils.ids import build_run_id, build_saved_document_id
 from project.utils.json import pretty_json_dumps, to_jsonable
 from project.utils.time import utc_timestamp, validate_timezone
 from project.workbook import (
@@ -127,7 +127,11 @@ from project.workflows.run_handoff_export import build_run_handoff_export
 from project.workflows.run_summary_export import build_run_summary_export
 from project.workflows.snapshot_inspection import summarize_mail_snapshot
 from project.workflows.ud_ip_exp.providers import JsonManifestUDDocumentPayloadProvider
-from project.workflows.import_btb_lc import extract_import_btb_lc_path
+from project.workflows.import_btb_lc import (
+    extract_import_btb_lc_path,
+    load_import_workbook_snapshot,
+    run_import_btb_lc_file_picker,
+)
 from project.workflows.retention_reporting import build_retention_report
 from project.workflows.retention_summary import build_retention_summary
 from project.workflows.summary_catalog import build_summary_catalog
@@ -236,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_execute_mail_moves(args)
     if args.command == "extract-import-btb-lc":
         return _handle_extract_import_btb_lc(args)
+    if args.command == "run-import-btb-lc-file-picker":
+        return _handle_run_import_btb_lc_file_picker(args)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -333,6 +339,45 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         required=True,
         help="Directory for deterministic versioned JSON verification artifacts.",
+    )
+
+    run_import_btb_lc_parser = subparsers.add_parser(
+        "run-import-btb-lc-file-picker",
+        help=(
+            "Run import BTB LC extraction, workbook allocation, and report generation "
+            "from local PDFs or extraction JSON artifacts. Read-only unless --apply-live-writes is supplied."
+        ),
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Source PDF, extraction JSON, or directory. Source files are never modified.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Directory for import workflow JSON report artifacts.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--workbook-json",
+        type=Path,
+        help="Optional workbook snapshot JSON manifest for deterministic verification.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--workbook",
+        type=Path,
+        help="Optional live workbook path. Used read-only unless --apply-live-writes is supplied.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--run-id",
+        help="Optional stable run id for repeatable verification output names.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--apply-live-writes",
+        action="store_true",
+        help="Apply staged import writes to --workbook after live prevalidation succeeds.",
     )
 
     inspect_mail_snapshot_parser = subparsers.add_parser(
@@ -2690,6 +2735,30 @@ def _handle_extract_import_btb_lc(args: argparse.Namespace) -> int:
         },
         "documents": results,
     }
+    print(pretty_json_dumps(summary), end="")
+    return 0
+
+
+def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
+    try:
+        if args.apply_live_writes and args.workbook is None:
+            raise ValueError("--apply-live-writes requires --workbook")
+        workbook_snapshot = load_import_workbook_snapshot(
+            workbook_json=args.workbook_json,
+            workbook_path=args.workbook,
+        )
+        summary = run_import_btb_lc_file_picker(
+            input_path=args.input,
+            output_directory=args.output,
+            workbook_snapshot=workbook_snapshot,
+            run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
+            apply_live_writes=args.apply_live_writes,
+            workbook_path=args.workbook,
+        )
+    except (ArtifactError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     print(pretty_json_dumps(summary), end="")
     return 0
 
