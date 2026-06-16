@@ -246,5 +246,57 @@
     "seller_pi_numbers": [
       "KYL/26/0016"
     ]
+  },
+  "411012567799-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-03-08",
+    "btb_lc_number": "411012567799-L",
+    "btb_lc_value": "3271.40",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "a747a1255746dbf1047299be7062c4573c85128906828fbd80e70cf8ce612860",
+    "related_export_lc_number": "LC-1475260400109",
+    "seller_pi_numbers": [
+      "BTL/26/1413"
+    ]
+  },
+  "411012567824-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-03-05",
+    "btb_lc_number": "411012567824-L",
+    "btb_lc_value": "117257.50",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "258fd352cc9f5bb17f8defea3c0fff259f4cbea0082dfc289683002b93bc6426",
+    "related_export_lc_number": "LC-DPCBD1172597",
+    "seller_pi_numbers": [
+      "BTL/26/1415"
+    ]
+  },
+  "411012572435-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-03-11",
+    "btb_lc_number": "411012572435-L",
+    "btb_lc_value": "6053",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "8ac7cdfa98d6e2ab2914b2c708dd8e301e2b917461bb1c9815a17cb120332593",
+    "related_export_lc_number": "LC-DPCBD1173267",
+    "seller_pi_numbers": [
+      "BTL/26/1583"
+    ]
+  },
+  "411012612204-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-05-07",
+    "btb_lc_number": "411012612204-L",
+    "btb_lc_value": "3879.65",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "c64555396f7a82c232887180ee042fa55fda7026485a90df3abc8552aa72f771",
+    "related_export_lc_number": "LC-0000201260400909",
+    "seller_pi_numbers": [
+      "BTL/26/3195"
+    ]
   }
 }

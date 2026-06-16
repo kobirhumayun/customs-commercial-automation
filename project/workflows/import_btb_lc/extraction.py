@@ -483,7 +483,7 @@ def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
 def _collect_related_export_lc_candidates(
     pages: list[ExtractedPage],
 ) -> list[FieldCandidate]:
-    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT\b)"
+    date_boundary = r"\s*[,;']?\s*(?=DATE(?:D)?\b|DAT\b|DT\b|DTED\b)"
     identifier = r"([A-Z0-9][A-Z0-9 /-]{2,38}?[A-Z0-9])"
     brac_candidate = _collect_brac_primary_related_export_lc_candidate(
         pages=pages,
@@ -492,6 +492,14 @@ def _collect_related_export_lc_candidates(
     )
     if brac_candidate is not None:
         return [brac_candidate]
+
+    scb_candidates = _collect_scb_related_export_lc_candidates(
+        pages=pages,
+        identifier=identifier,
+        date_boundary=date_boundary,
+    )
+    if scb_candidates:
+        return scb_candidates
 
     patterns = (
         re.compile(
@@ -525,16 +533,47 @@ def _collect_related_export_lc_candidates(
         compact = _compact_text(page.text)
         for pattern in patterns:
             for match in pattern.finditer(compact):
-                candidates.append(
-                    FieldCandidate(
-                        raw=match.group(1),
-                        page_number=page.page_number,
-                        matched_text=match.group(0),
-                        extraction_method=page.extraction_method,
-                        confidence=_matched_token_confidence(page, match.group(1)),
-                        hint="LC",
-                    )
-                )
+                candidates.append(_field_candidate_from_match(page, match))
+    return _dedupe_candidates(candidates)
+
+
+def _collect_scb_related_export_lc_candidates(
+    *,
+    pages: list[ExtractedPage],
+    identifier: str,
+    date_boundary: str,
+) -> list[FieldCandidate]:
+    if not _pages_identify_scb(pages):
+        return []
+    same_page_pattern = re.compile(
+        r"(?is)\bEXPORT\s+CONTRACT\s+NUMBER\s*/\s*EXPORT\s+"
+        r"(?:L\s*/\s*C|LC)\s+NUMBER\s*:\s*"
+        + identifier
+        + date_boundary
+    )
+    label_only_pattern = re.compile(
+        r"(?is)\bEXPORT\s+CONTRACT\s+NUMBER\s*/\s*EXPORT\s+"
+        r"(?:L\s*/\s*C|LC)\s+NUMBER\s*:\s*$"
+    )
+    continuation_pattern = re.compile(
+        r"(?is)^\s*(?:[\u017dZ]\s*)?(?:STANDARD\s+~?\s*CHARTERE?D\s*)?"
+        + identifier
+        + date_boundary
+    )
+    candidates = []
+    ordered_pages = sorted(pages, key=lambda page: page.page_number)
+    for page in ordered_pages:
+        compact = _compact_text(page.text)
+        for match in same_page_pattern.finditer(compact):
+            candidates.append(_field_candidate_from_match(page, match))
+    for current_page, next_page in zip(ordered_pages, ordered_pages[1:]):
+        if current_page.page_number + 1 != next_page.page_number:
+            continue
+        if label_only_pattern.search(_compact_text(current_page.text)) is None:
+            continue
+        match = continuation_pattern.search(_compact_text(next_page.text))
+        if match is not None:
+            candidates.append(_field_candidate_from_match(next_page, match))
     return _dedupe_candidates(candidates)
 
 
@@ -605,11 +644,36 @@ def _collect_brac_primary_related_export_lc_candidate(
     )
 
 
+def _field_candidate_from_match(
+    page: ExtractedPage,
+    match: re.Match[str],
+) -> FieldCandidate:
+    return FieldCandidate(
+        raw=match.group(1),
+        page_number=page.page_number,
+        matched_text=match.group(0),
+        extraction_method=page.extraction_method,
+        confidence=_matched_token_confidence(page, match.group(1)),
+        hint="LC",
+    )
+
+
 def _pages_identify_brac(pages: list[ExtractedPage]) -> bool:
     compact = _compact_text(" ".join(page.text for page in pages))
     return bool(
         re.search(r"(?<!\d)3085\d{9}(?!\d)", compact)
         or re.search(r"(?i)\b(?:BRAKBDDH\w*|BRAC\s+BANK\s+PLC)\b", compact)
+    )
+
+
+def _pages_identify_scb(pages: list[ExtractedPage]) -> bool:
+    compact = _compact_text(" ".join(page.text for page in pages))
+    return bool(
+        re.search(r"(?<![A-Z0-9])41101\d{7}-L(?![A-Z0-9])", compact)
+        or re.search(
+            r"(?i)\b(?:SCBLBDD\w*|STANDARD\s+CHARTERED\s+BANK)\b",
+            compact,
+        )
     )
 
 

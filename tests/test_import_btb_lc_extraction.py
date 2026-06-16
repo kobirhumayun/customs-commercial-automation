@@ -144,6 +144,18 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
     def test_411012525148_l(self) -> None:
         self._assert_reported_pdf("411012525148-L.pdf")
 
+    def test_411012567799_l(self) -> None:
+        self._assert_reported_pdf("411012567799-L.pdf")
+
+    def test_411012567824_l(self) -> None:
+        self._assert_reported_pdf("411012567824-L.pdf")
+
+    def test_411012572435_l(self) -> None:
+        self._assert_reported_pdf("411012572435-L.pdf")
+
+    def test_411012612204_l(self) -> None:
+        self._assert_reported_pdf("411012612204-L.pdf")
+
     def _assert_reported_pdf(self, filename: str) -> None:
         source_path = self.sample_root / filename
         if not source_path.exists():
@@ -475,6 +487,74 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                     artifact["fields"]["related_export_lc_number"]["canonical"],
                     "LC-0000223260400954",
                 )
+
+    def test_scb_related_export_lc_continues_on_next_page(self) -> None:
+        provider = _StaticPageProvider(
+            embedded=[
+                ExtractedPage(
+                    1,
+                    _sample_text(
+                        btb_number="411012567799-L",
+                        pi_text="BTL/26/1413",
+                        related_text=(
+                            "F) EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER:"
+                        ),
+                    ).replace(
+                        "City Bank PLC. Trade Services Division",
+                        "Standard Chartered Bank",
+                    ),
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+                ExtractedPage(
+                    2,
+                    "Standard Chartered 1475260400109 DATED: 05.01.2026",
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+            ],
+            ocr=[],
+        )
+
+        artifact = _extract_synthetic(
+            "",
+            filename="411012567799-L.pdf",
+            provider=provider,
+        )
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["related_export_lc_number"]["canonical"],
+            "LC-1475260400109",
+        )
+        self.assertEqual(
+            artifact["fields"]["related_export_lc_number"]["page_number"],
+            2,
+        )
+
+    def test_scb_related_export_lc_accepts_dted_boundary(self) -> None:
+        artifact = _extract_synthetic(
+            _sample_text(
+                btb_number="411012612204-L",
+                pi_text="BTL/26/3195",
+                related_text=(
+                    "EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER: "
+                    "0000201260400909 DTED:08.03.2026"
+                ),
+            ).replace(
+                "City Bank PLC. Trade Services Division",
+                "Standard Chartered Bank",
+            ),
+            filename="411012612204-L.pdf",
+        )
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["related_export_lc_number"]["canonical"],
+            "LC-0000201260400909",
+        )
 
     def test_brac_combined_export_lc_label_does_not_capture_with(self) -> None:
         cases = {
