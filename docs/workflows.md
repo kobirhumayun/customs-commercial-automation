@@ -800,6 +800,8 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - Bundled Windows CMD launchers:
   - Current Full Path: `scripts/run_import_btb_lc_current_live.cmd`
   - File Picker Path: `scripts/run_import_btb_lc_file_picker_live.cmd`
+- Both bundled launchers read `import_document_root` from the local config; this root is required and must not be a hard-coded launcher default.
+- Current Full Path mail movement uses `import_destination_success_entry_id` for the dedicated Outlook `Import` folder. The shared `destination_success_entry_id` key remains unchanged for finalized workflows until the broader folder-key refactor is approved.
 - Persist `launcher_path=current_full` or `launcher_path=file_picker` in run metadata and all import mail outcomes.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
 - For the `File Picker Path`, deterministic snapshot ordering is ascending normalized absolute file path; `snapshot_index`, synthetic `mail_id`, and run-level `mail_iteration_order` must derive from that sorted order, while file timestamps are lineage evidence only and do not affect ordering.
@@ -900,7 +902,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
 - automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
 - if the HTML report is generated successfully but the browser cannot be opened automatically, append run-scoped warning discrepancy `import_report_browser_open_failed`, atomically refresh run metadata, and keep mail decisions/moves unchanged
-- successfully processed import-team emails with staged writes move to `Import` only after the batch workbook-write phase commits and run-report artifacts are persisted
+- successfully processed import-team emails with staged writes move to the configured `import_destination_success_entry_id` Outlook `Import` folder only after the batch workbook-write phase commits and run-report artifacts are persisted
 - duplicate-only import BTB LC PDFs inside a mixed mail do not block mail movement; the mail may still move when every import BTB LC in that mail finishes as either duplicate-only/no-write or successful non-hard-block
 - a mail containing only duplicate-only/no-write import BTB LC PDFs may move to `Import` after run-report artifacts are persisted without requiring write-phase commit, because its staged write plan is empty
 - a run with no staged writes retains the shared zero-write write-phase behavior; duplicate-only move eligibility is established by `write_disposition=duplicate_only_noop`, not by fabricating a zero-operation workbook commit

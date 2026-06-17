@@ -537,8 +537,6 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                                 str(root / "attachments"),
                                 "--output",
                                 str(root / "reports"),
-                                "--import-document-root",
-                                str(root / "import_docs"),
                                 "--workbook-json",
                                 str(workbook_json),
                                 "--run-id",
@@ -547,11 +545,93 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                         )
                     open_mock.assert_called_once()
             summary = json.loads(stdout.getvalue())
+            report = json.loads(
+                (root / "reports" / "run-current-test.import-btb-lc.current-full.json").read_text(encoding="utf-8")
+            )
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(summary["launcher_path"], "current_full")
         self.assertEqual(summary["overall_decision"], "pass")
         self.assertTrue(summary["html_report_opened"])
+        self.assertTrue(
+            str(report["source_document_acquisition"][0]["promotion"]["destination_path"]).startswith(
+                str(root / "import_docs")
+            )
+        )
+
+    def test_cli_current_full_moves_to_import_specific_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks", "attachments", "import_docs"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = _config_path(root)
+            snapshot_path = root / "snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "entry-1",
+                            "received_time": "2026-06-16T08:00:00+06:00",
+                            "subject_raw": "Fabric BTB LC",
+                            "sender_address": "import@example.com",
+                            "attachments": [{"attachment_name": "0742260401049.pdf"}],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "attachments" / "0742260401049.pdf").write_bytes(b"%PDF-1.4\nsynthetic\n")
+            workbook_json = root / "workbook.json"
+            duplicate_snapshot = _workbook_snapshot(
+                rows=[
+                    _row(
+                        3,
+                        lc="LC-1883260400042",
+                        export_amount="100000",
+                        btb="0742260401049",
+                        import_amount="50000",
+                    )
+                ]
+            )
+            workbook_json.write_text(json.dumps(_workbook_manifest(duplicate_snapshot)), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch(
+                "project.workflows.import_btb_lc.workflow.extract_import_btb_lc_pdf",
+                return_value=_artifact(path=str(root / "attachments" / "0742260401049.pdf")),
+            ):
+                with patch("project.cli.open_import_btb_lc_report_in_browser"):
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "run-import-btb-lc-current",
+                                "--config",
+                                str(config_path),
+                                "--snapshot-json",
+                                str(snapshot_path),
+                                "--attachment-directory",
+                                str(root / "attachments"),
+                                "--output",
+                                str(root / "reports"),
+                                "--workbook-json",
+                                str(workbook_json),
+                                "--run-id",
+                                "run-current-test",
+                                "--move-mails",
+                                "--simulate-mail-moves",
+                                "--no-open-report",
+                            ]
+                        )
+            summary = json.loads(stdout.getvalue())
+            report = json.loads(
+                (root / "reports" / "run-current-test.import-btb-lc.current-full.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["mail_move_status"], "completed")
+        self.assertEqual(report["mail_move"]["operations"][0]["destination_folder"], "import-dst-folder")
 
 
 def _document(artifact: dict, *, snapshot_index: int = 0):
@@ -638,8 +718,8 @@ def _row(
     )
 
 
-def _workbook_manifest() -> dict:
-    snapshot = _workbook_snapshot()
+def _workbook_manifest(snapshot: WorkbookSnapshot | None = None) -> dict:
+    snapshot = snapshot or _workbook_snapshot()
     return {
         "sheet_name": snapshot.sheet_name,
         "headers": [
@@ -723,6 +803,8 @@ def _config_path(root: Path) -> Path:
                 "print_enabled = true",
                 'source_working_folder_entry_id = "src-folder"',
                 'destination_success_entry_id = "dst-folder"',
+                'import_destination_success_entry_id = "import-dst-folder"',
+                f'import_document_root = "{(root / "import_docs").as_posix()}"',
             ]
         ),
         encoding="utf-8",

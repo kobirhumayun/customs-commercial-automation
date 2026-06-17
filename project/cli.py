@@ -408,7 +408,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_import_btb_lc_current_parser.add_argument("--config", type=Path, required=True, help="Path to the local TOML config.")
     run_import_btb_lc_current_parser.add_argument("--output", type=Path, required=True, help="Directory for current-full import reports/evidence.")
-    run_import_btb_lc_current_parser.add_argument("--import-document-root", type=Path, required=True, help="Canonical import document storage root.")
+    run_import_btb_lc_current_parser.add_argument(
+        "--import-document-root",
+        type=Path,
+        help="Canonical import document storage root. Defaults to config import_document_root.",
+    )
     run_import_btb_lc_current_parser.add_argument("--snapshot-json", type=Path, help="Optional deterministic mail snapshot manifest.")
     run_import_btb_lc_current_parser.add_argument("--live-outlook-snapshot", action="store_true", help="Load source mails from the configured Outlook working folder.")
     run_import_btb_lc_current_parser.add_argument("--attachment-directory", type=Path, help="Directory containing attachment files for --snapshot-json verification.")
@@ -2850,6 +2854,11 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
             raise ValueError("Current Full Path requires --snapshot-json or --live-outlook-snapshot")
         if args.move_mails and args.live_mail_moves and args.simulate_mail_moves:
             raise ValueError("Choose either --live-mail-moves or --simulate-mail-moves, not both")
+        import_document_root = _resolve_import_document_root(args.import_document_root, config)
+        destination_folder_entry_id = _resolve_import_destination_success_entry_id(
+            config,
+            require=args.move_mails,
+        )
 
         mail_snapshot = (
             JsonManifestMailSnapshotProvider(args.snapshot_json).load_snapshot(
@@ -2899,10 +2908,10 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
             attachment_provider=attachment_provider,
             output_directory=args.output,
             workbook_snapshot=workbook_snapshot,
-            import_document_root=args.import_document_root,
+            import_document_root=import_document_root,
             run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
             source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")).strip(),
-            destination_folder_entry_id=str(config.values.get("destination_success_entry_id", "")).strip(),
+            destination_folder_entry_id=destination_folder_entry_id,
             apply_live_writes=args.apply_live_writes,
             workbook_path=workbook_path,
             move_mails=args.move_mails,
@@ -2938,6 +2947,31 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
 
     print(pretty_json_dumps(summary), end="")
     return 0
+
+
+def _resolve_import_document_root(argument_value: Path | None, config) -> Path:
+    if argument_value is not None:
+        return argument_value
+    configured = str(config.values.get("import_document_root", "")).strip()
+    if not configured:
+        raise ValueError(
+            "Import BTB LC Current Full Path requires --import-document-root or "
+            "config key import_document_root."
+        )
+    return Path(configured)
+
+
+def _resolve_import_destination_success_entry_id(config, *, require: bool) -> str:
+    configured = str(config.values.get("import_destination_success_entry_id", "")).strip()
+    if configured:
+        return configured
+    if require:
+        raise ValueError(
+            "Import BTB LC mail movement requires config key "
+            "import_destination_success_entry_id for the Outlook Import folder. "
+            "The shared destination_success_entry_id remains reserved for other workflows."
+        )
+    return str(config.values.get("destination_success_entry_id", "")).strip()
 
 
 def _handle_inspect_document_text(args: argparse.Namespace) -> int:

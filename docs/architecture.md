@@ -721,7 +721,7 @@ Optional placeholders may be used if a deployment intentionally wants generated 
 Workflow modules must declare their own required key list (for example import document storage root, destination folder mapping, or worksheet mapping), and startup validation must fail if any required key is absent or malformed.
 For `import_btb_lc`, this workflow-specific key set must distinguish between the two launcher paths:
 - both paths require `import_document_root`, `import_amount_currency`, and the write-capable workbook keys
-- `Current Full Path` additionally requires `outlook_profile` plus Outlook folder mapping for intake/move operations and a valid import keyword module
+- `Current Full Path` additionally requires `outlook_profile`, shared Outlook intake folder mapping, `import_destination_success_entry_id` for the dedicated `Import` destination folder, and a valid import keyword module
 - `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
 - Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
 

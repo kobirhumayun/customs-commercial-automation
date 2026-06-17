@@ -4,7 +4,7 @@ param(
     [string]$Config = "D:\customs-automation\workflow.toml",
     [string]$ImportDocumentRoot = "",
     [string]$OutputDirectory = "",
-    [string]$LauncherLogRoot = "D:\customs-automation\reports\launcher_logs",
+    [string]$LauncherLogRoot = "",
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [string[]]$InputPath = @(),
     [switch]$NoOpenReport,
@@ -215,15 +215,23 @@ if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
 
 $configReportRoot = Get-TomlStringValue -Path $Config -Key "report_root"
 if (-not $configReportRoot) {
-    $configReportRoot = "D:\customs-automation\reports"
+    Write-Host "Config key report_root is required for import BTB LC launchers." -ForegroundColor Red
+    Finish-Script 1
 }
 $configImportRoot = Get-TomlStringValue -Path $Config -Key "import_document_root"
 if (-not $ImportDocumentRoot) {
-    $ImportDocumentRoot = if ($configImportRoot) { $configImportRoot } else { "D:\customs-automation\import-documents" }
+    if (-not $configImportRoot) {
+        Write-Host "Config key import_document_root is required for import BTB LC launchers." -ForegroundColor Red
+        Finish-Script 1
+    }
+    $ImportDocumentRoot = $configImportRoot
 }
 if (-not $OutputDirectory) {
     $reportFolderName = if ($LauncherPath -eq "current_full") { "BTB LC Current Live" } else { "BTB LC File Picker Live" }
     $OutputDirectory = Join-Path $configReportRoot $reportFolderName
+}
+if (-not $LauncherLogRoot) {
+    $LauncherLogRoot = Join-Path $configReportRoot "launcher_logs"
 }
 
 New-Item -ItemType Directory -Force -Path $ImportDocumentRoot | Out-Null
