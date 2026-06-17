@@ -18,6 +18,7 @@ from project.workflows.import_btb_lc.workflow import (
     allocate_import_btb_lc_documents,
     evaluate_import_mail_relevance,
     load_import_relevance_keywords,
+    render_import_btb_lc_html_report,
     run_import_btb_lc_current_full,
     resolve_import_btb_lc_header_mapping,
 )
@@ -30,6 +31,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(mapping)
         assert mapping is not None
         self.assertEqual(mapping.lc_sc_no, 4)
+        self.assertEqual(mapping.sl_no, 1)
         self.assertEqual(mapping.up_no, 7)
         self.assertEqual(mapping.export_amount, 6)
         self.assertEqual(mapping.btb_lc_no, 21)
@@ -57,6 +59,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
 
         self.assertEqual(outcome["decision"], "pass")
         self.assertEqual(outcome["selected_row_index"], 4)
+        self.assertEqual(outcome["selected_sl_no"], "2")
         self.assertEqual(len(result.staged_write_plan), 3)
         self.assertEqual(
             [operation.column_key for operation in result.staged_write_plan],
@@ -260,10 +263,45 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(summary["decision_counts"], {"pass": 1, "warning": 0, "hard_block": 0})
         self.assertEqual(summary["write_disposition_counts"]["new_writes_staged"], 1)
         self.assertEqual(summary["selected_rows"][0]["selected_row_index"], 3)
+        self.assertEqual(summary["selected_rows"][0]["selected_sl_no"], "1")
         self.assertEqual(report["summary"]["staged"], 1)
         self.assertEqual(report["write_execution"]["status"], "not_requested")
         self.assertEqual(len(report["staged_write_plan"]), 3)
         self.assertIn("0742260401049", html)
+        self.assertIn("<th>SL.No.</th>", html)
+        self.assertNotIn("<th>Row</th>", html)
+        self.assertIn("05/05/2026", html)
+        self.assertIn("<h2>Snapshot</h2>", html)
+        self.assertIn("<h2>Summary</h2>", html)
+        self.assertIn("Generated at:", html)
+        self.assertIn("<td>1883260400042</td>", html)
+        self.assertNotIn("<td>LC-1883260400042</td>", html)
+
+    def test_import_report_uses_sl_no_as_text_not_row_sequence(self) -> None:
+        snapshot = _workbook_snapshot(
+            rows=[_row(11, sl_no="633.0", lc="LC-1883260400042", export_amount="100000")]
+        )
+        document = _document(_artifact(value="50000"))
+
+        result = allocate_import_btb_lc_documents(
+            documents=[document],
+            workbook_snapshot=snapshot,
+            run_id="run-import-test",
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(
+            {
+                **result.workflow_report,
+                "completed_at_utc": "2026-06-20T10:30:00Z",
+                "state_timezone": "Asia/Dhaka",
+            }
+        )
+
+        self.assertEqual(outcome["selected_row_index"], 11)
+        self.assertEqual(outcome["selected_sl_no"], "633")
+        self.assertIn("<td>633</td>", html)
+        self.assertNotIn("<td>11</td>", html)
+        self.assertIn("20/06/2026 04:30:00 PM (Asia/Dhaka)", html)
 
     def test_cli_file_picker_can_skip_report_browser_open(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -686,6 +724,7 @@ def _workbook_snapshot(*, rows: list[WorkbookRow] | None = None) -> WorkbookSnap
     return WorkbookSnapshot(
         sheet_name="Sheet1",
         headers=[
+            WorkbookHeader(column_index=1, text="SL.No."),
             WorkbookHeader(column_index=4, text="L/C & S/C No."),
             WorkbookHeader(column_index=6, text="Amount"),
             WorkbookHeader(column_index=7, text="UP No."),
@@ -700,6 +739,7 @@ def _workbook_snapshot(*, rows: list[WorkbookRow] | None = None) -> WorkbookSnap
 def _row(
     row_index: int,
     *,
+    sl_no: str | None = None,
     lc: str,
     export_amount: str,
     up_no: str = "",
@@ -710,6 +750,7 @@ def _row(
     return WorkbookRow(
         row_index=row_index,
         values={
+            1: str(row_index - 2 if sl_no is None else sl_no),
             4: lc,
             6: export_amount,
             7: up_no,

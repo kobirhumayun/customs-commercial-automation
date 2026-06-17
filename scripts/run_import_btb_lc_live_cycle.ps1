@@ -218,6 +218,11 @@ if (-not $configReportRoot) {
     Write-Host "Config key report_root is required for import BTB LC launchers." -ForegroundColor Red
     Finish-Script 1
 }
+$configStateTimezone = Get-TomlStringValue -Path $Config -Key "state_timezone"
+if (-not $configStateTimezone) {
+    Write-Host "Config key state_timezone is required for import BTB LC launchers." -ForegroundColor Red
+    Finish-Script 1
+}
 $configImportRoot = Get-TomlStringValue -Path $Config -Key "import_document_root"
 if (-not $ImportDocumentRoot) {
     if (-not $configImportRoot) {
@@ -245,6 +250,7 @@ New-Item -ItemType File -Force -Path $script:LauncherLogPath | Out-Null
 Write-LauncherLine "Workflow: import_btb_lc" "Green"
 Write-LauncherLine "Launcher path: $LauncherPath" "Green"
 Write-LauncherLine "Config: $Config" "Green"
+Write-LauncherLine "State timezone: $configStateTimezone" "Green"
 Write-LauncherLine "Import document root: $ImportDocumentRoot" "Green"
 Write-LauncherLine "Output directory: $OutputDirectory" "Green"
 Write-LauncherLine "Launcher log: $script:LauncherLogPath" "Green"
@@ -304,6 +310,7 @@ try {
             "--output", $OutputDirectory,
             "--workbook", $workbookPath,
             "--import-document-root", $ImportDocumentRoot,
+            "--state-timezone", $configStateTimezone,
             "--apply-live-writes"
         )
         foreach ($selectedPath in $selectedPaths) {

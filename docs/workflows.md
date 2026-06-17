@@ -890,7 +890,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - if multiple remaining rows are still tied after the highest-percentage key, the lowest workbook row index wins
 - one import LC maps to one row only
 - if an extracted import BTB LC does not qualify any workbook row, that import BTB LC is hard-blocked and the report must include the failed candidate evidence
-- each PDF must emit one `import_document_outcome` object containing classification/disposition, source identity/hash, storage decision/path, extracted raw and canonical fields with provenance/confidence, duplicate classification, ordered candidate evidence, selected row, document decision, discrepancy codes, warning codes, and staged write-operation ids
+- each PDF must emit one `import_document_outcome` object containing classification/disposition, source identity/hash, storage decision/path, extracted raw and canonical fields with provenance/confidence, duplicate classification, ordered candidate evidence, selected `SL.No.` plus row-index audit trace, document decision, discrepancy codes, warning codes, and staged write-operation ids
 - the mail-level extracted identifier arrays remain backward-compatible projections from `import_document_outcomes` and are not authoritative relationship records
 - mail decision is the highest document severity; if any document is `hard_block`, discard all tentative writes for that mail
 
@@ -900,6 +900,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - emit the standard run-level and mail-level JSON artifacts plus an HTML report that may summarize affected export-LC groups
 - no separate import-specific JSON summary artifact is required beyond the standard `run_metadata.json` and `mail_outcomes.jsonl`; the canonical import-specific summary artifact is `import_btb_lc_report.html`
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
+- import HTML report dates display as `DD/MM/YYYY`; selected workbook targets display `SL.No.` from the workbook as text rather than workbook row index; metadata and summary follow the `bb_dashboard_verification` report layout with a `Generated at: DD/MM/YYYY hh:mm:ss AM/PM (<state_timezone>)` timestamp resolved from config; Related Export LC display omits a leading `LC-` prefix while canonical JSON values remain unchanged
 - automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
 - if the HTML report is generated successfully but the browser cannot be opened automatically, append run-scoped warning discrepancy `import_report_browser_open_failed`, atomically refresh run metadata, and keep mail decisions/moves unchanged
 - successfully processed import-team emails with staged writes move to the configured `import_destination_success_entry_id` Outlook `Import` folder only after the batch workbook-write phase commits and run-report artifacts are persisted

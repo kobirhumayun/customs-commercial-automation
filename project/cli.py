@@ -389,6 +389,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional stable run id for repeatable verification output names.",
     )
     run_import_btb_lc_parser.add_argument(
+        "--state-timezone",
+        default="Asia/Dhaka",
+        help="Timezone name for import HTML report display timestamps.",
+    )
+    run_import_btb_lc_parser.add_argument(
         "--apply-live-writes",
         action="store_true",
         help="Apply staged import writes to --workbook after live prevalidation succeeds.",
@@ -2805,6 +2810,7 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
             workbook_snapshot=workbook_snapshot,
             run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
             import_document_root=args.import_document_root,
+            state_timezone=args.state_timezone,
             apply_live_writes=args.apply_live_writes,
             workbook_path=args.workbook,
         )
@@ -2910,6 +2916,7 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
             workbook_snapshot=workbook_snapshot,
             import_document_root=import_document_root,
             run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
+            state_timezone=config.state_timezone,
             source_folder_entry_id=str(config.values.get("source_working_folder_entry_id", "")).strip(),
             destination_folder_entry_id=destination_folder_entry_id,
             apply_live_writes=args.apply_live_writes,

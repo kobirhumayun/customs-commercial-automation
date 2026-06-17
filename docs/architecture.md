@@ -566,7 +566,7 @@ Required fields:
 For `import_btb_lc` File Picker Path, one selected PDF file = one synthetic mail-level unit. Its construction must be owned by an import-specific adapter; finalized Outlook snapshot providers and their shared model behavior must remain unchanged.
 
 ### `ImportDocumentOutcome` (`import_btb_lc` only)
-One record represents one processed PDF and is the authoritative relationship boundary for extracted BTB number/date/value/currency, ordered seller PI collection, related export LC, source provenance, duplicate classification, workbook candidate evidence, selected row, document decision, and write-operation ids. Mail-level identifier arrays are backward-compatible projections only.
+One record represents one processed PDF and is the authoritative relationship boundary for extracted BTB number/date/value/currency, ordered seller PI collection, related export LC, source provenance, duplicate classification, workbook candidate evidence, selected workbook `SL.No.` plus row-index audit trace, document decision, and write-operation ids. Mail-level identifier arrays are backward-compatible projections only.
 
 ### `SavedDocument`
 Required fields:

@@ -141,7 +141,8 @@ Each `import_document_outcomes[]` item must include:
 - `duplicate_classification` (`none` | `workbook_exact` | `same_mail_exact` | `same_run_exact` | `conflict`)
 - `duplicate_evidence` (object or null)
 - `candidate_rows` (ordered array)
-- `selected_row_index` (integer or null)
+- `selected_sl_no` (string or null; resolved from the workbook `SL.No.` column and treated as text, not inferred from row order)
+- `selected_row_index` (integer or null; audit trace only)
 - `allocation_attempts` (ordered array; empty for duplicates or pre-allocation hard blocks)
 - `document_decision` (`pass` | `warning` | `hard_block`)
 - `warning_codes` (array)
@@ -150,6 +151,7 @@ Each `import_document_outcomes[]` item must include:
 
 Each `candidate_rows[]` item must include:
 - `row_index`
+- `sl_no` when available
 - `canonical_export_lc`
 - `up_no_blank`
 - `btb_lc_no_blank`
@@ -180,6 +182,7 @@ For every staged `import_btb_lc` write operation:
 When `duplicate_classification` is `same_mail_exact` or `same_run_exact`, `duplicate_evidence` must include the primary `mail_id` and `import_document_outcome_id`. If that primary is later excluded by mail-level atomicity, the next restart must replace the stale duplicate evidence.
 
 The legacy `btb_lc_numbers_extracted`, `pi_numbers_extracted`, and `related_export_lc_numbers_extracted` arrays are ordered projections from `import_document_outcomes`. They must never be zipped together or treated as the authoritative document relationship model.
+Import BTB LC HTML rendering may apply display-only formatting: BTB LC dates use `DD/MM/YYYY`, generated timestamps use the configured state timezone, and Related Export LC values omit a leading `LC-` prefix. The canonical JSON fields remain unchanged.
 
 For `document_processing_disposition=candidate`, any null canonical required field must correspond to a document-level hard-block discrepancy explaining why the value was unavailable or invalid. Deterministic `ignored_non_import` records may keep import extraction fields null without a document discrepancy.
 `candidate_rows` represents the decisive/final allocation attempt; `allocation_attempts` preserves earlier tentative selections and restart evidence.
@@ -464,6 +467,7 @@ For `ud_ip_exp`, checklist generation should prefer these persisted `annotation_
         "import_amount": "50000.00"
       },
       "candidate_rows": [],
+      "selected_sl_no": null,
       "selected_row_index": null,
       "allocation_attempts": [],
       "document_decision": "warning",

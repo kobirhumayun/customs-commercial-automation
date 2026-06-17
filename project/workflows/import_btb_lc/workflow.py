@@ -19,7 +19,7 @@ from project.storage.artifacts import atomic_write_text
 from project.utils.hashing import canonical_json_hash, sha256_file
 from project.utils.ids import build_mail_move_operation_id, build_write_operation_id
 from project.utils.json import pretty_json_dumps, to_jsonable
-from project.utils.time import utc_timestamp
+from project.utils.time import utc_timestamp, validate_timezone
 from project.workbook import (
     WorkbookHeader,
     WorkbookMutationSessionProvider,
@@ -46,6 +46,7 @@ IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT = "#,##0.00"
 
 @dataclass(slots=True, frozen=True)
 class ImportBTBLCHeaderMapping:
+    sl_no: int
     lc_sc_no: int
     up_no: int
     export_amount: int
@@ -55,6 +56,7 @@ class ImportBTBLCHeaderMapping:
 
     def as_dict(self) -> dict[str, int]:
         return {
+            "sl_no": self.sl_no,
             "lc_sc_no": self.lc_sc_no,
             "up_no": self.up_no,
             "export_amount": self.export_amount,
@@ -130,6 +132,7 @@ def run_import_btb_lc_file_picker(
     workbook_snapshot: WorkbookSnapshot,
     run_id: str,
     import_document_root: Path | None = None,
+    state_timezone: str = "Asia/Dhaka",
     apply_live_writes: bool = False,
     workbook_path: Path | None = None,
     mutation_session_provider: WorkbookMutationSessionProvider | None = None,
@@ -161,6 +164,7 @@ def run_import_btb_lc_file_picker(
         run_id=run_id,
     )
     report = dict(allocation.workflow_report)
+    report["state_timezone"] = state_timezone
     write_execution = {
         "requested": bool(apply_live_writes),
         "status": "not_requested",
@@ -220,6 +224,7 @@ def run_import_btb_lc_current_full(
     workbook_snapshot: WorkbookSnapshot,
     import_document_root: Path,
     run_id: str,
+    state_timezone: str = "Asia/Dhaka",
     source_folder_entry_id: str | None = None,
     destination_folder_entry_id: str | None = None,
     apply_live_writes: bool = False,
@@ -336,6 +341,7 @@ def run_import_btb_lc_current_full(
     )
     report = dict(allocation.workflow_report)
     report["launcher_path"] = "current_full"
+    report["state_timezone"] = state_timezone
     report["import_keyword_revision"] = keywords["revision"]
     report["mail_relevance"] = list(relevance_by_mail_id.values())
     report["source_document_acquisition"] = acquisition_records
@@ -491,6 +497,7 @@ def allocate_import_btb_lc_documents(
 def resolve_import_btb_lc_header_mapping(
     snapshot: WorkbookSnapshot,
 ) -> ImportBTBLCHeaderMapping | None:
+    sl_no = _resolve_header(snapshot.headers, "SL.No.", ("SL.No", "SL No.", "SL No"))
     lc_sc_no = _resolve_header(snapshot.headers, "L/C & S/C No.", ("L/C No.", "LC/SC No.", "LC No."))
     up_no = _resolve_header(snapshot.headers, "UP No.", ("UP",))
     btb_lc_no = _resolve_header(
@@ -518,7 +525,8 @@ def resolve_import_btb_lc_header_mapping(
     export_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=6)
     import_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=22)
     if (
-        lc_sc_no is None
+        sl_no is None
+        or lc_sc_no is None
         or up_no is None
         or btb_lc_no is None
         or btb_lc_issue_date is None
@@ -527,6 +535,7 @@ def resolve_import_btb_lc_header_mapping(
     ):
         return None
     return ImportBTBLCHeaderMapping(
+        sl_no=sl_no,
         lc_sc_no=lc_sc_no,
         up_no=up_no,
         export_amount=export_amount_headers[0],
@@ -776,43 +785,81 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
                 f"<td>{escape(str(outcome.get('decision', '')))}</td>"
                 f"<td>{escape(str(outcome.get('filename', '')))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
-                f"<td>{escape(str(fields.get('btb_lc_date', '') if isinstance(fields, dict) else ''))}</td>"
+                f"<td>{escape(_format_import_report_date(fields.get('btb_lc_date', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_value', '') if isinstance(fields, dict) else ''))}</td>"
-                f"<td>{escape(str(fields.get('related_export_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
-                f"<td>{escape(str(outcome.get('selected_row_index', '') or ''))}</td>"
+                f"<td>{escape(_format_related_export_lc_display(fields.get('related_export_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
+                f"<td>{escape(str(outcome.get('selected_sl_no', '') or ''))}</td>"
                 f"<td>{escape(str(outcome.get('write_disposition', '')))}</td>"
                 "</tr>"
             )
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
-    return "\n".join(
-        [
-            "<!doctype html>",
-            '<html lang="en">',
-            "<head>",
-            '<meta charset="utf-8">',
-            "<title>Import BTB LC Workflow Report</title>",
-            "<style>",
-            "body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1f2937}",
-            "table{border-collapse:collapse;width:100%;margin-top:16px}",
-            "th,td{border:1px solid #d1d5db;padding:6px 8px;text-align:left}",
-            "th{background:#f3f4f6}",
-            "code{background:#f3f4f6;padding:2px 4px}",
-            "</style>",
-            "</head>",
-            "<body>",
-            "<h1>Import BTB LC Workflow Report</h1>",
-            f"<p><strong>Run:</strong> <code>{escape(str(report.get('run_id', '')))}</code></p>",
-            f"<p><strong>Decision:</strong> {escape(str(report.get('overall_decision', '')))}</p>",
-            f"<p><strong>Summary:</strong> {escape(json.dumps(summary, sort_keys=True))}</p>",
-            "<table>",
-            "<thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Related Export LC</th><th>Row</th><th>Disposition</th></tr></thead>",
-            "<tbody>",
-            *rows,
-            "</tbody>",
-            "</table>",
-            "</body>",
-            "</html>",
-        ]
+    state_timezone = str(report.get("state_timezone", "Asia/Dhaka") or "Asia/Dhaka")
+    generated_at_display = _format_import_report_timestamp(
+        report.get("completed_at_utc") or report.get("started_at_utc"),
+        state_timezone=state_timezone,
+    )
+    snapshot_rows = _import_report_snapshot_rows(
+        report=report,
+        generated_at_display=generated_at_display,
+        state_timezone=state_timezone,
+    )
+    summary_rows = [
+        ("Pass", summary.get("pass", 0)),
+        ("Warning", summary.get("warning", 0)),
+        ("Hard Block", summary.get("hard_block", 0)),
+        ("Staged", summary.get("staged", 0)),
+        ("Duplicate Only", summary.get("duplicate_only", 0)),
+    ]
+    rows_html = "\n".join(rows) if rows else '<tr><td colspan="8" class="empty">No import BTB LC documents were processed.</td></tr>'
+    return (
+        "<!DOCTYPE html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\">\n"
+        "  <title>Workflow Dashboard: import_btb_lc</title>\n"
+        "  <style>\n"
+        "    :root { color-scheme: light; }\n"
+        "    html, body { height: 100%; }\n"
+        "    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; color: #1f2933; background: #f6f8fb; }\n"
+        "    main { width: 100%; max-width: none; margin: 0; padding: 24px; box-sizing: border-box; }\n"
+        "    h1, h2 { color: #102a43; }\n"
+        "    h1 { margin-bottom: 4px; }\n"
+        "    .meta { color: #52606d; margin-bottom: 24px; }\n"
+        "    .section { background: #ffffff; border: 1px solid #d9e2ec; border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }\n"
+        "    .documents-section { padding-bottom: 12px; }\n"
+        "    .sticky-section-title { position: sticky; top: 0; z-index: 5; background: #ffffff; padding-bottom: 12px; margin-bottom: 0; }\n"
+        "    .table-wrap { width: 100%; max-width: 100%; overflow-x: auto; padding-bottom: 8px; }\n"
+        "    table { width: 100%; border-collapse: collapse; margin-top: 10px; }\n"
+        "    .wide-table { width: max-content; min-width: 100%; table-layout: auto; margin-top: 0; }\n"
+        "    th, td { border-bottom: 1px solid #e5e7eb; border-right: 1px solid #d9e2ec; padding: 10px 12px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; background: #ffffff; }\n"
+        "    th:last-child, td:last-child { border-right: none; }\n"
+        "    th { background: #f0f4f8; font-weight: 600; }\n"
+        "    .wide-table thead th { position: sticky; top: 0; z-index: 4; box-shadow: inset 0 -1px 0 #d9e2ec; }\n"
+        "    td { line-height: 1.4; }\n"
+        "    code { font-family: Consolas, 'Courier New', monospace; background: #f0f4f8; padding: 1px 4px; border-radius: 4px; }\n"
+        "    .empty { color: #7b8794; font-style: italic; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "  <main>\n"
+        "    <h1>Workflow Dashboard: import_btb_lc</h1>\n"
+        f"    <p class=\"meta\">Generated at: {escape(generated_at_display)} ({escape(state_timezone)})</p>\n"
+        f"{_render_import_report_key_value_section('Snapshot', snapshot_rows)}\n"
+        f"{_render_import_report_key_value_section('Summary', summary_rows)}\n"
+        "    <section class=\"section documents-section\">\n"
+        "      <h2 class=\"sticky-section-title\">Documents</h2>\n"
+        "      <div class=\"table-wrap\">\n"
+        "      <table class=\"wide-table\">\n"
+        "        <thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Related Export LC</th><th>SL.No.</th><th>Disposition</th></tr></thead>\n"
+        "        <tbody>\n"
+        f"{rows_html}\n"
+        "        </tbody>\n"
+        "      </table>\n"
+        "      </div>\n"
+        "    </section>\n"
+        "  </main>\n"
+        "</body>\n"
+        "</html>\n"
     )
 
 
@@ -1075,6 +1122,11 @@ def _allocate_one_document(
     base["decision"] = "warning" if base["warnings"] else "pass"
     base["write_disposition"] = "new_writes_staged"
     base["selected_row_index"] = row_index
+    base["selected_sl_no"] = _sl_no_for_row(
+        workbook_snapshot=workbook_snapshot,
+        mapping=mapping,
+        row_index=row_index,
+    )
     base["staged_write_operations"] = to_jsonable(operations)
     base["decision_reasons"] = [
         f"Selected workbook row {row_index} for import BTB LC write staging."
@@ -1160,6 +1212,7 @@ def _select_candidate_row(
             value_eligible = Decimal("0.40") <= value_ratio <= Decimal("0.80")
         evidence = {
             "row_index": row.row_index,
+            "sl_no": _stringify_sl_no_text(row.values.get(mapping.sl_no, "")),
             "related_export_lc_raw": row.values.get(mapping.lc_sc_no, ""),
             "related_export_lc_canonical": _canonicalize_workbook_lc(row.values.get(mapping.lc_sc_no, "")),
             "related_export_lc_matches": related_match,
@@ -1317,6 +1370,7 @@ def _base_document_outcome(document: ImportBTBLCDocument) -> dict[str, object]:
         "decision": "pass",
         "write_disposition": "not_staged",
         "selected_row_index": None,
+        "selected_sl_no": None,
         "candidate_rows": [],
         "staged_write_operations": [],
         "warnings": list(document.extraction_artifact.get("warnings", [])),
@@ -1562,6 +1616,122 @@ def _resolve_header_candidates(
 
 def _normalize_header(value: str) -> str:
     return " ".join(value.strip().casefold().replace(".", "").split())
+
+
+def _sl_no_for_row(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    mapping: ImportBTBLCHeaderMapping,
+    row_index: int,
+) -> str:
+    row = next((item for item in workbook_snapshot.rows if item.row_index == row_index), None)
+    if row is None:
+        return ""
+    return _stringify_sl_no_text(row.values.get(mapping.sl_no, ""))
+
+
+def _stringify_sl_no_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text_value = value.strip()
+        if not text_value:
+            return ""
+        if "." not in text_value and "e" not in text_value.lower():
+            return text_value
+        try:
+            decimal_value = Decimal(text_value.replace(",", ""))
+        except (InvalidOperation, ValueError):
+            return text_value
+        if decimal_value == decimal_value.to_integral_value():
+            return str(int(decimal_value))
+        return text_value
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return str(int(value))
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        decimal_value = Decimal(str(value))
+        if decimal_value == decimal_value.to_integral_value():
+            return str(int(decimal_value))
+        return str(value)
+    text_value = str(value).strip()
+    if not text_value:
+        return ""
+    try:
+        decimal_value = Decimal(text_value.replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return text_value
+    if decimal_value == decimal_value.to_integral_value():
+        return str(int(decimal_value))
+    return text_value
+
+
+def _format_import_report_date(value: object) -> str:
+    normalized = _normalize_date_value(value)
+    if normalized is None:
+        return str(value or "")
+    try:
+        return datetime.strptime(normalized, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value or "")
+
+
+def _import_report_snapshot_rows(
+    *,
+    report: dict[str, object],
+    generated_at_display: str,
+    state_timezone: str,
+) -> list[tuple[str, object]]:
+    return [
+        ("Run ID", report.get("run_id", "")),
+        ("Workflow ID", report.get("workflow_id", "")),
+        ("Schema", f"{report.get('schema_id', '')} {report.get('schema_version', '')}".strip()),
+        ("Report Schema", report.get("report_schema_version", "")),
+        ("Launcher Path", report.get("launcher_path", "")),
+        ("Generated At", f"{generated_at_display} ({state_timezone})"),
+        ("Overall Decision", report.get("overall_decision", "")),
+    ]
+
+
+def _format_import_report_timestamp(value: object, *, state_timezone: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    timezone = validate_timezone(state_timezone)
+    return parsed.astimezone(timezone).strftime("%d/%m/%Y %I:%M:%S %p")
+
+
+def _render_import_report_key_value_section(title: str, rows: list[tuple[str, object]]) -> str:
+    items = "\n".join(
+        f"        <tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>"
+        for label, value in rows
+    )
+    return "\n".join(
+        [
+            '    <section class="section">',
+            f"      <h2>{escape(title)}</h2>",
+            "      <table>",
+            "        <tbody>",
+            items,
+            "        </tbody>",
+            "      </table>",
+            "    </section>",
+        ]
+    )
+
+
+def _format_related_export_lc_display(value: object) -> str:
+    text = str(value or "").strip()
+    if text.upper().startswith("LC-"):
+        return text[3:]
+    return text
 
 
 def _import_column_index_by_key(mapping: ImportBTBLCHeaderMapping) -> dict[str, int]:
@@ -2007,6 +2177,7 @@ def _selected_row_summary(outcomes: object) -> list[dict[str, object]]:
                 "btb_lc_issue_date": fields.get("btb_lc_date"),
                 "btb_lc_value": fields.get("btb_lc_value"),
                 "related_export_lc_number": fields.get("related_export_lc_number"),
+                "selected_sl_no": outcome.get("selected_sl_no"),
                 "selected_row_index": outcome.get("selected_row_index"),
             }
         )
