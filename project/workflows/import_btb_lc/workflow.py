@@ -1222,7 +1222,7 @@ def _select_candidate_row(
     selected = sorted(
         eligible,
         key=lambda candidate: (
-            -Decimal(str(candidate["export_amount_canonical"])),
+            -Decimal(str(candidate["value_ratio"])),
             int(candidate["row_index"]),
         ),
     )[0]

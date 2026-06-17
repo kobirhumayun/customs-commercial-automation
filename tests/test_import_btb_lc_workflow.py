@@ -36,15 +36,17 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(mapping.btb_lc_issue_date, 20)
         self.assertEqual(mapping.import_amount, 22)
 
-    def test_allocation_selects_highest_eligible_export_amount_row(self) -> None:
+    def test_allocation_selects_highest_eligible_percentage_row(self) -> None:
         snapshot = _workbook_snapshot(
             rows=[
-                _row(3, lc="LC-1883260400042", export_amount="100000"),
-                _row(4, lc="1883260400042", export_amount="120000"),
-                _row(5, lc="LC-1883260400042", export_amount="200000"),
+                _row(3, lc="LC-1883260400042", export_amount="50"),
+                _row(4, lc="1883260400042", export_amount="40"),
+                _row(5, lc="LC-1883260400042", export_amount="60"),
+                _row(6, lc="LC-1883260400042", export_amount="35"),
+                _row(7, lc="LC-1883260400042", export_amount="70"),
             ]
         )
-        document = _document(_artifact(value="50000"))
+        document = _document(_artifact(value="30"))
 
         result = allocate_import_btb_lc_documents(
             documents=[document],

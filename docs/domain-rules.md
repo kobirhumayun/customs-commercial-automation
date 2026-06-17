@@ -536,8 +536,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - Within the matching related-export-LC family, a row where exactly one of `BTB L/C No.` and import `Amount` column 22 is blank is an invalid partial target state and hard-blocks the affected import document. A populated `BTB LC Issue Date` target on an otherwise candidate row also prevents new write allocation because import targets are no-overwrite cells.
 - Any matching-family row whose required export amount cannot be normalized to a positive canonical decimal hard-blocks the affected import document rather than being silently excluded.
 - A workbook row is value-eligible only when the normalized import BTB LC value is between 40% and 80% of the normalized workbook export `Amount` value, inclusive.
-- If multiple rows are value-eligible for one import BTB LC, choose the row with the highest normalized workbook export `Amount` value.
-- If multiple remaining rows are still tied after the highest-export-value key, choose the row with the lowest workbook row index.
+- If multiple rows are value-eligible for one import BTB LC, choose the row where the normalized import BTB LC value is the highest percentage of the normalized workbook export `Amount` value.
+- If multiple remaining rows are still tied after the highest-percentage key, choose the row with the lowest workbook row index.
 - Once a workbook row is selected for one import BTB LC in the run, that row must be excluded from all later import BTB LC allocations in the same run.
 - One import BTB LC maps to one workbook row only.
 - If an extracted import BTB LC produces zero value-eligible workbook rows, the result is `hard_block`; the report must include the normalized BTB LC value, related export LC, and compared candidate-row evidence.

@@ -456,8 +456,8 @@ If still tied after all keys: `hard_block` with discrepancy code `export_candida
 
 #### 2) Import candidate-row tie scenarios
 After 40%-80% validation, if more than one candidate row remains:
-1. prefer the row with the highest normalized workbook export `Amount` value
-2. if export values tie, choose the lowest workbook row index
+1. prefer the row where the import BTB LC value is the highest percentage of the normalized workbook export `Amount` value
+2. if percentages tie, choose the lowest workbook row index
 
 Workbook row indexes are unique, so this closes normal import candidate selection deterministically. `import_candidate_tie_after_full_tiebreak` remains reserved only as a defensive corruption/invariant code.
 
@@ -886,8 +886,8 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - if exactly one of `BTB L/C No.` and import `Amount` column 22 is blank on a matching-family row, hard-block as partial target state
 - if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row
 - eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
-- if multiple rows qualify, select the row with the highest normalized export LC value
-- if multiple remaining rows are still tied after the highest-export-value key, the lowest workbook row index wins
+- if multiple rows qualify, select the row where the BTB LC value is the highest percentage of the normalized export LC value
+- if multiple remaining rows are still tied after the highest-percentage key, the lowest workbook row index wins
 - one import LC maps to one row only
 - if an extracted import BTB LC does not qualify any workbook row, that import BTB LC is hard-blocked and the report must include the failed candidate evidence
 - each PDF must emit one `import_document_outcome` object containing classification/disposition, source identity/hash, storage decision/path, extracted raw and canonical fields with provenance/confidence, duplicate classification, ordered candidate evidence, selected row, document decision, discrepancy codes, warning codes, and staged write-operation ids
@@ -915,7 +915,7 @@ Before enabling either launcher in production, tests must cover:
 - both approved PI patterns, case normalization, multiple valid PIs, repeated-PI deduplication, and invalid seller PI values
 - valid/invalid dates, exact-decimal amount parsing, currency absence/mismatch, and no-rounding behavior
 - inclusive 40% and 80% boundaries plus values immediately outside each boundary
-- highest-export-value selection and lowest-row-index tie-break
+- highest-percentage selection and lowest-row-index tie-break
 - equal-value document ordering across mails and attachments
 - exact workbook duplicate, multiple-row duplicate, related-LC mismatch, and amount mismatch
 - exact/conflicting same-mail and same-run duplicates
