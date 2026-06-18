@@ -73,10 +73,16 @@ Goal: support shared-column population and quantity/value matching rules.
 
 ### Phase 4 — Import / BTB LC workflow
 Goal: process fabric-related import emails and map validated BTB LC data to a single eligible workbook row.
+- Two CMD launchers:
+  - Current Full Path: Outlook/mail-driven intake plus local storage
+  - File Picker Path: previously stored-file intake with no mail interaction
+- File Picker Path should still emit the same run/mail artifact model by representing each selected file as one synthetic mail-level unit.
 - Subject-based relevance filtering.
-- Save and iterate all new import PDFs.
-- Extract import LC number/date/value, PI yarn quantity, and related export LC.
-- Candidate-row filtering and 40%-80% validation rule.
+- Audit subject-ineligible Outlook mails as non-actionable relevance outcomes without moving or processing them.
+- Acquire new import PDFs into run-scoped source evidence, then copy-promote validated documents atomically into the BTB-year hierarchy.
+- Extract import LC number/date/value/currency, all distinct seller PI numbers, and related export LC; PI yarn quantity remains deferred to later ERP integration.
+- Emit one structured outcome per PDF so duplicate, candidate, selected-row, warning, and discrepancy evidence remains relational.
+- Candidate-row filtering and exact-decimal 40%-80% validation using launcher-scoped import currency configuration.
 - One import LC mapped to exactly one row.
 
 ### Phase 5 — Bangladesh Bank dashboard verification

@@ -23,10 +23,11 @@
 The configured export `document_root` is a stable storage base, not a per-run container. New emails, amendments, and later-arriving related PDFs for the same canonical LC/SC family must resolve back into the same attachment directory under that base path, even when they arrive on different days or reference different file numbers from the same family.
 
 ### Import path
-Designated import root organized by year.
+The configured import storage base path is a stable root, not a per-run container. Current Full Path PDF bytes must first be persisted as run-scoped source evidence. Import BTB LC attachments that pass deterministic classification/date extraction are then copy-promoted through a same-directory temporary file and atomic rename under `<import_document_root>/<BTB LC year>/`, where the year is derived from the normalized BTB LC date. Failed or unclassified source evidence remains in the run artifact tree and is not promoted. File Picker Path inputs must already resolve beneath `import_document_root`.
 
 ### Duplicate rule
 A duplicate PDF is defined only by identical filename.
+For `import_btb_lc`, an existing destination filename is therefore a storage collision. If SHA-256 also matches, reuse the existing file as the same stored document; if SHA-256 differs, hard-block with an import filename/content conflict and never overwrite either file.
 
 ## Subject and naming rules
 
@@ -81,8 +82,9 @@ Invalid patterns:
 
 Match rule: exact canonical equality.
 
-### PI number profile
+### Export PI number profile
 Accepted raw forms are PI references such as `PDL-YY-NNNN` with optional revision token `R<digits>`.
+This profile applies only to export-fabric PI references. Import seller PI references used by `import_btb_lc` are governed separately by that workflow's clause-extraction regex rules and must not be normalized as `PDL-YY-NNNN`.
 
 Normalization steps (exact order):
 1. apply shared primitives 1, 3, 4, 5
@@ -158,7 +160,7 @@ Match rule: exact canonical equality.
 - `LC-092387-COMTRADING APPAREL`
 
 ### Naming conventions assumed reliable in phase 1
-- PI: `PDL-YY-NNNN` with optional revision like `R4`
+- Export PI: `PDL-YY-NNNN` with optional revision like `R4`
 - UD: `UD-LC/SC-LC/SC_ENDSEQ-BUYERNAME_EXTENSION`
 - LC standard/amendment/ack patterns as documented
 - IP example: `IP-LC-0043-VINTAGE DENIM STUDIO LTD`
@@ -175,7 +177,11 @@ Required-field OCR thresholds are explicit and workflow-bound:
 | IP docs | IP number | 0.97 |
 | EXP docs | EXP number | 0.97 |
 | import BTB LC docs | BTB LC number | 0.98 |
+| import BTB LC docs | BTB LC date | 0.96 |
 | import BTB LC docs | BTB LC value | 0.96 |
+| import BTB LC docs | currency | 0.96 |
+| import BTB LC docs | seller PI number | 0.95 |
+| import BTB LC docs | related export LC | 0.98 |
 
 Extraction order is mandatory:
 1. text-layer PDF parse
@@ -254,8 +260,10 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 | `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source normalized document date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source current workflow date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `export_amount` | `Amount` (column 6) | `never_write` | structured UD/AM target-row selection by exact LC-value group matching |
-| `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule |
-| `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation |
+| `import_btb_lc` | `export_amount` | `Amount` (column 6) | `never_write` | exact-decimal 40%-80% candidate validation |
+| `import_btb_lc` | `btb_lc_no` | `BTB L/C No.` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule; target blank at evaluation, staging, and live pre-write validation; never overwrite |
+| `import_btb_lc` | `btb_lc_issue_date` | `BTB LC Issue Date` | `update_if_blank` | row matches export LC + BTB value 40%-80% rule; source BTB LC date normalized to workbook date representation; target blank at evaluation, staging, and live pre-write validation; never overwrite |
+| `import_btb_lc` | `import_lc_amount` | `Amount` (column 22) | `update_if_blank` | row passed import LC candidate matching and BTB value validation; target blank at evaluation, staging, and live pre-write validation; never overwrite |
 | `bb_dashboard_verification` | `dashboard_status` | `Bangladesh Bank Dashboard` | `update_if_blank_or_replace_non_compliant` | row eligible by workflow filters |
 | `bb_dashboard_verification` | `shipment_date` | `Shipment Date` | `update_from_erp_after_lookup_comparison` | row eligible by workflow filters and the family reached dashboard lookup/comparison; applies to successful families (`OK`, `OK (KGS)`) and warning/failure families produced after lookup/comparison, but not upstream ERP/input hard-block families; source ERP `Ship. DT.` formatted to workbook date representation |
 | `bb_dashboard_verification` | `expiry_date` | `Expiry Date` | `update_from_erp_after_lookup_comparison` | row eligible by workflow filters and the family reached dashboard lookup/comparison; applies to successful families (`OK`, `OK (KGS)`) and warning/failure families produced after lookup/comparison, but not upstream ERP/input hard-block families; source ERP `Expiry DT.` formatted to workbook date representation |
@@ -445,7 +453,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Human-review routing is excluded from the initial live-deployment path; unspecified failures default to hard block with comprehensive reporting until recurring issue categories are formally classified.
 
 ## Initial exception-handling rule
-- Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment.
+- Any naming mismatch, unsupported rule exception, or partially specified case must hard-block and produce a comprehensive discrepancy report during early deployment, except for explicitly documented warning-only cases such as the `import_btb_lc` filename-versus-extracted-number mismatch when all other mandatory checks pass.
 - Business-approved exceptions should be implemented only inside workflow-specific rule-pack modules and should run after standard validation rules.
 - `warning` decisions are permitted in phase 1 only for explicitly defined, non-blocking exceptions where all required validation parameters still pass.
 - Warning-only outcomes may continue through downstream stages (workbook write when applicable, print, and post-run mail move) and must be captured in discrepancy/audit reporting with rule IDs and rationale.
@@ -455,20 +463,90 @@ The dashboard column is verification-only and should not be used to drive other 
 - Subject/attachment token formatting differs cosmetically (such as extra separators) but required identifiers and normalized entities match ERP/workbook context.
 - Buyer text includes harmless punctuation/case variation while canonical normalization confirms an exact business-entity match.
 - Email includes an extra non-required PDF that is ignored, while required documents pass extraction and all mandatory write gates.
+- For `import_btb_lc`, attachment filename text does not match the extracted BTB LC number, but the extracted BTB LC data remains internally valid and all other deterministic workbook-selection requirements still pass.
 
 ## Import relevance rule
-- Fabric-related import emails are identified by case-insensitive substring matching against a versioned rules data file: `rules/import_btb_lc/keywords.yaml`.
-- Required keys in `keywords.yaml`:
-  - `revision` (string)
-  - `include_keywords` (non-empty array of non-empty strings)
-  - `exclude_keywords` (array, optional)
+- In `import_btb_lc` Current Full Path, fabric-related import emails are identified by case-insensitive substring matching against a versioned Python keyword module: `project/rules/workflows/import_btb_lc/keywords.py`.
+- In `import_btb_lc` File Picker Path, the operator-selected stored PDFs are treated as the candidate set directly and this subject-keyword relevance filter does not apply.
+- Required module exports:
+  - `IMPORT_KEYWORD_REVISION` (string)
+  - `IMPORT_SUBJECT_KEYWORDS` (non-empty sequence of non-empty strings)
+  - `IMPORT_SUBJECT_EXCLUDE_KEYWORDS` (sequence, optional)
 - Subject matching sequence:
   1. normalize subject with trim + whitespace collapse + lowercase
-  2. require at least one include-keyword hit
+  2. require at least one include-keyword hit from `IMPORT_SUBJECT_KEYWORDS`
   3. reject if any exclude-keyword hit is present
-- Startup must hard-fail before run snapshot/side effects if file is missing, malformed, or include list is empty.
-- The active `revision` value must be stamped as `import_keyword_revision` in run and mail reports.
+- Every snapshotted Current Full Path mail must persist an `import_relevance` object with normalized subject, include hits, exclude hits, eligibility, and `IMPORT_KEYWORD_REVISION`.
+- An ineligible subject is not an error and must not be silently discarded. Persist `processing_disposition=not_applicable` and schema-compatible `final_decision=pass`, perform no attachment acquisition/extraction/write/move, leave the mail in `working`, and exclude it from action-outcome pass/warning/hard-block counts.
+- For `import_btb_lc` Current Full Path, startup must hard-fail before run snapshot/side effects if the module is missing, malformed, or the include list is empty.
+- For `import_btb_lc` File Picker Path, subject-keyword relevance is not evaluated and `import_keyword_revision` may be `null`.
+- The active `IMPORT_KEYWORD_REVISION` value must be stamped as `import_keyword_revision` in run and mail reports for every Current Full Path relevance decision.
 - Keyword-list changes must follow code-review and release boundaries; no ad hoc runtime edits.
+
+## Import BTB LC allocation rule
+- Import BTB LC value comparison is numeric, not lexical. Implementations must use exact decimal arithmetic for BTB values, workbook export `Amount` column 6, and workbook import `Amount` column 22 before evaluating the 40%-80% rule.
+- `import_amount_currency` is required configuration for both launcher paths and defines the single currency represented by workbook export/import amount columns for this workflow. It and the extracted currency must match `^[A-Z]{3}$` after uppercase normalization and must match each other exactly. Phase 1 performs no currency-synonym inference or exchange-rate conversion.
+- Monetary text must represent a positive amount. Structurally valid grouping separators may be removed, but ambiguous grouping, negative values, missing currency, non-numeric text, implicit rounding, and float conversion are forbidden.
+- Import BTB LC PDFs follow UCP clause structure, but clause placement and page formatting may vary significantly across banks and may show minor discrepancies even within the same bank.
+- BTB LC number extraction must validate against these bank-specific identifier shapes after deterministic normalization:
+  - The City Bank PLC: `^0742\d{9}$`
+  - Mutual Trust Bank Limited: `^0002228\d{9}$`
+  - Al-Arafah Islami Bank PLC: `^1080\d{9}$`
+  - Brac Bank PLC: `^3085\d{9}$`
+  - Standard Chartered Bank: `^41101\d{7}-L$`
+- BTB normalization may trim outer whitespace, uppercase ASCII, normalize Unicode dash variants to `-`, and remove zero-width/control characters. It must not remove or repair internal spaces, separators, or digits.
+- Internal spaces are forbidden for all approved bank-specific BTB LC number shapes. If a candidate BTB LC number contains any embedded space, validation fails; implementations must not repair the value by removing spaces.
+- If an extracted candidate BTB LC number does not satisfy one of the approved bank-specific shapes, the BTB LC number is not valid for deterministic phase-1 write processing.
+- PI number extraction for import BTB LC processing must come from LC clauses on pages that contain deterministic LC-message structure. Appended proforma-invoice or other non-LC pages are excluded even when they contain PI-like text. An isolated number that happens to equal a SWIFT field code, such as `20` in payment terms, is not sufficient LC-page evidence; require multiple field codes or a field code paired with its expected SWIFT label. A single BTB LC may reference one or more seller PIs, and every distinct PI found in the applicable LC pages must be preserved in deterministic document-occurrence order.
+- Every extracted seller PI must match one of these approved case-insensitive regex patterns:
+  - `btl/\d{2}/\d{4}`
+  - `kyl/\d{2}/\d{4}`
+- Canonical import PI output uppercases ASCII letters and preserves slash separators, for example `BTL/26/0042`.
+- Repeated mentions of the same canonical PI are deduplicated while their occurrence-level provenance remains available.
+- If no seller PI is found, or any extracted PI-like candidate from the applicable LC clauses does not satisfy an approved regex pattern, seller PI extraction is not valid for deterministic phase-1 import processing.
+- BTB LC date must parse unambiguously to a valid calendar date and be persisted as ISO `YYYY-MM-DD`; ambiguous numeric dates use day-first interpretation.
+- Related export LC must pass the shared LC/SC canonicalization profile and match workbook values by exact canonical equality. When an import LC clause omits the `LC` prefix, the extractor supplies that clause-defined prefix; whitespace separating alphanumeric body segments is normalized to `-`, slash-delimited body segments remain slash-delimited, and the raw clause value and provenance remain unchanged.
+- For Mutual Trust Bank Limited `EXPORT LC/SC NO.` clauses, the date boundary may appear as compact `DT` without an intervening space before the date digits, for example `DT21.01.2026`.
+- For Standard Chartered Bank clauses, `EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER:` is authoritative. If that label appears at the end of one inspected page and the related value begins the immediately following inspected page, the first continuation value followed by a valid date label is the related export LC. The observed misspelled date label `DTED` is accepted as a deterministic boundary for this SCB clause only.
+- For BRAC `ALL SHIPPING DOCUMENTS MUST BEAR...` clauses, the first occurrence of the authoritative clause supplies the related export LC. Supported labels are `L/C NUMBER [WITH DATE]`, `L/C NUMBER WITH DATE [AND] EXPORT LC NO.`, `L/C NUMBER WITH DATE AND EXPORT SALES CONTRACT NO.`, `[THE] EXPORT NO.`, and `[THE] EXPORT SALES CONTRACT NO.`. Punctuation after the label is optional and may contain an observed combination such as `NO.:`. Label words such as `WITH`, `DATE`, `AND`, or `EXPORT` must never be emitted as identifier candidates. The first reference immediately following the complete label is authoritative even when its body resembles a sales-contract identifier. Later `SALES CONTRACT NO.` or repeated contract references are not alternative related-export-LC candidates. The observed date labels `DATE`, `DATED`, `DAT`, and `DT` are valid deterministic boundaries for this extraction rule.
+- A single run may contain multiple import BTB LCs tied to the same related export LC, whether they originate from one mail or multiple mails.
+- The complete allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or normalized synthetic source path ascending.
+- Mail-level write atomicity applies before run-level batch atomicity. Mails with intrinsic hard blocks are excluded before allocation. If a document later has no qualified row, hard-block its parent mail, release all tentative row reservations for that mail, and restart same-run duplicate ownership plus deterministic allocation from the baseline workbook without blocked mails. Continue until a full pass introduces no new blocked mail.
+- A same-run duplicate classification is valid only while its referenced primary document belongs to a surviving non-hard-block mail. Restarts must promote the next exact duplicate in deterministic order to primary when the prior owner is excluded.
+- Attachment filename and extracted BTB LC number are expected to match for import BTB LC PDFs. A mismatch is warning-only evidence only when all other required extraction and workbook-selection checks for that import BTB LC pass, and it must be preserved in run/mail reports; filename text must not replace or override extracted BTB LC values.
+- Filename comparison uses the entire filename stem after the same safe outer-whitespace/case/dash normalization as the BTB number. Additional prefixes, suffixes, separators, or removed internal spaces do not count as a match.
+- Duplicate import BTB LC handling must check both:
+  - already-recorded workbook `BTB L/C No.` values
+  - import BTB LC values already accepted earlier in the same run, whether from the same mail or a different mail
+- Workbook duplicate-only success requires exactly one row containing the normalized BTB LC number, and that row must have the same canonical related export LC plus the same normalized import amount in column 22. PI/date cannot be verified from workbook state and remain source audit evidence only.
+- Multiple matching workbook rows, blank/unparseable existing import amount, related-export mismatch, or amount mismatch is conflicting/unprovable duplicate evidence and hard-blocks before candidate filtering.
+- Same-run duplicate-only success requires equality of canonical BTB number, BTB date, value, currency, the ordered canonical seller PI collection, and related export LC. Any disagreement is a hard block.
+- Candidate workbook rows for a given import BTB LC must satisfy all of:
+  - workbook export LC matches the related export LC
+  - `UP No.` is blank
+  - import `BTB L/C No.` target is blank
+  - import `BTB LC Issue Date` target is blank
+  - import `Amount` column 22 target is blank
+  - row has not already been reserved by an earlier import BTB LC allocation in the same run
+- The import workflow may write only `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` column 22. Every other workbook cell is read-only evidence for import evaluation.
+- The three import destination cells are append-only blank targets. All must remain blank at candidate evaluation, staged-plan construction, target prevalidation, and immediately before live batch apply. The workflow must never clear, append to, merge with, or replace a populated cell.
+- Every staged operation for either import destination must use a canonical blank `expected_pre_write_value`. If a staged plan contains a non-blank expected value, the plan is invalid and hard-blocks before apply.
+- If a destination cell is observed populated during live prevalidation after it was blank during allocation, emit `import_target_cell_already_populated`, abort the complete atomic write batch before the first mutation, and retain the observed value as discrepancy evidence. Do not convert this race into a duplicate-only outcome.
+- The only successful case involving already populated import destination cells is a duplicate proven before candidate allocation under the workbook duplicate rule. That case stages no writes and leaves every existing cell unchanged.
+- Within the matching related-export-LC family, a row where exactly one of `BTB L/C No.` and import `Amount` column 22 is blank is an invalid partial target state and hard-blocks the affected import document. A populated `BTB LC Issue Date` target on an otherwise candidate row also prevents new write allocation because import targets are no-overwrite cells.
+- Any matching-family row whose required export amount cannot be normalized to a positive canonical decimal hard-blocks the affected import document rather than being silently excluded.
+- A workbook row is value-eligible only when the normalized import BTB LC value is between 40% and 80% of the normalized workbook export `Amount` value, inclusive.
+- If multiple rows are value-eligible for one import BTB LC, choose the row where the normalized import BTB LC value is the highest percentage of the normalized workbook export `Amount` value.
+- If multiple remaining rows are still tied after the highest-percentage key, choose the row with the lowest workbook row index.
+- Once a workbook row is selected for one import BTB LC in the run, that row must be excluded from all later import BTB LC allocations in the same run.
+- One import BTB LC maps to one workbook row only.
+- If an extracted import BTB LC produces zero value-eligible workbook rows, the result is `hard_block`; the report must include the normalized BTB LC value, related export LC, and compared candidate-row evidence.
+- If no deterministic import BTB LC PDF can be extracted from a relevant import mail, the mail is `hard_block` and the report must include attachment-level extraction-failure evidence.
+- Every PDF attachment in an eligible Current Full Path mail must receive a deterministic import/non-import/ambiguous classification from first-three-page evidence. Deterministic non-import PDFs are ignored with audit evidence; import-like PDFs with missing or invalid required fields hard-block; ambiguous classification hard-blocks under `attachment_classification_ambiguous`.
+- If one mail contains multiple import BTB LC PDFs, duplicate-only/no-write results for one or more PDFs do not by themselves block post-run mail movement; the mail remains move-eligible only when no import BTB LC in that mail ends in `hard_block`.
+- If one mail contains only duplicate-only/no-write import BTB LC PDFs, the mail remains move-eligible after report generation even though it produced zero workbook writes.
+- If any document in a mail hard-blocks, that mail contributes zero writes even when another document in the same mail had a tentative row selection; released rows remain available to unrelated mails after allocation restart.
+- Import reporting must preserve one authoritative `import_document_outcome` per processed PDF. Parallel mail-level identifier arrays are compatibility projections only.
 
 ## Staged run execution rule
 - A run snapshots all candidate emails before validation and side effects begin.
@@ -515,7 +593,8 @@ The dashboard column is verification-only and should not be used to drive other 
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
 - Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
-- Successfully processed import-team emails move to `Import` only after batch workbook writes and printing complete.
+- In `import_btb_lc` Current Full Path, successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; duplicate-only/no-write import BTB LC PDFs inside an otherwise successful mail do not block that move, mails containing only duplicate-only/no-write import BTB LC PDFs are still move-eligible after report generation, and the generated HTML report opens automatically after terminal mail-move success.
+- In `import_btb_lc` File Picker Path, no Outlook post-processing occurs; the same workbook/report decisions apply, but the generated HTML report opens automatically after report generation completes.
 
 ## Open questions that remain intentionally unresolved
 - Any future business-approved exceptions to the documented value/quantity matching constraints or naming conventions that have not yet been encoded in workflow-specific rule-pack modules.
@@ -528,7 +607,7 @@ The dashboard column is verification-only and should not be used to drive other 
 To keep import relevance deterministic and auditable, keyword changes must follow a documented lifecycle.
 
 ### Change control checklist
-Every pull request that modifies `project/workflows/import_btb_lc/keywords.py` must include:
+Every pull request that modifies `project/rules/workflows/import_btb_lc/keywords.py` must include:
 1. updated `IMPORT_KEYWORD_REVISION` matching `YYYY-MM-DD.N`
 2. rationale for each added/removed keyword
 3. business-domain approval note
@@ -542,6 +621,7 @@ At minimum, tests must cover:
 - case-insensitive matching behavior
 - duplicate keyword normalization behavior
 - startup hard-fail paths for missing/malformed `IMPORT_SUBJECT_KEYWORDS`
+- startup hard-fail paths for malformed `IMPORT_SUBJECT_EXCLUDE_KEYWORDS`
 - startup hard-fail path for malformed `IMPORT_KEYWORD_REVISION`
 
 Suggested fixture location for implementation: `tests/workflows/import_btb_lc/fixtures/`.
@@ -554,4 +634,4 @@ Suggested fixture location for implementation: `tests/workflows/import_btb_lc/fi
 ### Release gate requirements
 - Keyword changes become active only after merge + deployment release boundary.
 - Runtime/manual editing on operator machines is prohibited.
-- Run-level and mail-level outputs must stamp `import_keyword_revision` for every relevance decision, including blocked mails.
+- For `import_btb_lc` Current Full Path, run-level and mail-level outputs must stamp `import_keyword_revision` for every relevance decision, including blocked mails.

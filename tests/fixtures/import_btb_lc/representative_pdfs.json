@@ -1,0 +1,115 @@
+{
+  "0002228260403929.pdf": {
+    "bank_id": "mutual_trust_bank_limited",
+    "btb_lc_date": "2026-05-07",
+    "btb_lc_number": "0002228260403929",
+    "btb_lc_value": "2937.600",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "862840535e92be811500efc8ff6c6af3ac0f1957b18355fd56a1a753944a632b",
+    "related_export_lc_number": "LC-1416250403803",
+    "seller_pi_numbers": ["BTL/26/3275"]
+  },
+  "0002228260404700.pdf": {
+    "bank_id": "mutual_trust_bank_limited",
+    "btb_lc_date": "2026-06-08",
+    "btb_lc_number": "0002228260404700",
+    "btb_lc_value": "54209.950",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "c22e04e716af856731ba624537c64c10e6b2ce1c44c49d7f17c21f94b02e52de",
+    "related_export_lc_number": "LC-1416260401902",
+    "seller_pi_numbers": ["BTL/26/3931"]
+  },
+  "0742260401049.pdf": {
+    "bank_id": "the_city_bank_plc",
+    "btb_lc_date": "2026-05-05",
+    "btb_lc_number": "0742260401049",
+    "btb_lc_value": "59242.25",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "9067fe866766ee85e3da438c2b075e0f92d3373a562d46578f5e76c206ee98a4",
+    "related_export_lc_number": "LC-1883260400042",
+    "seller_pi_numbers": ["BTL/26/3183"]
+  },
+  "0742260401362.pdf": {
+    "bank_id": "the_city_bank_plc",
+    "btb_lc_date": "2026-06-07",
+    "btb_lc_number": "0742260401362",
+    "btb_lc_value": "67993.60",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "e3279bdc5e63e96a175a32c33ec5d26f3b0ac372f615df2fada3a253af4b8fe2",
+    "related_export_lc_number": "LC-DPCBDA033739",
+    "seller_pi_numbers": ["KYL/26/1927"]
+  },
+  "1080260400315.pdf": {
+    "bank_id": "al_arafah_islami_bank_plc",
+    "btb_lc_date": "2026-05-05",
+    "btb_lc_number": "1080260400315",
+    "btb_lc_value": "132608.55",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "193c90d35cb6cd421deb5cfe2491693bb0e737916ae1c8d7593354b2701e9979",
+    "related_export_lc_number": "LC-1082260401276",
+    "seller_pi_numbers": ["BTL/26/3193"]
+  },
+  "1080260400428.pdf": {
+    "bank_id": "al_arafah_islami_bank_plc",
+    "btb_lc_date": "2026-06-07",
+    "btb_lc_number": "1080260400428",
+    "btb_lc_value": "140114.65",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "3950badb06482d0476bad358fcff499695acce8d2b865a8632dc6265e10eac33",
+    "related_export_lc_number": "LC-1027260401017",
+    "seller_pi_numbers": ["BTL/26/3914"]
+  },
+  "3085260403867.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-05-06",
+    "btb_lc_number": "3085260403867",
+    "btb_lc_value": "8081.15",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "2e840b59721649f921f6a09b12e4b67d83846e6ae814abd528c5fdf191f9b39f",
+    "related_export_lc_number": "LC-0000223260400695",
+    "seller_pi_numbers": ["KYL/26/1649"]
+  },
+  "3085260404808.pdf": {
+    "bank_id": "brac_bank_plc",
+    "btb_lc_date": "2026-06-07",
+    "btb_lc_number": "3085260404808",
+    "btb_lc_value": "3746.55",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "327c7e82ecf4a6b73288c7fea76ae33f1b50cf09ff3069e0b3d5045b0f14a2cd",
+    "related_export_lc_number": "LC-3085260300816",
+    "seller_pi_numbers": ["KYL/26/1928"]
+  },
+  "411012607381-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-05-06",
+    "btb_lc_number": "411012607381-L",
+    "btb_lc_value": "36690.30",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "b828e0942a90179e8c173b760127522ed76e0fe67997072c4e3e438fbdf7c5fc",
+    "related_export_lc_number": "LC-1475260403411",
+    "seller_pi_numbers": [
+      "BTL/26/3019",
+      "BTL/26/3018"
+    ]
+  },
+  "411012632898-L.pdf": {
+    "bank_id": "standard_chartered_bank",
+    "btb_lc_date": "2026-06-08",
+    "btb_lc_number": "411012632898-L",
+    "btb_lc_value": "3961.45",
+    "currency": "USD",
+    "decision": "pass",
+    "file_sha256": "18426eeeda2076d288868079a1be463a4112af0d9bd0d8c9600f34346f70f027",
+    "related_export_lc_number": "LC-DPCBD1182457",
+    "seller_pi_numbers": ["BTL/26/3929"]
+  }
+}

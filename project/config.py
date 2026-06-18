@@ -17,6 +17,7 @@ PATH_KEYS = {
     "run_artifact_root",
     "backup_root",
     "master_workbook_root",
+    "import_document_root",
     "playwright_storage_state_path",
     "acrobat_executable_path",
 }
@@ -87,6 +88,9 @@ OPTIONAL_ENV_CONFIG_KEYS = tuple(
             "bb_dashboard_lc_value_selector",
             "bb_dashboard_foreign_lc_selector",
             "bb_dashboard_quantity_selector",
+            "import_amount_currency",
+            "import_destination_success_entry_id",
+            "import_document_root",
             "source_working_folder_display_name",
             "destination_success_display_name",
         }
