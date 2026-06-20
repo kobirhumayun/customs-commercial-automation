@@ -37,6 +37,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(mapping.btb_lc_no, 21)
         self.assertEqual(mapping.btb_lc_issue_date, 20)
         self.assertEqual(mapping.import_amount, 22)
+        self.assertEqual(mapping.quantity_kgs, 23)
 
     def test_allocation_selects_highest_eligible_percentage_row(self) -> None:
         snapshot = _workbook_snapshot(
@@ -54,17 +55,19 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(total_amount="30", quantity_kg="1709"),
         )
         outcome = result.workflow_report["document_outcomes"][0]
 
         self.assertEqual(outcome["decision"], "pass")
         self.assertEqual(outcome["selected_row_index"], 4)
         self.assertEqual(outcome["selected_sl_no"], "2")
-        self.assertEqual(len(result.staged_write_plan), 3)
+        self.assertEqual(len(result.staged_write_plan), 4)
         self.assertEqual(
             [operation.column_key for operation in result.staged_write_plan],
-            ["btb_lc_no", "btb_lc_issue_date", "import_amount"],
+            ["btb_lc_no", "btb_lc_issue_date", "import_amount", "quantity_kgs"],
         )
+        self.assertEqual(outcome["selected_quantity_kgs"], "1709")
 
     def test_allocation_hard_blocks_when_no_qualified_row(self) -> None:
         snapshot = _workbook_snapshot(
@@ -76,6 +79,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcome = result.workflow_report["document_outcomes"][0]
 
@@ -83,6 +87,24 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(
             outcome["hard_block_discrepancies"][0]["code"],
             "import_no_qualified_workbook_row",
+        )
+        self.assertEqual(result.staged_write_plan, [])
+
+    def test_allocation_hard_blocks_when_pi_register_total_mismatches_btb_value(self) -> None:
+        document = _document(_artifact(value="50000"))
+
+        result = allocate_import_btb_lc_documents(
+            documents=[document],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(total_amount="49999.99"),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+
+        self.assertEqual(outcome["decision"], "hard_block")
+        self.assertEqual(
+            outcome["hard_block_discrepancies"][0]["code"],
+            "import_pi_register_amount_mismatch",
         )
         self.assertEqual(result.staged_write_plan, [])
 
@@ -105,6 +127,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcome = result.workflow_report["document_outcomes"][0]
 
@@ -131,6 +154,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcome = result.workflow_report["document_outcomes"][0]
 
@@ -156,13 +180,14 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=documents,
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcomes = result.workflow_report["document_outcomes"]
 
         self.assertEqual(outcomes[0]["decision"], "pass")
         self.assertEqual(outcomes[1]["decision"], "warning")
         self.assertEqual(outcomes[1]["warnings"][0]["code"], "import_duplicate_document_same_run")
-        self.assertEqual(len(result.staged_write_plan), 3)
+        self.assertEqual(len(result.staged_write_plan), 4)
 
     def test_same_run_duplicate_conflict_is_hard_block(self) -> None:
         snapshot = _workbook_snapshot(
@@ -183,6 +208,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=documents,
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcomes = result.workflow_report["document_outcomes"]
 
@@ -210,6 +236,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcome = result.workflow_report["document_outcomes"][0]
 
@@ -229,6 +256,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             artifact_path.write_text(json.dumps(_artifact(path=str(input_dir / "0742260401049.pdf"))), encoding="utf-8")
             workbook_path = root / "workbook.json"
             workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch("project.cli.open_import_btb_lc_report_in_browser") as open_mock:
@@ -242,6 +270,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                             str(output_dir),
                             "--workbook-json",
                             str(workbook_path),
+                            "--erp-pi-report",
+                            str(pi_report_path),
                             "--run-id",
                             "run-import-test",
                         ]
@@ -266,7 +296,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(summary["selected_rows"][0]["selected_sl_no"], "1")
         self.assertEqual(report["summary"]["staged"], 1)
         self.assertEqual(report["write_execution"]["status"], "not_requested")
-        self.assertEqual(len(report["staged_write_plan"]), 3)
+        self.assertEqual(len(report["staged_write_plan"]), 4)
         self.assertIn("0742260401049", html)
         self.assertIn("<th>SL.No.</th>", html)
         self.assertNotIn("<th>Row</th>", html)
@@ -287,6 +317,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             documents=[document],
             workbook_snapshot=snapshot,
             run_id="run-import-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
         )
         outcome = result.workflow_report["document_outcomes"][0]
         html = render_import_btb_lc_html_report(
@@ -315,6 +346,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             )
             workbook_path = root / "workbook.json"
             workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch("project.cli.open_import_btb_lc_report_in_browser") as open_mock:
@@ -328,6 +360,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                             str(output_dir),
                             "--workbook-json",
                             str(workbook_path),
+                            "--erp-pi-report",
+                            str(pi_report_path),
                             "--run-id",
                             "run-import-test",
                             "--no-open-report",
@@ -352,6 +386,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             second.write_text(json.dumps(_artifact(path=str(input_dir / "second.pdf"))), encoding="utf-8")
             workbook_path = root / "workbook.json"
             workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch("project.cli.open_import_btb_lc_report_in_browser"):
@@ -367,6 +402,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                             str(output_dir),
                             "--workbook-json",
                             str(workbook_path),
+                            "--erp-pi-report",
+                            str(pi_report_path),
                             "--run-id",
                             "run-import-test",
                             "--no-open-report",
@@ -428,6 +465,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             )
             workbook_path = root / "workbook.json"
             workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch(
@@ -444,6 +482,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                             str(output_dir),
                             "--workbook-json",
                             str(workbook_path),
+                            "--erp-pi-report",
+                            str(pi_report_path),
                             "--run-id",
                             "run-import-test",
                         ]
@@ -491,6 +531,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                 import_document_root=import_root,
                 run_id="run-current-test",
                 page_provider=provider,
+                pi_register_provider=_StaticPIRegisterProvider(),
             )
             report = json.loads(
                 (output_dir / "run-current-test.import-btb-lc.current-full.json").read_text(encoding="utf-8")
@@ -558,6 +599,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             (root / "attachments" / "0742260401049.pdf").write_bytes(b"%PDF-1.4\nsynthetic\n")
             workbook_json = root / "workbook.json"
             workbook_json.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch(
@@ -579,6 +621,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                                 str(root / "reports"),
                                 "--workbook-json",
                                 str(workbook_json),
+                                "--erp-pi-report",
+                                str(pi_report_path),
                                 "--run-id",
                                 "run-current-test",
                             ]
@@ -636,6 +680,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                 ]
             )
             workbook_json.write_text(json.dumps(_workbook_manifest(duplicate_snapshot)), encoding="utf-8")
+            pi_report_path = _pi_report_path(root)
 
             stdout = io.StringIO()
             with patch(
@@ -657,6 +702,8 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
                                 str(root / "reports"),
                                 "--workbook-json",
                                 str(workbook_json),
+                                "--erp-pi-report",
+                                str(pi_report_path),
                                 "--run-id",
                                 "run-current-test",
                                 "--move-mails",
@@ -731,6 +778,7 @@ def _workbook_snapshot(*, rows: list[WorkbookRow] | None = None) -> WorkbookSnap
             WorkbookHeader(column_index=20, text="BTB LC Issue Date"),
             WorkbookHeader(column_index=21, text="BTB L/C No."),
             WorkbookHeader(column_index=22, text="Amount"),
+            WorkbookHeader(column_index=23, text="Quantity (Kgs)"),
         ],
         rows=rows or [_row(3, lc="LC-1883260400042", export_amount="100000")],
     )
@@ -746,6 +794,7 @@ def _row(
     btb: str = "",
     issue_date: str = "",
     import_amount: str = "",
+    quantity_kgs: str = "",
 ) -> WorkbookRow:
     return WorkbookRow(
         row_index=row_index,
@@ -757,6 +806,7 @@ def _row(
             20: issue_date,
             21: btb,
             22: import_amount,
+            23: quantity_kgs,
         },
     )
 
@@ -779,6 +829,20 @@ def _workbook_manifest(snapshot: WorkbookSnapshot | None = None) -> dict:
     }
 
 
+def _pi_report_path(root: Path, *, total_amount: str = "50000", quantity_kg: str = "1709") -> Path:
+    path = root / "rptPIRegisterCustomsPDL.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "SL.,Unit,PI Number,PI Date,Buyer Name,Description of Goods,Tenor,Bankers,HS Code,Qty.Bag,Qty.Kg,Price/KG,Total Amount,File No,LC Number",
+                f"1,BADSHA TEXTILES LTD.,BTL/26/3183,20/06/2026,PIONEER DENIM LIMITED,YARN,120,HSBC,5203,35,{quantity_kg},3,{total_amount},B3043/26,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 class _StaticPageProvider:
     def __init__(self, *, embedded: list[ExtractedPage], ocr: list[ExtractedPage]) -> None:
         self._embedded = embedded
@@ -791,6 +855,43 @@ class _StaticPageProvider:
     def ocr_pages(self, *, pdf_path: Path, page_numbers: list[int]) -> list[ExtractedPage]:
         del pdf_path
         return [page for page in self._ocr if page.page_number in page_numbers]
+
+
+class _StaticPIRegisterProvider:
+    def __init__(
+        self,
+        *,
+        pi_number: str = "BTL/26/3183",
+        total_amount: str = "50000",
+        quantity_kg: str = "1709",
+    ) -> None:
+        self._rows = [
+            {
+                "pi_number": pi_number,
+                "quantity_kg": quantity_kg,
+                "total_amount": total_amount,
+                "source_row_index": 2,
+                "raw_values": {},
+            }
+        ]
+
+    def lookup_pi_numbers(self, *, pi_numbers: list[str]):
+        from project.erp.import_pi import ImportPIRegisterRow
+
+        rows = [
+            ImportPIRegisterRow(
+                pi_number=str(row["pi_number"]),
+                quantity_kg=str(row["quantity_kg"]),
+                total_amount=str(row["total_amount"]),
+                source_row_index=int(row["source_row_index"]),
+                raw_values={},
+            )
+            for row in self._rows
+        ]
+        return {pi_number: [row for row in rows if row.pi_number == pi_number] for pi_number in pi_numbers}
+
+    def load_rows(self):
+        return [row for rows in self.lookup_pi_numbers(pi_numbers=["BTL/26/3183"]).values() for row in rows]
 
 
 def _mail_snapshot(*, subject: str = "Fabric BTB LC"):

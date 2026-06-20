@@ -8,10 +8,12 @@ from unittest.mock import patch
 
 from project.erp import (
     DelimitedERPExportRowProvider,
+    DelimitedImportPIRegisterProvider,
     inspect_playwright_report_download,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
+from project.erp.import_pi import format_import_pi_decimal, parse_import_pi_decimal
 from project.erp.normalization import normalize_lc_sc_date
 from project.erp.providers import _build_download_receipt
 from project.workflows.erp_inspection import inspect_erp_rows
@@ -488,6 +490,28 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["P/26/0042"][0].current_lc_value, "12345.00")
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
         self.assertEqual(rows["P/26/0042"][0].amd_no, "05")
+
+    def test_delimited_import_pi_register_reads_sample_style_headers_and_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,PI Date,Buyer Name,Description of Goods,Tenor,Bankers,HS Code,Qty.Bag,Qty.Kg,Price/KG,Total Amount,File No,LC Number",
+                        '3,BADSHA TEXTILES LTD.,BTL/26/3920,20/06/2026,PIONEER DENIM LIMITED,YARN,120,HSBC,5203,35,"1,709",3.,"5,127.",B3043/26,',
+                        "4,BADSHA TEXTILES LTD.,BTL/26/3920,20/06/2026,PIONEER DENIM LIMITED,YARN,120,HSBC,5203,35,20,3.,60.,B3043/26,",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+
+        self.assertEqual([row.source_row_index for row in rows["BTL/26/3920"]], [2, 3])
+        self.assertEqual(rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(rows["BTL/26/3920"][0].total_amount, "5127")
+        self.assertEqual(parse_import_pi_decimal("1,50,000."), parse_import_pi_decimal("150000"))
+        self.assertEqual(format_import_pi_decimal(parse_import_pi_decimal("1,709") or 0), "1709")
 
     def test_delimited_export_provider_requires_ship_remarks_header_but_allows_blank_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

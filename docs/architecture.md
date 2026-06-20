@@ -41,6 +41,7 @@ The architecture must optimize for:
 5. **ERP downloader**
    - Playwright login/navigation
    - `RptCommercialExport/DateWiseLCRegisterForDocuments` retrieval
+   - `RptExportPInLC/PIRegisterCustomsPDL` retrieval for `import_btb_lc` seller-PI value/quantity validation
    - normalization and row selection across all extracted file numbers, including family-consistency checks
 6. **Parsing and normalization layer**
    - subject parsing

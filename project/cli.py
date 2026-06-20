@@ -16,10 +16,14 @@ from project.documents import (
 )
 from project.erp import (
     DelimitedERPExportRowProvider,
+    DelimitedImportPIRegisterProvider,
     EmptyERPRowProvider,
+    EmptyImportPIRegisterProvider,
     inspect_playwright_report_download,
     JsonManifestERPRowProvider,
+    JsonManifestImportPIRegisterProvider,
     PlaywrightERPRowProvider,
+    PlaywrightImportPIRegisterProvider,
 )
 from project.exceptions import ArtifactError, ConfigError, RulePackError
 from project.intake import EmptyMailSnapshotProvider, JsonManifestMailSnapshotProvider, Win32ComMailSnapshotProvider
@@ -385,6 +389,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional live workbook path. Used read-only unless --apply-live-writes is supplied.",
     )
     run_import_btb_lc_parser.add_argument(
+        "--erp-pi-report",
+        type=Path,
+        help="Optional import PI register CSV/JSON export used to validate PI value and quantity.",
+    )
+    run_import_btb_lc_parser.add_argument(
         "--run-id",
         help="Optional stable run id for repeatable verification output names.",
     )
@@ -423,6 +432,8 @@ def _build_parser() -> argparse.ArgumentParser:
     run_import_btb_lc_current_parser.add_argument("--attachment-directory", type=Path, help="Directory containing attachment files for --snapshot-json verification.")
     run_import_btb_lc_current_parser.add_argument("--workbook-json", type=Path, help="Optional workbook snapshot JSON manifest.")
     run_import_btb_lc_current_parser.add_argument("--workbook", type=Path, help="Optional live workbook path. Defaults to config yearly workbook when --workbook-json is absent.")
+    run_import_btb_lc_current_parser.add_argument("--erp-pi-report", type=Path, help="Optional import PI register CSV/JSON export. Defaults to config import_pi_register_export_path when present.")
+    run_import_btb_lc_current_parser.add_argument("--live-erp-pi-register", action="store_true", help="Download the import PI register report through the configured live ERP path.")
     run_import_btb_lc_current_parser.add_argument("--run-id", help="Optional stable run id for repeatable verification output names.")
     run_import_btb_lc_current_parser.add_argument("--apply-live-writes", action="store_true", help="Apply staged import writes to --workbook after live prevalidation succeeds.")
     run_import_btb_lc_current_parser.add_argument("--move-mails", action="store_true", help="Move successful import mails after report/write completion.")
@@ -2800,6 +2811,11 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
     try:
         if args.apply_live_writes and args.workbook is None:
             raise ValueError("--apply-live-writes requires --workbook")
+        pi_register_provider = _load_import_pi_register_provider(
+            erp_pi_report=args.erp_pi_report,
+            live_erp_pi_register=False,
+            config=None,
+        )
         workbook_snapshot = load_import_workbook_snapshot(
             workbook_json=args.workbook_json,
             workbook_path=args.workbook,
@@ -2813,6 +2829,7 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
             state_timezone=args.state_timezone,
             apply_live_writes=args.apply_live_writes,
             workbook_path=args.workbook,
+            pi_register_provider=pi_register_provider,
         )
         summary["html_report_open_requested"] = not args.no_open_report
         summary["html_report_opened"] = False
@@ -2892,6 +2909,11 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
             workbook_json=args.workbook_json,
             workbook_path=workbook_path,
         )
+        pi_register_provider = _load_import_pi_register_provider(
+            erp_pi_report=args.erp_pi_report,
+            live_erp_pi_register=args.live_erp_pi_register,
+            config=config,
+        )
 
         mail_move_provider = None
         if args.move_mails:
@@ -2923,6 +2945,7 @@ def _handle_run_import_btb_lc_current(args: argparse.Namespace) -> int:
             workbook_path=workbook_path,
             move_mails=args.move_mails,
             mail_move_provider=mail_move_provider,
+            pi_register_provider=pi_register_provider,
         )
         summary["html_report_open_requested"] = not args.no_open_report
         summary["html_report_opened"] = False
@@ -4223,6 +4246,45 @@ def _load_erp_provider(
             headless=bool(config.values.get("playwright_headless", False)),
         )
     return EmptyERPRowProvider()
+
+
+def _load_import_pi_register_provider(
+    *,
+    erp_pi_report: Path | None,
+    live_erp_pi_register: bool,
+    config,
+):
+    configured_report = None
+    if config is not None:
+        configured_value = str(config.values.get("import_pi_register_export_path", "")).strip()
+        configured_report = Path(configured_value) if configured_value else None
+    selected_report = erp_pi_report or configured_report
+    selected_count = int(selected_report is not None) + int(live_erp_pi_register)
+    if selected_count > 1:
+        raise ValueError("Choose one import PI register source: --erp-pi-report/config import_pi_register_export_path or --live-erp-pi-register")
+    if selected_report is not None:
+        if selected_report.suffix.casefold() == ".json":
+            return JsonManifestImportPIRegisterProvider(selected_report)
+        return DelimitedImportPIRegisterProvider(selected_report)
+    if live_erp_pi_register:
+        if config is None:
+            raise ValueError("--live-erp-pi-register requires --config")
+        storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+        configured_fill_values = _resolve_configured_erp_fill_values(config)
+        return PlaywrightImportPIRegisterProvider(
+            base_url=str(config.values.get("erp_base_url", "")).strip(),
+            report_relative_url=str(config.values.get("erp_import_pi_register_relative_url", "")).strip(),
+            browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
+            storage_state_path=Path(storage_state_value) if storage_state_value else None,
+            field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
+            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip(),
+            post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
+            download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip(),
+            download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip(),
+            timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
+            headless=bool(config.values.get("playwright_headless", False)),
+        )
+    return EmptyImportPIRegisterProvider()
 
 
 def _load_dashboard_provider(

@@ -134,6 +134,7 @@ Each `import_document_outcomes[]` item must include:
 - `currency` (nullable when invalid/unavailable)
 - `pi_numbers_raw` (ordered array; empty when unavailable)
 - `pi_numbers` (ordered canonical array; empty when invalid/unavailable)
+- `pi_register_validation` (object; ERP PI register aggregation evidence, including per-PI row indexes, aggregated PI total amount, aggregated PI quantity kg, and exact-match decision)
 - `related_export_lc_raw` (nullable when unavailable)
 - `related_export_lc` (nullable when invalid/unavailable)
 - `field_provenance` (object keyed by extracted field)
@@ -143,6 +144,7 @@ Each `import_document_outcomes[]` item must include:
 - `candidate_rows` (ordered array)
 - `selected_sl_no` (string or null; resolved from the workbook `SL.No.` column and treated as text, not inferred from row order)
 - `selected_row_index` (integer or null; audit trace only)
+- `selected_quantity_kgs` (canonical decimal string or null; sourced only from the aggregated ERP import PI register quantity after exact value match)
 - `allocation_attempts` (ordered array; empty for duplicates or pre-allocation hard blocks)
 - `document_decision` (`pass` | `warning` | `hard_block`)
 - `warning_codes` (array)
@@ -173,7 +175,7 @@ Each `allocation_attempts[]` item must include:
 - `restart_reason` (nullable)
 
 For every staged `import_btb_lc` write operation:
-- `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, or `import_lc_amount`; no other workbook column is writable by this workflow
+- `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, `import_lc_amount`, or `quantity_kgs`; no other workbook column is writable by this workflow
 - `expected_pre_write_value` must be canonical blank
 - live target-prevalidation evidence must record the observed value for each destination cell
 - `import_target_cell_already_populated` details must include `sheet_name`, `row_index`, `column_key`, `expected_pre_write_value`, and `observed_value`

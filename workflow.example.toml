@@ -23,11 +23,21 @@ import_amount_currency = "USD"
 # Outlook / ERP / browser settings.
 outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
+# For the live Badsha ERP environment, use:
+# erp_base_url = "https://btlerp.badshatex.com"
+# Keep real credentials outside git, preferably in environment variables:
+# CCA_ERP_USERNAME and CCA_ERP_PASSWORD.
+# erp_username = "REPLACE_WITH_USERNAME"
+# erp_password = "REPLACE_WITH_PASSWORD"
 playwright_browser_channel = "msedge"
 playwright_headless = true
 
 # Live ERP report settings.
 erp_lc_register_relative_url = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
+erp_import_pi_register_relative_url = "/RptExportPInLC/PIRegisterCustomsPDL"
+# Optional saved import PI register export for import_btb_lc validation.
+# The sample production-style report path is:
+# import_pi_register_export_path = "D:/customs-automation/rptPIRegisterCustomsPDL.csv"
 erp_download_timeout_seconds = 120
 erp_report_default_lookback_days = 365
 erp_report_default_from_input_selector = ".dx-texteditor-input"

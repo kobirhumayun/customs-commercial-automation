@@ -18,6 +18,7 @@ PATH_KEYS = {
     "backup_root",
     "master_workbook_root",
     "import_document_root",
+    "import_pi_register_export_path",
     "playwright_storage_state_path",
     "acrobat_executable_path",
 }
@@ -36,6 +37,7 @@ INTEGER_KEYS = {
 }
 OPTIONAL_CONFIG_DEFAULTS: dict[str, Any] = {
     "erp_lc_register_relative_url": "/RptCommercialExport/DateWiseLCRegisterForDocuments",
+    "erp_import_pi_register_relative_url": "/RptExportPInLC/PIRegisterCustomsPDL",
     "playwright_headless": True,
     "erp_download_timeout_seconds": 120,
     "erp_report_submit_selector": 'role=button[name="Submit"]',
@@ -91,6 +93,10 @@ OPTIONAL_ENV_CONFIG_KEYS = tuple(
             "import_amount_currency",
             "import_destination_success_entry_id",
             "import_document_root",
+            "import_pi_register_export_path",
+            "erp_import_pi_register_relative_url",
+            "erp_username",
+            "erp_password",
             "source_working_folder_display_name",
             "destination_success_display_name",
         }

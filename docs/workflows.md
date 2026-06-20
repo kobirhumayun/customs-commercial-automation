@@ -818,7 +818,12 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - `Current Full Path`: PDFs that cannot be classified/extracted deterministically remain in source-evidence storage and are not promoted to the canonical import document hierarchy
 - `File Picker Path`: operator-selected previously stored PDF files; no Outlook folder access, message snapshot, or subject-keyword relevance filter applies
 - `File Picker Path`: each selected file is represented as one synthetic mail-level unit in run artifacts and mail-level reports
-- phase-1 `import_btb_lc` candidate selection is driven by extracted BTB LC data plus workbook state and does not require a separate ERP download/search step
+- phase-1 `import_btb_lc` candidate selection is driven by extracted BTB LC data, the ERP import PI register, and workbook state. The ERP import PI register supplies seller-PI value/quantity evidence because scanned PI pages are not deterministic extraction sources.
+- ERP import PI register source:
+  - ERP home page/base URL: `https://btlerp.badshatex.com`
+  - report path: `/RptExportPInLC/PIRegisterCustomsPDL`
+  - saved-export fixture/example: `D:\customs-automation\rptPIRegisterCustomsPDL.csv`
+  - local config documents `erp_base_url`, `erp_import_pi_register_relative_url`, optional saved export path `import_pi_register_export_path`, and operator-specific credentials/session settings; raw credentials must not be written into reports
 
 ### Extraction targets
 - Extract only the import BTB LC portion from the first three pages of the PDF
@@ -851,7 +856,10 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - compare the entire attachment filename stem with the canonical extracted BTB LC number after the same safe case/dash/outer-whitespace normalization; prefixes, suffixes, and repaired separators do not count as a match
 - attachment filename mismatch is warning-only evidence, applicable only when all other required extraction and workbook-selection requirements for that import BTB LC pass
 - Low-quality scanned PI and export-LC pages appended after the BTB LC are not phase-1 PDF extraction targets
-- PI yarn quantity remains a later import-ERP integration input and is not extracted from the scanned PDF in the initial live workflow
+- PI quantity is not extracted from scanned PDF PI pages. It is retrieved from the ERP import PI register by the seller PI numbers extracted from the BTB LC clauses.
+- ERP import PI register rows may split one PI across multiple rows. The workflow must aggregate `Total Amount` and `Qty.Kg` for each extracted PI, then aggregate across all extracted PIs for the BTB LC document.
+- The aggregated ERP PI total amount must exactly equal the extracted BTB LC value using exact decimal arithmetic. Missing PI rows, invalid ERP amount/quantity values, or any amount mismatch hard-block before workbook row allocation/write staging.
+- When the aggregated ERP PI total amount exactly matches the BTB LC value, the aggregated ERP `Qty.Kg` value becomes the source for the workbook `Quantity (Kgs)` write.
 - if no import BTB LC PDF can be extracted deterministically from a relevant mail, the mail hard-blocks and the report must capture the missing/failed extraction evidence
 - evaluate every PDF attachment for import classification from the allowed first-three-page evidence
 - a PDF deterministically classified as non-import may be ignored with audit evidence and is not promoted; a PDF that appears to be an import BTB LC but is missing/invalid on any required field is a document hard block and must not be downgraded to ignored
@@ -859,7 +867,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - all import BTB LC clause parsing should assume UCP-style clause semantics even when bank-specific visual layout differs
 
 ### Candidate row rules
-- Resolve import workbook headers explicitly: canonical export LC `L/C & S/C No.`, `UP No.`, export `Amount` at fixed column 6, `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` at fixed column 22
+- Resolve import workbook headers explicitly: canonical export LC `L/C & S/C No.`, `UP No.`, export `Amount` at fixed column 6, `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` at fixed column 22, and `Quantity (Kgs)`
 - Normalize import BTB LC values and workbook export LC values to exact canonical decimals before comparison; both are interpreted in configured `import_amount_currency`
 - Group all validated import BTB LCs in the run by related export LC
 - Allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or synthetic source path ascending
@@ -878,12 +886,12 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - `BTB LC Issue Date` target field blank
 - import `Amount` column 22 blank
 - row not already selected by an earlier import BTB LC allocation in the same run
-- the only cells `import_btb_lc` may write are `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` column 22; all other workbook cells are read-only inputs for this workflow
-- all three destination cells must be blank when the row is evaluated, when write operations are staged, and when the live workbook is prevalidated immediately before batch apply
+- the only cells `import_btb_lc` may write are `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, and `Quantity (Kgs)`; all other workbook cells are read-only inputs for this workflow
+- all four destination cells must be blank when the row is evaluated, when write operations are staged, and when the live workbook is prevalidated immediately before batch apply
 - every staged import write operation must persist a blank `expected_pre_write_value`; a non-blank expected pre-write value is an invalid staged plan
 - if any destination cell becomes populated after allocation but before batch apply, emit `import_target_cell_already_populated` and hard-block the batch before any workbook mutation; do not reinterpret the late value as a duplicate
 - a proven workbook duplicate remains a duplicate-only/no-write outcome and must not generate staged write operations
-- if exactly one of `BTB L/C No.` and import `Amount` column 22 is blank on a matching-family row, hard-block as partial target state
+- if a matching-family row has only a partial set of import destination cells populated among `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, and `Quantity (Kgs)`, hard-block as partial target state
 - if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row
 - eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
 - if multiple rows qualify, select the row where the BTB LC value is the highest percentage of the normalized export LC value
