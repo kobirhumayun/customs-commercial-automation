@@ -801,6 +801,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
   - Current Full Path: `scripts/run_import_btb_lc_current_live.cmd`
   - File Picker Path: `scripts/run_import_btb_lc_file_picker_live.cmd`
 - Both bundled launchers read `import_document_root` from the local config; this root is required and must not be a hard-coded launcher default.
+- Both bundled launchers require the operator to supply a saved import PI register CSV/JSON report before processing. If `-ErpPIReport` is not passed to the PowerShell launcher, the launcher opens a file picker for the report and forwards it to the workflow as `--erp-pi-report`.
 - Current Full Path mail movement uses `import_destination_success_entry_id` for the dedicated Outlook `Import` folder. The shared `destination_success_entry_id` key remains unchanged for finalized workflows until the broader folder-key refactor is approved.
 - Persist `launcher_path=current_full` or `launcher_path=file_picker` in run metadata and all import mail outcomes.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
@@ -823,7 +824,8 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
   - ERP home page/base URL: `https://btlerp.badshatex.com`
   - report path: `/RptExportPInLC/PIRegisterCustomsPDL`
   - this is a raw-material/yarn import ERP, separate from the export ERP represented by `erp_base_url`
-  - local config documents `import_erp_base_url`, `import_erp_pi_register_relative_url`, and operator-specific credentials/session settings; raw credentials must not be written into reports
+  - local config documents `import_erp_base_url`, `import_erp_pi_register_relative_url`, and operator-specific credentials/session settings for the future live download path; raw credentials must not be written into reports
+  - while the import ERP server/download path is unavailable, the active production path is a manually saved CSV/JSON supplied explicitly through the launchers or CLI
   - saved exports such as `D:\customs-automation\rptPIRegisterCustomsPDL.csv` are reference/offline inputs only and may be supplied explicitly with the workflow CLI for deterministic verification; they are not durable configuration defaults
 
 ### Extraction targets

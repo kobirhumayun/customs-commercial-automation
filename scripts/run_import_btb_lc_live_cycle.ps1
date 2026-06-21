@@ -6,6 +6,7 @@ param(
     [string]$OutputDirectory = "",
     [string]$LauncherLogRoot = "",
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$ErpPIReport = "",
     [string[]]$InputPath = @(),
     [switch]$NoOpenReport,
     [switch]$PreviewCommand,
@@ -204,6 +205,37 @@ function Select-ImportPdfFiles {
     return @($dialog.FileNames)
 }
 
+function Select-ImportPIRegisterReport {
+    param([string]$InitialDirectory)
+
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = "Select downloaded Import PI register report"
+    $dialog.InitialDirectory = $InitialDirectory
+    $dialog.Filter = "PI register reports (*.csv;*.json)|*.csv;*.json|CSV files (*.csv)|*.csv|JSON files (*.json)|*.json|All files (*.*)|*.*"
+    $dialog.Multiselect = $false
+    $dialog.CheckFileExists = $true
+    $dialog.CheckPathExists = $true
+    $result = $dialog.ShowDialog()
+    if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+        return ""
+    }
+    return $dialog.FileName
+}
+
+function Assert-ImportPIRegisterReport {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Import PI register report does not exist: $Path"
+    }
+    $extension = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
+    if ($extension -notin @(".csv", ".json")) {
+        throw "Import PI register report must be a CSV or JSON file: $Path"
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
     Write-Host "Config file not found: $Config" -ForegroundColor Red
     Finish-Script 1
@@ -257,6 +289,16 @@ Write-LauncherLine "Launcher log: $script:LauncherLogPath" "Green"
 
 Push-Location $RepoRoot
 try {
+    if (-not $ErpPIReport) {
+        $ErpPIReport = Select-ImportPIRegisterReport -InitialDirectory $configReportRoot
+    }
+    if (-not $ErpPIReport) {
+        Write-LauncherLine "No Import PI register report selected. Nothing to do." "Yellow"
+        Finish-Script 1
+    }
+    Assert-ImportPIRegisterReport -Path $ErpPIReport
+    Write-LauncherLine "Import PI register report: $ErpPIReport" "Green"
+
     if ($LauncherPath -eq "current_full") {
         Write-Section "Current Full Live Run"
         $arguments = @(
@@ -266,6 +308,7 @@ try {
             "--live-outlook-snapshot",
             "--output", $OutputDirectory,
             "--import-document-root", $ImportDocumentRoot,
+            "--erp-pi-report", $ErpPIReport,
             "--apply-live-writes",
             "--move-mails",
             "--live-mail-moves"
@@ -311,6 +354,7 @@ try {
             "--workbook", $workbookPath,
             "--import-document-root", $ImportDocumentRoot,
             "--state-timezone", $configStateTimezone,
+            "--erp-pi-report", $ErpPIReport,
             "--apply-live-writes"
         )
         foreach ($selectedPath in $selectedPaths) {
