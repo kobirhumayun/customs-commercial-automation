@@ -822,8 +822,9 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - ERP import PI register source:
   - ERP home page/base URL: `https://btlerp.badshatex.com`
   - report path: `/RptExportPInLC/PIRegisterCustomsPDL`
-  - saved-export fixture/example: `D:\customs-automation\rptPIRegisterCustomsPDL.csv`
-  - local config documents `erp_base_url`, `erp_import_pi_register_relative_url`, optional saved export path `import_pi_register_export_path`, and operator-specific credentials/session settings; raw credentials must not be written into reports
+  - this is a raw-material/yarn import ERP, separate from the export ERP represented by `erp_base_url`
+  - local config documents `import_erp_base_url`, `import_erp_pi_register_relative_url`, and operator-specific credentials/session settings; raw credentials must not be written into reports
+  - saved exports such as `D:\customs-automation\rptPIRegisterCustomsPDL.csv` are reference/offline inputs only and may be supplied explicitly with the workflow CLI for deterministic verification; they are not durable configuration defaults
 
 ### Extraction targets
 - Extract only the import BTB LC portion from the first three pages of the PDF

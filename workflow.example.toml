@@ -23,21 +23,11 @@ import_amount_currency = "USD"
 # Outlook / ERP / browser settings.
 outlook_profile = "outlook"
 erp_base_url = "https://erp.example.local"
-# For the live Badsha ERP environment, use:
-# erp_base_url = "https://btlerp.badshatex.com"
-# Keep real credentials outside git, preferably in environment variables:
-# CCA_ERP_USERNAME and CCA_ERP_PASSWORD.
-# erp_username = "REPLACE_WITH_USERNAME"
-# erp_password = "REPLACE_WITH_PASSWORD"
 playwright_browser_channel = "msedge"
 playwright_headless = true
 
-# Live ERP report settings.
+# Export ERP report settings.
 erp_lc_register_relative_url = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
-erp_import_pi_register_relative_url = "/RptExportPInLC/PIRegisterCustomsPDL"
-# Optional saved import PI register export for import_btb_lc validation.
-# The sample production-style report path is:
-# import_pi_register_export_path = "D:/customs-automation/rptPIRegisterCustomsPDL.csv"
 erp_download_timeout_seconds = 120
 erp_report_default_lookback_days = 365
 erp_report_default_from_input_selector = ".dx-texteditor-input"
@@ -56,6 +46,17 @@ erp_report_table_selector = "table"
 # Optional ERP report selectors for `inspect-erp-download`.
 # Fill these from Playwright codegen or manual inspection.
 # erp_report_fill_values = ["#fromDate=2026-03-01", "#toDate=2026-03-31"]
+
+# Import ERP report settings for `import_btb_lc` seller-PI quantity/value validation.
+# This is a separate raw-material/yarn ERP from the export ERP above.
+import_erp_base_url = "https://btlerp.badshatex.com"
+import_erp_pi_register_relative_url = "/RptExportPInLC/PIRegisterCustomsPDL"
+# Keep real credentials outside git, preferably in environment variables:
+# CCA_IMPORT_ERP_USERNAME and CCA_IMPORT_ERP_PASSWORD.
+# import_erp_username = "REPLACE_WITH_USERNAME"
+# import_erp_password = "REPLACE_WITH_PASSWORD"
+# For offline deterministic verification, pass a downloaded CSV/JSON to:
+# uv run python -m project run-import-btb-lc-current ... --erp-pi-report "<path>"
 
 # Bangladesh Bank dashboard live settings for `bb_dashboard_verification`.
 # The workflow also supports deterministic fixtures through:

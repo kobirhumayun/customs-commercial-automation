@@ -432,7 +432,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_import_btb_lc_current_parser.add_argument("--attachment-directory", type=Path, help="Directory containing attachment files for --snapshot-json verification.")
     run_import_btb_lc_current_parser.add_argument("--workbook-json", type=Path, help="Optional workbook snapshot JSON manifest.")
     run_import_btb_lc_current_parser.add_argument("--workbook", type=Path, help="Optional live workbook path. Defaults to config yearly workbook when --workbook-json is absent.")
-    run_import_btb_lc_current_parser.add_argument("--erp-pi-report", type=Path, help="Optional import PI register CSV/JSON export. Defaults to config import_pi_register_export_path when present.")
+    run_import_btb_lc_current_parser.add_argument("--erp-pi-report", type=Path, help="Optional import PI register CSV/JSON export for deterministic verification or offline processing.")
     run_import_btb_lc_current_parser.add_argument("--live-erp-pi-register", action="store_true", help="Download the import PI register report through the configured live ERP path.")
     run_import_btb_lc_current_parser.add_argument("--run-id", help="Optional stable run id for repeatable verification output names.")
     run_import_btb_lc_current_parser.add_argument("--apply-live-writes", action="store_true", help="Apply staged import writes to --workbook after live prevalidation succeeds.")
@@ -4254,14 +4254,10 @@ def _load_import_pi_register_provider(
     live_erp_pi_register: bool,
     config,
 ):
-    configured_report = None
-    if config is not None:
-        configured_value = str(config.values.get("import_pi_register_export_path", "")).strip()
-        configured_report = Path(configured_value) if configured_value else None
-    selected_report = erp_pi_report or configured_report
+    selected_report = erp_pi_report
     selected_count = int(selected_report is not None) + int(live_erp_pi_register)
     if selected_count > 1:
-        raise ValueError("Choose one import PI register source: --erp-pi-report/config import_pi_register_export_path or --live-erp-pi-register")
+        raise ValueError("Choose one import PI register source: --erp-pi-report or --live-erp-pi-register")
     if selected_report is not None:
         if selected_report.suffix.casefold() == ".json":
             return JsonManifestImportPIRegisterProvider(selected_report)
@@ -4269,11 +4265,14 @@ def _load_import_pi_register_provider(
     if live_erp_pi_register:
         if config is None:
             raise ValueError("--live-erp-pi-register requires --config")
+        import_erp_base_url = str(config.values.get("import_erp_base_url", "")).strip()
+        if not import_erp_base_url:
+            raise ValueError("--live-erp-pi-register requires config key import_erp_base_url")
         storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
         configured_fill_values = _resolve_configured_erp_fill_values(config)
         return PlaywrightImportPIRegisterProvider(
-            base_url=str(config.values.get("erp_base_url", "")).strip(),
-            report_relative_url=str(config.values.get("erp_import_pi_register_relative_url", "")).strip(),
+            base_url=import_erp_base_url,
+            report_relative_url=str(config.values.get("import_erp_pi_register_relative_url", "")).strip(),
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
             field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
