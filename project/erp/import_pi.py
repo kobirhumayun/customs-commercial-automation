@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import tempfile
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -129,13 +130,13 @@ class PlaywrightImportPIRegisterProvider:
 
 def canonicalize_import_pi_number(raw_value: object) -> str | None:
     text = str(raw_value or "").strip().upper()
-    text = text.replace("\\", "/").replace("-", "/")
-    parts = [part.strip() for part in text.split("/") if part.strip()]
-    if len(parts) != 3 or parts[0] not in {"BTL", "KYL"}:
+    match = re.fullmatch(
+        r"(BTL|KYL)\s*[/-]\s*(\d{2})\s*[/-]\s*(\d{4})(?:\s+(?:REV|REVISED)\b(?:[-\s]*\d+)?)?",
+        text.replace("\\", "/"),
+    )
+    if match is None:
         return None
-    if not (parts[1].isdigit() and len(parts[1]) == 2 and parts[2].isdigit() and len(parts[2]) == 4):
-        return None
-    return f"{parts[0]}/{parts[1]}/{parts[2]}"
+    return f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
 
 
 def parse_import_pi_decimal(raw_value: object) -> Decimal | None:

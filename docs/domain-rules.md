@@ -506,6 +506,7 @@ The dashboard column is verification-only and should not be used to drive other 
 - Repeated mentions of the same canonical PI are deduplicated while their occurrence-level provenance remains available.
 - If no seller PI is found, or any extracted PI-like candidate from the applicable LC clauses does not satisfy an approved regex pattern, seller PI extraction is not valid for deterministic phase-1 import processing.
 - Scanned PI pages are not a deterministic source for quantity in phase 1. After seller PI extraction, `import_btb_lc` must resolve those PI numbers through the ERP import PI register report `RptExportPInLC/PIRegisterCustomsPDL`.
+- ERP import PI register `PI Number` values may include a trailing revision marker such as `REVISED-1`; for ERP register matching only, the workflow canonicalizes that value to the base `BTL/YY/NNNN` or `KYL/YY/NNNN` seller PI number.
 - The ERP import PI register may split one PI across multiple rows. For each extracted PI, sum all matched `Total Amount` values and all matched `Qty.Kg` values using exact decimal arithmetic; then sum those per-PI totals across the ordered PI collection for the document.
 - Every extracted PI must have at least one ERP register row. Missing PI rows, invalid ERP `Total Amount`, invalid ERP `Qty.Kg`, or unreadable ERP report data are hard blocks.
 - The aggregated ERP PI `Total Amount` for all extracted PIs must exactly equal the extracted BTB LC value. No rounding, tolerance, currency conversion, or scanned-PI fallback is permitted.

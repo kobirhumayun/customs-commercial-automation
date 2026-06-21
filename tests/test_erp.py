@@ -513,6 +513,28 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(parse_import_pi_decimal("1,50,000."), parse_import_pi_decimal("150000"))
         self.assertEqual(format_import_pi_decimal(parse_import_pi_decimal("1,709") or 0), "1709")
 
+    def test_delimited_import_pi_register_accepts_erp_revision_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,PI Date,Buyer Name,Description of Goods,Tenor,Bankers,HS Code,Qty.Bag,Qty.Kg,Price/KG,Total Amount,File No,LC Number",
+                        '2,BADSHA TEXTILES LTD.,BTL/26/3761 REVISED-1,13.06.26,ARGON DENIMS LTD.,YARN,,Mercantile Bank PLC.,5510,13,650,3.35,"2,177.5",,',
+                        '612,KAMAL YARN LIMITED,KYL/26/1925,18.06.26,ANANTA GARMENTS LTD.,YARN,120,Mutual Trust Bank PLC.,5203,80,"3,992",3.7,"14,770.4",K1653/26,0002228260404850',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+            revised_rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["BTL/26/3761"])
+
+        self.assertEqual(len(rows["KYL/26/1925"]), 1)
+        self.assertEqual(rows["KYL/26/1925"][0].total_amount, "14770.4")
+        self.assertEqual(len(revised_rows["BTL/26/3761"]), 1)
+        self.assertEqual(revised_rows["BTL/26/3761"][0].pi_number, "BTL/26/3761")
+
     def test_delimited_export_provider_requires_ship_remarks_header_but_allows_blank_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             missing_header_path = Path(temp_dir) / "missing_ship_remarks.csv"
