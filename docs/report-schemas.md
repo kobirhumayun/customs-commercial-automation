@@ -157,8 +157,10 @@ Each `candidate_rows[]` item must include:
 - `canonical_export_lc`
 - `up_no_blank`
 - `btb_lc_no_blank`
+- `btb_lc_issue_date_blank`
 - `import_amount_blank`
-- `target_cells_blank_at_evaluation` (boolean; true only when both import destination cells are blank)
+- `quantity_kgs_blank`
+- `target_cells_blank_at_evaluation` (boolean; true only when all four import destination cells are blank)
 - `row_reserved_in_run`
 - `export_amount`
 - `lower_bound_40_percent`
@@ -175,7 +177,7 @@ Each `allocation_attempts[]` item must include:
 - `restart_reason` (nullable)
 
 For every staged `import_btb_lc` write operation:
-- `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, `import_lc_amount`, or `quantity_kgs`; no other workbook column is writable by this workflow
+- `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, `import_amount`, or `quantity_kgs`; no other workbook column is writable by this workflow
 - `expected_pre_write_value` must be canonical blank
 - live target-prevalidation evidence must record the observed value for each destination cell
 - `import_target_cell_already_populated` details must include `sheet_name`, `row_index`, `column_key`, `expected_pre_write_value`, and `observed_value`

@@ -945,9 +945,9 @@ Before enabling either launcher in production, tests must cover:
 - mail-atomic reservation release and deterministic allocation restart
 - filename mismatch warning without replacement of extracted values
 - same-name/same-hash storage reuse and same-name/different-hash hard block
-- both import destination cells blank at candidate evaluation, staging, and live pre-write validation
-- either import destination cell populated initially, including partial target state, with no overwrite
-- either import destination cell populated after staging but before apply, causing whole-batch hard block with zero workbook mutation
+- all four import destination cells blank at candidate evaluation, staging, and live pre-write validation
+- any import destination cell populated initially, including partial target state, with no overwrite
+- any import destination cell populated after staging but before apply, causing whole-batch hard block with zero workbook mutation
 - exact workbook duplicate remains no-write and never rewrites existing cells
 - deterministic non-import exclusion, ambiguous attachment classification, and relevant mail with no valid import document
 - include/exclude subject relevance and non-actionable ineligible-mail reporting
