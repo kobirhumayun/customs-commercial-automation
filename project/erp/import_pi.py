@@ -46,11 +46,15 @@ class EmptyImportPIRegisterProvider:
 @dataclass(slots=True, frozen=True)
 class JsonManifestImportPIRegisterProvider:
     manifest_path: Path
+    _cached_rows: tuple[ImportPIRegisterRow, ...] | None = field(default=None, init=False, repr=False, compare=False)
+    _cached_index: dict[str, tuple[ImportPIRegisterRow, ...]] | None = field(default=None, init=False, repr=False, compare=False)
 
     def lookup_pi_numbers(self, *, pi_numbers: list[str]) -> dict[str, list[ImportPIRegisterRow]]:
-        return _index_pi_rows(pi_numbers=pi_numbers, rows=self.load_rows())
+        return _lookup_pi_rows_from_index(pi_numbers=pi_numbers, index=self._get_row_index())
 
     def load_rows(self) -> list[ImportPIRegisterRow]:
+        if self._cached_rows is not None:
+            return list(self._cached_rows)
         with self.manifest_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         raw_rows = payload.get("rows") if isinstance(payload, dict) else payload
@@ -67,18 +71,31 @@ class JsonManifestImportPIRegisterProvider:
                     row_label=f"Import PI manifest row {index}",
                 )
             )
-        return rows
+        cached = tuple(rows)
+        object.__setattr__(self, "_cached_rows", cached)
+        return list(cached)
+
+    def _get_row_index(self) -> dict[str, tuple[ImportPIRegisterRow, ...]]:
+        if self._cached_index is not None:
+            return self._cached_index
+        index = _build_pi_row_index(self.load_rows())
+        object.__setattr__(self, "_cached_index", index)
+        return index
 
 
 @dataclass(slots=True, frozen=True)
 class DelimitedImportPIRegisterProvider:
     export_path: Path
     delimiter: str | None = None
+    _cached_rows: tuple[ImportPIRegisterRow, ...] | None = field(default=None, init=False, repr=False, compare=False)
+    _cached_index: dict[str, tuple[ImportPIRegisterRow, ...]] | None = field(default=None, init=False, repr=False, compare=False)
 
     def lookup_pi_numbers(self, *, pi_numbers: list[str]) -> dict[str, list[ImportPIRegisterRow]]:
-        return _index_pi_rows(pi_numbers=pi_numbers, rows=self.load_rows())
+        return _lookup_pi_rows_from_index(pi_numbers=pi_numbers, index=self._get_row_index())
 
     def load_rows(self) -> list[ImportPIRegisterRow]:
+        if self._cached_rows is not None:
+            return list(self._cached_rows)
         if not self.export_path.exists():
             raise ValueError(f"Import PI register path does not exist: {self.export_path}")
         text = _decode_delimited_export_text(self.export_path)
@@ -87,7 +104,16 @@ class DelimitedImportPIRegisterProvider:
         handle.seek(0)
         reader = csv.reader(handle, delimiter=self.delimiter or _resolve_delimiter(self.export_path, sample))
         matrix = [[cell.strip() for cell in row] for row in reader]
-        return _load_import_pi_rows_from_matrix(matrix, source_name=str(self.export_path))
+        rows = tuple(_load_import_pi_rows_from_matrix(matrix, source_name=str(self.export_path)))
+        object.__setattr__(self, "_cached_rows", rows)
+        return list(rows)
+
+    def _get_row_index(self) -> dict[str, tuple[ImportPIRegisterRow, ...]]:
+        if self._cached_index is not None:
+            return self._cached_index
+        index = _build_pi_row_index(self.load_rows())
+        object.__setattr__(self, "_cached_index", index)
+        return index
 
 
 @dataclass(slots=True)
@@ -111,9 +137,10 @@ class PlaywrightImportPIRegisterProvider:
     timeout_ms: int = 120_000
     headless: bool = True
     _cached_rows: tuple[ImportPIRegisterRow, ...] | None = field(default=None, init=False, repr=False)
+    _cached_index: dict[str, tuple[ImportPIRegisterRow, ...]] | None = field(default=None, init=False, repr=False)
 
     def lookup_pi_numbers(self, *, pi_numbers: list[str]) -> dict[str, list[ImportPIRegisterRow]]:
-        return _index_pi_rows(pi_numbers=pi_numbers, rows=self.load_rows())
+        return _lookup_pi_rows_from_index(pi_numbers=pi_numbers, index=self._get_row_index())
 
     def load_rows(self) -> list[ImportPIRegisterRow]:
         if self._cached_rows is not None:
@@ -140,6 +167,12 @@ class PlaywrightImportPIRegisterProvider:
         )
         self._cached_rows = tuple(rows)
         return rows
+
+    def _get_row_index(self) -> dict[str, tuple[ImportPIRegisterRow, ...]]:
+        if self._cached_index is not None:
+            return self._cached_index
+        self._cached_index = _build_pi_row_index(self.load_rows())
+        return self._cached_index
 
 
 def canonicalize_import_pi_number(raw_value: object) -> str | None:
@@ -352,18 +385,40 @@ def _index_pi_rows(
     pi_numbers: list[str],
     rows: list[ImportPIRegisterRow],
 ) -> dict[str, list[ImportPIRegisterRow]]:
+    return _lookup_pi_rows_from_index(
+        pi_numbers=pi_numbers,
+        index=_build_pi_row_index(rows),
+    )
+
+
+def _build_pi_row_index(rows: list[ImportPIRegisterRow]) -> dict[str, tuple[ImportPIRegisterRow, ...]]:
+    indexed: dict[str, list[ImportPIRegisterRow]] = {}
+    for row in rows:
+        indexed.setdefault(row.pi_number, []).append(row)
+    for matched_rows in indexed.values():
+        matched_rows.sort(key=lambda row: row.source_row_index)
+    return {pi_number: tuple(matched_rows) for pi_number, matched_rows in indexed.items()}
+
+
+def _lookup_pi_rows_from_index(
+    *,
+    pi_numbers: list[str],
+    index: dict[str, tuple[ImportPIRegisterRow, ...]],
+) -> dict[str, list[ImportPIRegisterRow]]:
+    normalized_numbers = _unique_canonical_pi_numbers(pi_numbers)
+    return {
+        pi_number: list(index.get(pi_number, ()))
+        for pi_number in normalized_numbers
+    }
+
+
+def _unique_canonical_pi_numbers(pi_numbers: list[str]) -> list[str]:
     normalized_numbers = []
     for pi_number in pi_numbers:
         canonical = canonicalize_import_pi_number(pi_number)
         if canonical is not None and canonical not in normalized_numbers:
             normalized_numbers.append(canonical)
-    indexed: dict[str, list[ImportPIRegisterRow]] = {pi_number: [] for pi_number in normalized_numbers}
-    for row in rows:
-        if row.pi_number in indexed:
-            indexed[row.pi_number].append(row)
-    for matched_rows in indexed.values():
-        matched_rows.sort(key=lambda row: row.source_row_index)
-    return indexed
+    return normalized_numbers
 
 
 def _parse_grouped_decimal(

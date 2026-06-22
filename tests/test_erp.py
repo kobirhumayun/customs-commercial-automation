@@ -6,10 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import project.erp.import_pi as import_pi_module
 from project.erp import (
     DelimitedERPExportRowProvider,
     DelimitedImportPIRegisterProvider,
     inspect_playwright_report_download,
+    ImportPIRegisterRow,
     JsonManifestERPRowProvider,
     PlaywrightImportPIRegisterProvider,
     PlaywrightERPRowProvider,
@@ -624,6 +626,73 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["BTL/26/3920"][0].total_amount, "5127")
         self.assertEqual(parse_import_pi_decimal("1,50,000."), parse_import_pi_decimal("150000"))
         self.assertEqual(format_import_pi_decimal(parse_import_pi_decimal("1,709") or 0), "1709")
+
+    def test_delimited_import_pi_provider_caches_rows_and_pi_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                        "2,KAMAL YARN LIMITED,KYL/26/1925,300,900",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = DelimitedImportPIRegisterProvider(export_path)
+            with patch(
+                "project.erp.import_pi._load_import_pi_rows_from_matrix",
+                wraps=import_pi_module._load_import_pi_rows_from_matrix,
+            ) as load_mock:
+                with patch(
+                    "project.erp.import_pi._build_pi_row_index",
+                    wraps=import_pi_module._build_pi_row_index,
+                ) as index_mock:
+                    first_rows = provider.lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+                    second_rows = provider.lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+
+        self.assertEqual(load_mock.call_count, 1)
+        self.assertEqual(index_mock.call_count, 1)
+        self.assertEqual(first_rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(second_rows["KYL/26/1925"][0].quantity_kg, "300")
+
+    def test_playwright_import_pi_provider_caches_download_rows_and_pi_index(self) -> None:
+        rows = [
+            ImportPIRegisterRow(
+                pi_number="BTL/26/3920",
+                quantity_kg="1709",
+                total_amount="5127",
+                source_row_index=2,
+            ),
+            ImportPIRegisterRow(
+                pi_number="KYL/26/1925",
+                quantity_kg="300",
+                total_amount="900",
+                source_row_index=3,
+            ),
+        ]
+        provider = PlaywrightImportPIRegisterProvider(
+            base_url="https://import-erp.local",
+            download_format_selector="text=CSV",
+        )
+
+        with patch(
+            "project.erp.import_pi._load_import_pi_rows_from_playwright_download",
+            return_value=rows,
+        ) as download_mock:
+            with patch(
+                "project.erp.import_pi._build_pi_row_index",
+                wraps=import_pi_module._build_pi_row_index,
+            ) as index_mock:
+                first_rows = provider.lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+                second_rows = provider.lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+
+        self.assertEqual(download_mock.call_count, 1)
+        self.assertEqual(index_mock.call_count, 1)
+        self.assertEqual(first_rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(second_rows["KYL/26/1925"][0].quantity_kg, "300")
 
     def test_delimited_import_pi_register_accepts_erp_revision_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
