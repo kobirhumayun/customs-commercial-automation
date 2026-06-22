@@ -6,6 +6,7 @@ import hashlib
 import io
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urljoin
@@ -272,18 +273,12 @@ def inspect_playwright_report_download(
                 timeout_ms=timeout_ms,
             )
             if login_url and username and password:
-                page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                page.goto(target_url, wait_until="commit", timeout=timeout_ms)
                 _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
 
             for selector, value in field_values:
                 locator = page.locator(selector)
-                locator.wait_for(state="visible", timeout=timeout_ms)
-                _click_locator(locator, timeout_ms=timeout_ms)
-                locator.fill(value)
-                try:
-                    locator.press("Tab")
-                except Exception:
-                    pass
+                _fill_report_field(page, locator, value, timeout_ms=timeout_ms)
             payload["field_readbacks"] = _collect_field_readbacks(page, field_values)
 
             if submit_selector:
@@ -384,7 +379,8 @@ def _maybe_perform_login(
 
     payload["attempted"] = True
     payload["status"] = "attempted"
-    username_locator = page.locator(username_selector)
+    username_locator = page.locator(username_selector).first
+    password_locator = password_locator.first
     username_locator.wait_for(state="visible", timeout=timeout_ms)
     _click_locator(username_locator, timeout_ms=timeout_ms)
     username_locator.fill(username)
@@ -396,6 +392,10 @@ def _maybe_perform_login(
         page.locator(post_login_wait_selector).wait_for(state="visible", timeout=timeout_ms)
     else:
         _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+        try:
+            page.wait_for_timeout(3000)
+        except Exception:
+            pass
     payload["status"] = "submitted"
     return payload
 
@@ -420,6 +420,107 @@ def _click_locator(locator, *, timeout_ms: int) -> None:
 def _click_error_supports_force_retry(error: Exception) -> bool:
     normalized = str(error).casefold()
     return "intercepts pointer events" in normalized or "element click intercepted" in normalized
+
+
+def _fill_report_field(page, locator, value: str, *, timeout_ms: int) -> None:
+    locator.wait_for(state="visible", timeout=timeout_ms)
+    _click_locator(locator, timeout_ms=timeout_ms)
+    locator.fill(value)
+    if _locator_value_matches(locator, value):
+        _try_commit_devexpress_dropdown_text(page, locator)
+    _best_effort_press(locator, "Tab")
+    if _locator_value_matches(locator, value):
+        return
+    if _try_fill_devexpress_datebox(page, locator, value):
+        _best_effort_press(locator, "Tab")
+
+
+def _best_effort_press(locator, key: str) -> None:
+    try:
+        locator.press(key)
+    except Exception:
+        pass
+
+
+def _locator_value_matches(locator, expected_value: str) -> bool:
+    try:
+        return locator.input_value() == expected_value
+    except Exception:
+        return False
+
+
+def _try_fill_devexpress_datebox(page, locator, value: str) -> bool:
+    iso_value = _parse_report_date_iso(value)
+    if iso_value is None:
+        return False
+    try:
+        result = locator.evaluate(
+            """
+            (input, isoValue) => {
+              const host = input.closest && input.closest('.dx-datebox');
+              if (!host) return false;
+              const jquery = window.jQuery || window.$;
+              if (!jquery || !jquery(host).dxDateBox) return false;
+              const instance = jquery(host).dxDateBox('instance');
+              if (!instance) return false;
+              instance.option('value', new Date(isoValue));
+              if (instance.close) instance.close();
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              input.dispatchEvent(new Event('blur', { bubbles: true }));
+              return true;
+            }
+            """,
+            iso_value,
+        )
+    except Exception:
+        return False
+    if result:
+        try:
+            page.wait_for_timeout(250)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def _try_commit_devexpress_dropdown_text(page, locator) -> bool:
+    try:
+        is_dropdown = locator.evaluate(
+            """
+            (input) => {
+              return Boolean(
+                input.closest
+                && input.closest('.dx-dropdowneditor')
+                && !input.closest('.dx-datebox')
+              );
+            }
+            """
+        )
+    except Exception:
+        return False
+    if not is_dropdown:
+        return False
+    try:
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+    _best_effort_press(locator, "Enter")
+    try:
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+    return True
+
+
+def _parse_report_date_iso(value: str) -> str | None:
+    for pattern in ("%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(value.strip(), pattern)
+        except ValueError:
+            continue
+        return parsed.strftime("%Y-%m-%dT00:00:00")
+    return None
 
 
 def _index_rows(*, file_numbers: list[str], rows: list[ERPRegisterRow]) -> dict[str, list[ERPRegisterRow]]:

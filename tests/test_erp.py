@@ -11,11 +11,12 @@ from project.erp import (
     DelimitedImportPIRegisterProvider,
     inspect_playwright_report_download,
     JsonManifestERPRowProvider,
+    PlaywrightImportPIRegisterProvider,
     PlaywrightERPRowProvider,
 )
 from project.erp.import_pi import format_import_pi_decimal, parse_import_pi_decimal
 from project.erp.normalization import normalize_lc_sc_date
-from project.erp.providers import _build_download_receipt
+from project.erp.providers import _build_download_receipt, _fill_report_field
 from project.workflows.erp_inspection import inspect_erp_rows
 
 
@@ -195,6 +196,85 @@ class ERPProviderTests(unittest.TestCase):
         self.assertTrue(receipt["has_required_erp_headers"])
         self.assertEqual(receipt["erp_header_missing"], [])
 
+    def test_fill_report_field_uses_devexpress_datebox_when_plain_fill_does_not_stick(self) -> None:
+        class FakePage:
+            def __init__(self) -> None:
+                self.waits: list[int] = []
+
+            def wait_for_timeout(self, timeout: int) -> None:
+                self.waits.append(timeout)
+
+        class FakeDateLocator:
+            def __init__(self) -> None:
+                self.value = ""
+                self.evaluated_iso_value = None
+                self.clicks: list[dict[str, object]] = []
+
+            @property
+            def first(self):
+                return self
+
+            def wait_for(self, state: str, timeout: int) -> None:
+                self.wait_call = (state, timeout)
+
+            def click(self, **kwargs) -> None:
+                self.clicks.append(kwargs)
+
+            def fill(self, value: str) -> None:
+                self.filled_value = value
+                self.value = ""
+
+            def press(self, key: str) -> None:
+                self.last_key = key
+
+            def input_value(self) -> str:
+                return self.value
+
+            def evaluate(self, _script: str, iso_value: str) -> bool:
+                self.evaluated_iso_value = iso_value
+                self.value = "24-Mar-2026"
+                return True
+
+        page = FakePage()
+        locator = FakeDateLocator()
+
+        _fill_report_field(page, locator, "24-Mar-2026", timeout_ms=30_000)
+
+        self.assertEqual(locator.evaluated_iso_value, "2026-03-24T00:00:00")
+        self.assertEqual(locator.value, "24-Mar-2026")
+        self.assertEqual(page.waits, [250])
+
+    def test_live_import_pi_provider_rejects_unretained_report_parameters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {"selector": "#buyerName", "matched": False},
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                with self.assertRaisesRegex(ValueError, "did not retain"):
+                    provider.load_rows()
+
     def test_inspect_playwright_report_download_retries_force_click_when_pointer_events_intercept(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "erp-debug"
@@ -228,6 +308,8 @@ class ERPProviderTests(unittest.TestCase):
                     return self
 
                 def count(self) -> int:
+                    if self.selector == "input[type=\"text\"]":
+                        return 2
                     return 1
 
                 def fill(self, value: str) -> None:

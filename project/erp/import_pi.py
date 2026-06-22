@@ -257,6 +257,18 @@ def _load_import_pi_rows_from_playwright_download(
         )
         if payload.get("status") != "ready":
             raise ValueError(f"Live import PI register download failed: {payload.get('error') or 'unknown error'}")
+        readbacks = payload.get("field_readbacks")
+        if isinstance(readbacks, list):
+            mismatched_selectors = [
+                str(item.get("selector"))
+                for item in readbacks
+                if isinstance(item, dict) and item.get("matched") is False
+            ]
+            if mismatched_selectors:
+                raise ValueError(
+                    "Live import PI register form did not retain one or more filled values: "
+                    + ", ".join(mismatched_selectors)
+                )
         downloaded_file_path = str(payload.get("downloaded_file_path") or "").strip()
         if not downloaded_file_path:
             raise ValueError("Live import PI register flow completed without a downloaded file.")
