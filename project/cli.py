@@ -368,6 +368,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_import_btb_lc_parser.add_argument(
+        "--config",
+        type=Path,
+        help="Optional TOML config. Required when --live-erp-pi-register is supplied.",
+    )
+    run_import_btb_lc_parser.add_argument(
         "--import-document-root",
         type=Path,
         help="Optional canonical import document root; when supplied, all selected PDFs must resolve beneath it.",
@@ -392,6 +397,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--erp-pi-report",
         type=Path,
         help="Optional import PI register CSV/JSON export used to validate PI value and quantity.",
+    )
+    run_import_btb_lc_parser.add_argument(
+        "--live-erp-pi-register",
+        action="store_true",
+        help="Download the import PI register report through the configured live import ERP path.",
     )
     run_import_btb_lc_parser.add_argument(
         "--run-id",
@@ -2809,12 +2819,22 @@ def _handle_extract_import_btb_lc(args: argparse.Namespace) -> int:
 
 def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
     try:
+        config = None
+        if args.config is not None:
+            descriptor = _descriptor_from_args(WorkflowId.IMPORT_BTB_LC.value)
+            config = load_workflow_config(
+                descriptor=descriptor,
+                config_path=args.config,
+                overrides={},
+            )
+        if args.live_erp_pi_register and config is None:
+            raise ValueError("--live-erp-pi-register requires --config")
         if args.apply_live_writes and args.workbook is None:
             raise ValueError("--apply-live-writes requires --workbook")
         pi_register_provider = _load_import_pi_register_provider(
             erp_pi_report=args.erp_pi_report,
-            live_erp_pi_register=False,
-            config=None,
+            live_erp_pi_register=args.live_erp_pi_register,
+            config=config,
         )
         workbook_snapshot = load_import_workbook_snapshot(
             workbook_json=args.workbook_json,
@@ -2826,7 +2846,7 @@ def _handle_run_import_btb_lc_file_picker(args: argparse.Namespace) -> int:
             workbook_snapshot=workbook_snapshot,
             run_id=args.run_id or build_run_id(WorkflowId.IMPORT_BTB_LC),
             import_document_root=args.import_document_root,
-            state_timezone=args.state_timezone,
+            state_timezone=config.state_timezone if config is not None else args.state_timezone,
             apply_live_writes=args.apply_live_writes,
             workbook_path=args.workbook,
             pi_register_provider=pi_register_provider,
@@ -3151,23 +3171,63 @@ def _handle_inspect_erp_download(args: argparse.Namespace) -> int:
             workflow_id=descriptor.workflow_id.value,
         )
         storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
+        if descriptor.workflow_id == WorkflowId.IMPORT_BTB_LC:
+            base_url = str(config.values.get("import_erp_base_url", "")).strip()
+            report_relative_url = str(config.values.get("import_erp_pi_register_relative_url", "")).strip()
+            field_values = (
+                _parse_selector_value_pairs(args.fills, option_name="--fill")
+                if args.fills
+                else []
+            ) or _resolve_configured_import_pi_register_fill_values(config) or _default_live_import_pi_register_fill_values(config)
+            submit_selector = args.submit_selector or str(config.values.get("import_erp_pi_register_submit_selector", "")).strip()
+            post_submit_wait_selector = args.post_submit_wait_selector or str(config.values.get("import_erp_pi_register_post_submit_wait_selector", "")).strip()
+            download_menu_selector = args.download_menu_selector or str(config.values.get("import_erp_pi_register_download_menu_selector", "")).strip()
+            download_format_selector = args.download_format_selector or str(config.values.get("import_erp_pi_register_download_format_selector", "")).strip()
+            username = str(config.values.get("import_erp_username", "")).strip() or None
+            password = str(config.values.get("import_erp_password", "")).strip() or None
+            login_url = str(config.values.get("import_erp_login_url", "")).strip() or base_url
+            username_selector = str(config.values.get("import_erp_username_selector", "")).strip() or None
+            password_selector = str(config.values.get("import_erp_password_selector", "")).strip() or None
+            login_submit_selector = str(config.values.get("import_erp_login_submit_selector", "")).strip() or None
+            post_login_wait_selector = str(config.values.get("import_erp_post_login_wait_selector", "")).strip() or None
+            download_header_profile = "import_pi_register"
+        else:
+            base_url = str(config.values.get("erp_base_url", "")).strip()
+            report_relative_url = str(config.values.get("erp_lc_register_relative_url", "")).strip()
+            field_values = _resolve_erp_fill_values(args=args, config=config) or _default_live_erp_fill_values(config)
+            submit_selector = args.submit_selector or str(config.values.get("erp_report_submit_selector", "")).strip()
+            post_submit_wait_selector = args.post_submit_wait_selector or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip()
+            download_menu_selector = args.download_menu_selector or str(config.values.get("erp_report_download_menu_selector", "")).strip()
+            download_format_selector = args.download_format_selector or str(config.values.get("erp_report_download_format_selector", "")).strip()
+            username = None
+            password = None
+            login_url = None
+            username_selector = None
+            password_selector = None
+            login_submit_selector = None
+            post_login_wait_selector = None
+            download_header_profile = "export_lc_register"
         payload = inspect_playwright_report_download(
-            base_url=str(config.values.get("erp_base_url", "")).strip(),
-            report_relative_url=str(config.values.get("erp_lc_register_relative_url", "")).strip(),
+            base_url=base_url,
+            report_relative_url=report_relative_url,
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
             headless=(False if args.headed else bool(config.values.get("playwright_headless", False))),
             output_dir=output_dir,
-            field_values=_resolve_erp_fill_values(args=args, config=config) or _default_live_erp_fill_values(config),
-            submit_selector=args.submit_selector
-            or str(config.values.get("erp_report_submit_selector", "")).strip(),
-            post_submit_wait_selector=args.post_submit_wait_selector
-            or str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
-            download_menu_selector=args.download_menu_selector
-            or str(config.values.get("erp_report_download_menu_selector", "")).strip(),
-            download_format_selector=args.download_format_selector
-            or str(config.values.get("erp_report_download_format_selector", "")).strip(),
+            field_values=field_values,
+            username=username,
+            password=password,
+            login_url=login_url,
+            username_selector=username_selector,
+            password_selector=password_selector,
+            login_submit_selector=login_submit_selector,
+            post_login_wait_selector=post_login_wait_selector,
+            submit_selector=submit_selector,
+            post_submit_wait_selector=post_submit_wait_selector,
+            download_menu_selector=download_menu_selector,
+            download_format_selector=download_format_selector,
+            download_header_profile=download_header_profile,
         )
         payload["workflow_id"] = descriptor.workflow_id.value
     except (ArtifactError, ConfigError, RulePackError, ValueError) as exc:
@@ -4146,17 +4206,25 @@ def _parse_selector_value_pairs(items: list[str], *, option_name: str) -> list[t
 
 
 def _resolve_configured_erp_fill_values(config) -> list[tuple[str, str]]:
-    configured_items = config.values.get("erp_report_fill_values")
+    return _resolve_configured_selector_value_pairs(config, key="erp_report_fill_values")
+
+
+def _resolve_configured_import_pi_register_fill_values(config) -> list[tuple[str, str]]:
+    return _resolve_configured_selector_value_pairs(config, key="import_erp_pi_register_fill_values")
+
+
+def _resolve_configured_selector_value_pairs(config, *, key: str) -> list[tuple[str, str]]:
+    configured_items = config.values.get(key)
     if configured_items is None:
         return []
     if not isinstance(configured_items, list):
-        raise ValueError("Configuration key 'erp_report_fill_values' must be a TOML array of SELECTOR=VALUE strings")
+        raise ValueError(f"Configuration key '{key}' must be a TOML array of SELECTOR=VALUE strings")
     normalized_items: list[str] = []
     for item in configured_items:
         if not isinstance(item, str):
-            raise ValueError("Configuration key 'erp_report_fill_values' must contain only strings")
+            raise ValueError(f"Configuration key '{key}' must contain only strings")
         normalized_items.append(item)
-    return _parse_selector_value_pairs(normalized_items, option_name="erp_report_fill_values")
+    return _parse_selector_value_pairs(normalized_items, option_name=key)
 
 
 def _resolve_erp_fill_values(*, args: argparse.Namespace, config) -> list[tuple[str, str]]:
@@ -4186,6 +4254,34 @@ def _default_live_erp_fill_values(config) -> list[tuple[str, str]]:
                 zero_based_index=int(config.values.get("erp_report_default_to_input_index", 0)),
             ),
             _format_erp_report_date(today),
+        ),
+    ]
+
+
+def _default_live_import_pi_register_fill_values(config) -> list[tuple[str, str]]:
+    today = datetime.now(tz=validate_timezone(config.state_timezone)).date()
+    start_date = today - timedelta(days=int(config.values.get("import_erp_pi_register_default_lookback_days", 0)))
+    return [
+        (
+            _nth_match_selector(
+                base_selector=str(config.values.get("import_erp_pi_register_default_from_input_selector", "")).strip(),
+                zero_based_index=int(config.values.get("import_erp_pi_register_default_from_input_index", 0)),
+            ),
+            _format_erp_report_date(start_date),
+        ),
+        (
+            _nth_match_selector(
+                base_selector=str(config.values.get("import_erp_pi_register_default_to_input_selector", "")).strip(),
+                zero_based_index=int(config.values.get("import_erp_pi_register_default_to_input_index", 0)),
+            ),
+            _format_erp_report_date(today),
+        ),
+        (
+            _nth_match_selector(
+                base_selector=str(config.values.get("import_erp_pi_register_default_buyer_input_selector", "")).strip(),
+                zero_based_index=int(config.values.get("import_erp_pi_register_default_buyer_input_index", 0)),
+            ),
+            str(config.values.get("import_erp_pi_register_default_buyer_name", "")).strip(),
         ),
     ]
 
@@ -4269,17 +4365,24 @@ def _load_import_pi_register_provider(
         if not import_erp_base_url:
             raise ValueError("--live-erp-pi-register requires config key import_erp_base_url")
         storage_state_value = str(config.values.get("playwright_storage_state_path", "")).strip()
-        configured_fill_values = _resolve_configured_erp_fill_values(config)
+        configured_fill_values = _resolve_configured_import_pi_register_fill_values(config)
         return PlaywrightImportPIRegisterProvider(
             base_url=import_erp_base_url,
             report_relative_url=str(config.values.get("import_erp_pi_register_relative_url", "")).strip(),
             browser_channel=str(config.values.get("playwright_browser_channel", "")).strip() or None,
             storage_state_path=Path(storage_state_value) if storage_state_value else None,
-            field_values=tuple(configured_fill_values or _default_live_erp_fill_values(config)),
-            submit_selector=str(config.values.get("erp_report_submit_selector", "")).strip(),
-            post_submit_wait_selector=str(config.values.get("erp_report_post_submit_wait_selector", "")).strip(),
-            download_menu_selector=str(config.values.get("erp_report_download_menu_selector", "")).strip(),
-            download_format_selector=str(config.values.get("erp_report_download_format_selector", "")).strip(),
+            field_values=tuple(configured_fill_values or _default_live_import_pi_register_fill_values(config)),
+            username=str(config.values.get("import_erp_username", "")).strip() or None,
+            password=str(config.values.get("import_erp_password", "")).strip() or None,
+            login_url=str(config.values.get("import_erp_login_url", "")).strip() or import_erp_base_url,
+            username_selector=str(config.values.get("import_erp_username_selector", "")).strip() or None,
+            password_selector=str(config.values.get("import_erp_password_selector", "")).strip() or None,
+            login_submit_selector=str(config.values.get("import_erp_login_submit_selector", "")).strip() or None,
+            post_login_wait_selector=str(config.values.get("import_erp_post_login_wait_selector", "")).strip() or None,
+            submit_selector=str(config.values.get("import_erp_pi_register_submit_selector", "")).strip(),
+            post_submit_wait_selector=str(config.values.get("import_erp_pi_register_post_submit_wait_selector", "")).strip(),
+            download_menu_selector=str(config.values.get("import_erp_pi_register_download_menu_selector", "")).strip(),
+            download_format_selector=str(config.values.get("import_erp_pi_register_download_format_selector", "")).strip(),
             timeout_ms=int(config.values.get("erp_download_timeout_seconds", 0)) * 1000,
             headless=bool(config.values.get("playwright_headless", False)),
         )

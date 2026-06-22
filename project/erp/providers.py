@@ -179,10 +179,18 @@ def inspect_playwright_report_download(
     headless: bool,
     output_dir: Path,
     field_values: list[tuple[str, str]],
+    username: str | None = None,
+    password: str | None = None,
+    login_url: str | None = None,
+    username_selector: str | None = None,
+    password_selector: str | None = None,
+    login_submit_selector: str | None = None,
+    post_login_wait_selector: str | None = None,
     submit_selector: str | None = None,
     post_submit_wait_selector: str | None = None,
     download_menu_selector: str | None = None,
     download_format_selector: str | None = None,
+    download_header_profile: str = "export_lc_register",
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "status": "issue",
@@ -204,6 +212,16 @@ def inspect_playwright_report_download(
         "downloaded_file_path": None,
         "field_readbacks": [],
         "download_receipt": None,
+        "login": {
+            "login_url": login_url,
+            "username_selector": username_selector,
+            "password_selector": password_selector,
+            "login_submit_selector": login_submit_selector,
+            "post_login_wait_selector": post_login_wait_selector,
+            "credentials_configured": bool(username and password),
+            "attempted": False,
+            "status": "not_configured",
+        },
         "error": None,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -237,8 +255,25 @@ def inspect_playwright_report_download(
                 context_kwargs["storage_state"] = str(storage_state_path)
             context = browser.new_context(**context_kwargs)
             page = context.new_page()
-            page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            if login_url and username and password:
+                page.goto(login_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            else:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
             _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+            payload["login"] = _maybe_perform_login(
+                page,
+                username=username,
+                password=password,
+                login_url=login_url,
+                username_selector=username_selector,
+                password_selector=password_selector,
+                login_submit_selector=login_submit_selector,
+                post_login_wait_selector=post_login_wait_selector,
+                timeout_ms=timeout_ms,
+            )
+            if login_url and username and password:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
 
             for selector, value in field_values:
                 locator = page.locator(selector)
@@ -275,6 +310,7 @@ def inspect_playwright_report_download(
                 payload["download_receipt"] = _build_download_receipt(
                     downloaded_path=downloaded_path,
                     suggested_filename=download.suggested_filename,
+                    header_profile=download_header_profile,
                 )
 
             payload["final_url"] = page.url
@@ -305,6 +341,63 @@ def inspect_playwright_report_download(
                 browser.close()
             except Exception:
                 pass
+
+
+def _maybe_perform_login(
+    page,
+    *,
+    username: str | None,
+    password: str | None,
+    login_url: str | None,
+    username_selector: str | None,
+    password_selector: str | None,
+    login_submit_selector: str | None,
+    post_login_wait_selector: str | None,
+    timeout_ms: int,
+) -> dict[str, object]:
+    payload = {
+        "login_url": login_url,
+        "username_selector": username_selector,
+        "password_selector": password_selector,
+        "login_submit_selector": login_submit_selector,
+        "post_login_wait_selector": post_login_wait_selector,
+        "credentials_configured": bool(username and password),
+        "attempted": False,
+        "status": "not_configured",
+    }
+    if not username and not password:
+        return payload
+    if not username or not password:
+        raise ValueError("Live ERP login requires both username and password.")
+    if not username_selector or not password_selector or not login_submit_selector:
+        raise ValueError("Live ERP login requires username, password, and submit selectors.")
+
+    password_locator = page.locator(password_selector)
+    try:
+        if password_locator.count() <= 0:
+            payload["status"] = "login_form_not_present"
+            return payload
+    except Exception as exc:
+        payload["status"] = "login_form_probe_failed"
+        payload["error"] = str(exc)
+        return payload
+
+    payload["attempted"] = True
+    payload["status"] = "attempted"
+    username_locator = page.locator(username_selector)
+    username_locator.wait_for(state="visible", timeout=timeout_ms)
+    _click_locator(username_locator, timeout_ms=timeout_ms)
+    username_locator.fill(username)
+    password_locator.wait_for(state="visible", timeout=timeout_ms)
+    _click_locator(password_locator, timeout_ms=timeout_ms)
+    password_locator.fill(password)
+    _click_locator(page.locator(login_submit_selector), timeout_ms=timeout_ms)
+    if post_login_wait_selector:
+        page.locator(post_login_wait_selector).wait_for(state="visible", timeout=timeout_ms)
+    else:
+        _best_effort_wait_for_network_idle(page, timeout_ms=timeout_ms)
+    payload["status"] = "submitted"
+    return payload
 
 
 def _click_locator(locator, *, timeout_ms: int) -> None:
@@ -713,11 +806,16 @@ def _collect_field_readbacks(page, field_values: list[tuple[str, str]]) -> list[
     return records
 
 
-def _build_download_receipt(*, downloaded_path: Path, suggested_filename: str | None) -> dict[str, object]:
+def _build_download_receipt(
+    *,
+    downloaded_path: Path,
+    suggested_filename: str | None,
+    header_profile: str = "export_lc_register",
+) -> dict[str, object]:
     exists = downloaded_path.exists()
     size_bytes = downloaded_path.stat().st_size if exists else None
     sha256 = _sha256_file(downloaded_path) if exists else None
-    file_probe = _probe_downloaded_file(downloaded_path) if exists else {
+    file_probe = _probe_downloaded_file(downloaded_path, header_profile=header_profile) if exists else {
         "content_kind": "missing",
         "looks_like_html": False,
         "is_empty": True,
@@ -748,7 +846,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _probe_downloaded_file(path: Path) -> dict[str, object]:
+def _probe_downloaded_file(path: Path, *, header_profile: str = "export_lc_register") -> dict[str, object]:
     raw_bytes = path.read_bytes()
     if not raw_bytes:
         return {
@@ -758,7 +856,7 @@ def _probe_downloaded_file(path: Path) -> dict[str, object]:
             "line_count": 0,
             "header_preview": None,
             "has_required_erp_headers": False,
-            "erp_header_missing": list(REQUIRED_ERP_EXPORT_HEADERS),
+            "erp_header_missing": _download_header_profile_required_keys(header_profile),
         }
 
     header_sample = raw_bytes[:512].decode("utf-8", errors="ignore").lstrip()
@@ -775,12 +873,9 @@ def _probe_downloaded_file(path: Path) -> dict[str, object]:
         rows = [[cell.strip() for cell in row] for row in reader]
         non_empty_rows = [row for row in rows if any(cell.strip() for cell in row)]
         line_count = len(non_empty_rows)
-        if len(non_empty_rows) >= 2:
-            header_cells = non_empty_rows[1]
-        elif non_empty_rows:
-            header_cells = non_empty_rows[0]
+        header_cells = _select_download_header_cells(non_empty_rows, header_profile=header_profile)
     header_preview = ",".join(header_cells) if header_cells else None
-    missing_headers = _missing_required_erp_headers(header_cells) if header_cells else list(REQUIRED_ERP_EXPORT_HEADERS)
+    missing_headers = _missing_download_headers(header_cells, header_profile=header_profile) if header_cells else _download_header_profile_required_keys(header_profile)
     has_required_headers = not missing_headers
 
     return {
@@ -792,3 +887,44 @@ def _probe_downloaded_file(path: Path) -> dict[str, object]:
         "has_required_erp_headers": has_required_headers,
         "erp_header_missing": missing_headers,
     }
+
+
+def _select_download_header_cells(rows: list[list[str]], *, header_profile: str) -> list[str]:
+    if header_profile == "import_pi_register":
+        for row in rows[:5]:
+            if not _missing_download_headers(row, header_profile=header_profile):
+                return row
+    if len(rows) >= 2:
+        return rows[1]
+    if rows:
+        return rows[0]
+    return []
+
+
+def _download_header_profile_required_keys(header_profile: str) -> list[str]:
+    if header_profile == "import_pi_register":
+        return ["pi_number", "quantity_kg", "total_amount"]
+    return list(REQUIRED_ERP_EXPORT_HEADERS)
+
+
+def _missing_download_headers(headers: list[str], *, header_profile: str) -> list[str]:
+    if header_profile == "import_pi_register":
+        mapping = _build_import_pi_download_header_mapping(headers)
+        return sorted(key for key in _download_header_profile_required_keys(header_profile) if key not in mapping)
+    return _missing_required_erp_headers(headers)
+
+
+def _build_import_pi_download_header_mapping(headers: list[str]) -> dict[str, int]:
+    aliases = {
+        "pi_number": {"PI NUMBER", "PI NO"},
+        "quantity_kg": {"QTY KG", "QTY KGS", "QUANTITY KG", "QUANTITY KGS"},
+        "total_amount": {"TOTAL AMOUNT", "TOTAL VALUE", "PI VALUE", "AMOUNT"},
+    }
+    normalized_headers = [_normalize_header(header) for header in headers]
+    mapping: dict[str, int] = {}
+    for canonical_key, allowed in aliases.items():
+        for index, header in enumerate(normalized_headers):
+            if header in allowed:
+                mapping[canonical_key] = index
+                break
+    return mapping

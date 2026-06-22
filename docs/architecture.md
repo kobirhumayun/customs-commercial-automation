@@ -723,8 +723,8 @@ Workflow modules must declare their own required key list (for example import do
 For `import_btb_lc`, this workflow-specific key set must distinguish between the two launcher paths:
 - both paths require `import_document_root`, `import_amount_currency`, and the write-capable workbook keys
 - `Current Full Path` additionally requires `outlook_profile`, shared Outlook intake folder mapping, `import_destination_success_entry_id` for the dedicated `Import` destination folder, and a valid import keyword module
-- bundled `import_btb_lc` launchers require a saved import PI-register CSV/JSON report supplied by the operator and passed to the workflow as `--erp-pi-report`
-- future live import PI-register retrieval uses the separate raw-material/yarn import ERP keys `import_erp_base_url` and `import_erp_pi_register_relative_url`; it must not reuse export-ERP `erp_base_url`
+- bundled `import_btb_lc` launchers use live import PI-register retrieval by default and accept a saved CSV/JSON report only as an explicit offline fallback passed to the workflow as `--erp-pi-report`
+- live import PI-register retrieval uses the separate raw-material/yarn import ERP keys `import_erp_base_url`, `import_erp_pi_register_relative_url`, import ERP login selector/credential keys, and `import_erp_pi_register_*` report parameter/selector keys; it must not reuse export-ERP `erp_base_url` or export `erp_report_*` fill values
 - `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
 - Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
 

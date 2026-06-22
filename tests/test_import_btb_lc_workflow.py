@@ -307,6 +307,69 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertIn("<td>1883260400042</td>", html)
         self.assertNotIn("<td>LC-1883260400042</td>", html)
 
+    def test_cli_file_picker_workflow_can_use_live_import_pi_register_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("input", "output", "reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            artifact_path = root / "input" / "0742260401049.pdf.import-btb-lc.json"
+            artifact_path.write_text(json.dumps(_artifact(path=str(root / "input" / "0742260401049.pdf"))), encoding="utf-8")
+            workbook_path = root / "workbook.json"
+            workbook_path.write_text(json.dumps(_workbook_manifest()), encoding="utf-8")
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "workflow.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://export-erp.local"',
+                        'import_erp_base_url = "https://import-erp.local"',
+                        'import_erp_username = "user"',
+                        'import_erp_password = "pass"',
+                        'playwright_browser_channel = "msedge"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with patch("project.cli.PlaywrightImportPIRegisterProvider", return_value=_StaticPIRegisterProvider()) as provider_mock:
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-import-btb-lc-file-picker",
+                            "--config",
+                            str(config_path),
+                            "--input",
+                            str(root / "input"),
+                            "--output",
+                            str(root / "output"),
+                            "--workbook-json",
+                            str(workbook_path),
+                            "--live-erp-pi-register",
+                            "--run-id",
+                            "run-import-live-pi-test",
+                            "--no-open-report",
+                        ]
+                    )
+
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(provider_mock.call_args.kwargs["login_url"], "https://import-erp.local")
+        self.assertEqual(summary["overall_decision"], "pass")
+        self.assertEqual(summary["staged_write_operation_count"], 4)
+
     def test_import_report_uses_sl_no_as_text_not_row_sequence(self) -> None:
         snapshot = _workbook_snapshot(
             rows=[_row(11, sl_no="633.0", lc="LC-1883260400042", export_amount="100000")]

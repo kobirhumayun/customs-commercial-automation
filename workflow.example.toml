@@ -47,17 +47,40 @@ erp_report_table_selector = "table"
 # Fill these from Playwright codegen or manual inspection.
 # erp_report_fill_values = ["#fromDate=2026-03-01", "#toDate=2026-03-31"]
 
-# Import ERP report settings for future live `import_btb_lc` seller-PI
+# Import ERP report settings for live `import_btb_lc` seller-PI
 # quantity/value retrieval. This is a separate raw-material/yarn ERP from
 # the export ERP above.
 import_erp_base_url = "https://btlerp.badshatex.com"
+import_erp_login_url = "https://btlerp.badshatex.com"
 import_erp_pi_register_relative_url = "/RptExportPInLC/PIRegisterCustomsPDL"
 # Keep real credentials outside git, preferably in environment variables:
 # CCA_IMPORT_ERP_USERNAME and CCA_IMPORT_ERP_PASSWORD.
 # import_erp_username = "REPLACE_WITH_USERNAME"
 # import_erp_password = "REPLACE_WITH_PASSWORD"
-# While the import ERP download path is unavailable, the bundled import BTB LC
-# launchers prompt for a manually saved PI register CSV/JSON. For direct CLI use:
+import_erp_username_selector = 'input[type="text"]'
+import_erp_password_selector = 'input[type="password"]'
+import_erp_login_submit_selector = 'button[type="submit"], input[type="submit"]'
+import_erp_post_login_wait_selector = ""
+import_erp_pi_register_default_lookback_days = 90
+import_erp_pi_register_default_from_input_selector = ".dx-texteditor-input"
+import_erp_pi_register_default_to_input_selector = ".dx-texteditor-input"
+import_erp_pi_register_default_buyer_input_selector = ".dx-texteditor-input"
+import_erp_pi_register_default_from_input_index = 2
+import_erp_pi_register_default_to_input_index = 3
+import_erp_pi_register_default_buyer_input_index = 4
+import_erp_pi_register_default_buyer_name = "PIONEER DENIM LIMITED"
+import_erp_pi_register_submit_selector = 'role=button[name="Submit"]'
+import_erp_pi_register_post_submit_wait_selector = ".dx-menu-item-popout"
+import_erp_pi_register_download_menu_selector = ".dx-menu-item-popout"
+import_erp_pi_register_download_format_selector = '.dxrd-preview-export-item-text:text-is("CSV")'
+# Optional exact overrides from Playwright codegen or manual inspection.
+# Values here replace the computed lookback/current/buyer defaults:
+# import_erp_pi_register_fill_values = [
+#   ":nth-match(.dx-texteditor-input, 3)=24-Mar-2026",
+#   ":nth-match(.dx-texteditor-input, 4)=22-Jun-2026",
+#   ":nth-match(.dx-texteditor-input, 5)=PIONEER DENIM LIMITED",
+# ]
+# For offline deterministic verification, direct CLI use may still pass:
 # uv run python -m project run-import-btb-lc-current ... --erp-pi-report "<path>"
 
 # Bangladesh Bank dashboard live settings for `bb_dashboard_verification`.

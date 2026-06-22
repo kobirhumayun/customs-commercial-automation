@@ -147,6 +147,12 @@ class ERPProviderTests(unittest.TestCase):
                     headless=False,
                     output_dir=output_dir,
                     field_values=[("#fromDate", "2026-03-01"), ("#toDate", "2026-03-31")],
+                    username="user",
+                    password="secret",
+                    username_selector="#username",
+                    password_selector="#password",
+                    login_submit_selector="#login",
+                    post_login_wait_selector="#fromDate",
                     submit_selector="#show",
                     post_submit_wait_selector="#downloadDropdown",
                     download_menu_selector="#downloadDropdown",
@@ -160,10 +166,34 @@ class ERPProviderTests(unittest.TestCase):
             self.assertTrue(Path(str(payload["downloaded_file_path"])).exists())
             self.assertEqual(len(payload["field_readbacks"]), 2)
             self.assertTrue(payload["field_readbacks"][0]["matched"])
+            self.assertEqual(payload["login"]["status"], "submitted")
+            self.assertNotIn("secret", json.dumps(payload))
             self.assertIsNotNone(payload["download_receipt"])
             self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
             self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
             self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
+
+    def test_import_pi_download_receipt_uses_import_register_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        '1,BADSHA TEXTILES LTD.,BTL/26/3920,"1,709","5,127."',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            receipt = _build_download_receipt(
+                downloaded_path=report_path,
+                suggested_filename="rptPIRegisterCustomsPDL.csv",
+                header_profile="import_pi_register",
+            )
+
+        self.assertTrue(receipt["has_required_erp_headers"])
+        self.assertEqual(receipt["erp_header_missing"], [])
 
     def test_inspect_playwright_report_download_retries_force_click_when_pointer_events_intercept(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

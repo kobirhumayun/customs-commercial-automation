@@ -69,10 +69,17 @@ When the live ERP report page requires form input and export/download interactio
 uv run python -m project inspect-erp-download export_lc_sc --config "D:\customs-automation\workflow.toml" --headed
 ```
 
+For the import BTB LC PI-register report, use the same helper with the import workflow id:
+
+```powershell
+uv run python -m project inspect-erp-download import_btb_lc --config "D:\customs-automation\workflow.toml" --headed
+```
+
 The command accepts repeated `--fill SELECTOR=VALUE` inputs plus optional selectors for submit, post-submit wait state, download menu, and download format click.
 
 For stable local reuse, the same fill values may be stored in config under:
 - `erp_report_fill_values = ["SELECTOR=VALUE", ...]`
+- `import_erp_pi_register_fill_values = ["SELECTOR=VALUE", ...]`
 
 Typical example:
 
@@ -801,7 +808,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
   - Current Full Path: `scripts/run_import_btb_lc_current_live.cmd`
   - File Picker Path: `scripts/run_import_btb_lc_file_picker_live.cmd`
 - Both bundled launchers read `import_document_root` from the local config; this root is required and must not be a hard-coded launcher default.
-- Both bundled launchers require the operator to supply a saved import PI register CSV/JSON report before processing. If `-ErpPIReport` is not passed to the PowerShell launcher, the launcher opens a file picker for the report and forwards it to the workflow as `--erp-pi-report`.
+- Both bundled launchers use the live import ERP PI-register download by default and pass `--live-erp-pi-register` to the workflow. If `-ErpPIReport` is passed to the PowerShell launcher, that saved CSV/JSON is used instead and forwarded as `--erp-pi-report`.
 - Current Full Path mail movement uses `import_destination_success_entry_id` for the dedicated Outlook `Import` folder. The shared `destination_success_entry_id` key remains unchanged for finalized workflows until the broader folder-key refactor is approved.
 - Persist `launcher_path=current_full` or `launcher_path=file_picker` in run metadata and all import mail outcomes.
 - For the `File Picker Path`, each selected PDF file becomes one deterministic synthetic mail-level unit for ordering, staging, duplicate handling, and reporting.
@@ -824,8 +831,12 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
   - ERP home page/base URL: `https://btlerp.badshatex.com`
   - report path: `/RptExportPInLC/PIRegisterCustomsPDL`
   - this is a raw-material/yarn import ERP, separate from the export ERP represented by `erp_base_url`
-  - local config documents `import_erp_base_url`, `import_erp_pi_register_relative_url`, and operator-specific credentials/session settings for the future live download path; raw credentials must not be written into reports
-  - while the import ERP server/download path is unavailable, the active production path is a manually saved CSV/JSON supplied explicitly through the launchers or CLI
+  - local config documents `import_erp_base_url`, optional `import_erp_login_url`, `import_erp_pi_register_relative_url`, import ERP login selectors/credentials, PI-register report selectors, and PI-register report parameter defaults; raw credentials must not be written into reports
+  - the active live report parameters are computed at run time as:
+    - From Date: current local date minus `import_erp_pi_register_default_lookback_days`, default `90`
+    - To Date: current local date
+    - Buyer Name: `import_erp_pi_register_default_buyer_name`, default `PIONEER DENIM LIMITED`
+  - exact selector/value pairs may be configured with `import_erp_pi_register_fill_values`; when present, these override the computed From Date, To Date, and Buyer Name defaults
   - saved exports such as `D:\customs-automation\rptPIRegisterCustomsPDL.csv` are reference/offline inputs only and may be supplied explicitly with the workflow CLI for deterministic verification; they are not durable configuration defaults
 
 ### Extraction targets

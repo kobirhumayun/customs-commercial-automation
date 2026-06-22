@@ -289,15 +289,13 @@ Write-LauncherLine "Launcher log: $script:LauncherLogPath" "Green"
 
 Push-Location $RepoRoot
 try {
-    if (-not $ErpPIReport) {
-        $ErpPIReport = Select-ImportPIRegisterReport -InitialDirectory $configReportRoot
+    $useLivePIRegister = -not $ErpPIReport
+    if ($useLivePIRegister) {
+        Write-LauncherLine "Import PI register source: live import ERP download" "Green"
+    } else {
+        Assert-ImportPIRegisterReport -Path $ErpPIReport
+        Write-LauncherLine "Import PI register report: $ErpPIReport" "Green"
     }
-    if (-not $ErpPIReport) {
-        Write-LauncherLine "No Import PI register report selected. Nothing to do." "Yellow"
-        Finish-Script 1
-    }
-    Assert-ImportPIRegisterReport -Path $ErpPIReport
-    Write-LauncherLine "Import PI register report: $ErpPIReport" "Green"
 
     if ($LauncherPath -eq "current_full") {
         Write-Section "Current Full Live Run"
@@ -308,11 +306,16 @@ try {
             "--live-outlook-snapshot",
             "--output", $OutputDirectory,
             "--import-document-root", $ImportDocumentRoot,
-            "--erp-pi-report", $ErpPIReport,
             "--apply-live-writes",
             "--move-mails",
             "--live-mail-moves"
         )
+        if ($useLivePIRegister) {
+            $arguments += "--live-erp-pi-register"
+        } else {
+            $arguments += "--erp-pi-report"
+            $arguments += $ErpPIReport
+        }
     } else {
         Write-Section "Select Stored PDFs"
         $selectedPaths = @($InputPath)
@@ -350,13 +353,19 @@ try {
         $arguments = @(
             "run", "python", "-m", "project",
             "run-import-btb-lc-file-picker",
+            "--config", $Config,
             "--output", $OutputDirectory,
             "--workbook", $workbookPath,
             "--import-document-root", $ImportDocumentRoot,
             "--state-timezone", $configStateTimezone,
-            "--erp-pi-report", $ErpPIReport,
             "--apply-live-writes"
         )
+        if ($useLivePIRegister) {
+            $arguments += "--live-erp-pi-register"
+        } else {
+            $arguments += "--erp-pi-report"
+            $arguments += $ErpPIReport
+        }
         foreach ($selectedPath in $selectedPaths) {
             $arguments += "--input"
             $arguments += $selectedPath

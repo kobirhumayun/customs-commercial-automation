@@ -97,6 +97,13 @@ class PlaywrightImportPIRegisterProvider:
     browser_channel: str | None = None
     storage_state_path: Path | None = None
     field_values: tuple[tuple[str, str], ...] = ()
+    username: str | None = None
+    password: str | None = None
+    login_url: str | None = None
+    username_selector: str | None = None
+    password_selector: str | None = None
+    login_submit_selector: str | None = None
+    post_login_wait_selector: str | None = None
     submit_selector: str | None = None
     post_submit_wait_selector: str | None = None
     download_menu_selector: str | None = None
@@ -119,6 +126,13 @@ class PlaywrightImportPIRegisterProvider:
             timeout_ms=self.timeout_ms,
             headless=self.headless,
             field_values=list(self.field_values),
+            username=self.username,
+            password=self.password,
+            login_url=self.login_url,
+            username_selector=self.username_selector,
+            password_selector=self.password_selector,
+            login_submit_selector=self.login_submit_selector,
+            post_login_wait_selector=self.post_login_wait_selector,
             submit_selector=self.submit_selector,
             post_submit_wait_selector=self.post_submit_wait_selector,
             download_menu_selector=self.download_menu_selector,
@@ -204,6 +218,13 @@ def _load_import_pi_rows_from_playwright_download(
     timeout_ms: int,
     headless: bool,
     field_values: list[tuple[str, str]],
+    username: str | None,
+    password: str | None,
+    login_url: str | None,
+    username_selector: str | None,
+    password_selector: str | None,
+    login_submit_selector: str | None,
+    post_login_wait_selector: str | None,
     submit_selector: str | None,
     post_submit_wait_selector: str | None,
     download_menu_selector: str | None,
@@ -221,10 +242,18 @@ def _load_import_pi_rows_from_playwright_download(
             headless=headless,
             output_dir=Path(temp_dir),
             field_values=field_values,
+            username=username,
+            password=password,
+            login_url=login_url,
+            username_selector=username_selector,
+            password_selector=password_selector,
+            login_submit_selector=login_submit_selector,
+            post_login_wait_selector=post_login_wait_selector,
             submit_selector=submit_selector,
             post_submit_wait_selector=post_submit_wait_selector,
             download_menu_selector=download_menu_selector,
             download_format_selector=download_format_selector,
+            download_header_profile="import_pi_register",
         )
         if payload.get("status") != "ready":
             raise ValueError(f"Live import PI register download failed: {payload.get('error') or 'unknown error'}")
