@@ -295,7 +295,9 @@ def _load_import_pi_rows_from_playwright_download(
             mismatched_selectors = [
                 str(item.get("selector"))
                 for item in readbacks
-                if isinstance(item, dict) and item.get("matched") is False
+                if isinstance(item, dict)
+                and item.get("matched") is False
+                and not _readback_has_exact_tagbox_selection(item)
             ]
             if mismatched_selectors:
                 raise ValueError(
@@ -306,6 +308,14 @@ def _load_import_pi_rows_from_playwright_download(
         if not downloaded_file_path:
             raise ValueError("Live import PI register flow completed without a downloaded file.")
         return DelimitedImportPIRegisterProvider(Path(downloaded_file_path)).load_rows()
+
+
+def _readback_has_exact_tagbox_selection(item: dict[str, object]) -> bool:
+    expected_value = str(item.get("expected_value") or "")
+    selected_values = item.get("selected_display_values")
+    if not expected_value or not isinstance(selected_values, list):
+        return False
+    return [str(value) for value in selected_values] == [expected_value]
 
 
 def _load_import_pi_rows_from_matrix(matrix: list[list[str]], *, source_name: str) -> list[ImportPIRegisterRow]:
