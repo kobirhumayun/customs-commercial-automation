@@ -681,6 +681,93 @@ class CLITests(unittest.TestCase):
         self.assertEqual(inspect_mock.call_args.kwargs["submit_selector"], "#show")
         self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
 
+    def test_inspect_erp_download_command_uses_import_pi_register_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'state_timezone = "Asia/Dhaka"',
+                        f'report_root = "{(root / "reports").as_posix()}"',
+                        f'run_artifact_root = "{(root / "runs").as_posix()}"',
+                        f'backup_root = "{(root / "backups").as_posix()}"',
+                        'outlook_profile = "outlook"',
+                        f'master_workbook_root = "{(root / "workbooks").as_posix()}"',
+                        'erp_base_url = "https://export-erp.local"',
+                        'import_erp_base_url = "https://import-erp.local"',
+                        'import_erp_login_url = "https://import-erp.local/login"',
+                        'import_erp_username = "import-user"',
+                        'import_erp_password = "import-pass"',
+                        'import_erp_username_selector = "#username"',
+                        'import_erp_password_selector = "#password"',
+                        'import_erp_login_submit_selector = "#login"',
+                        'import_erp_post_login_wait_selector = "#fromDate"',
+                        'playwright_browser_channel = "msedge"',
+                        'erp_report_fill_values = ["#exportFrom=2026-01-01"]',
+                        'import_erp_pi_register_default_from_input_selector = "#fromDate"',
+                        'import_erp_pi_register_default_to_input_selector = "#toDate"',
+                        'import_erp_pi_register_default_buyer_input_selector = "#buyerName"',
+                        'import_erp_pi_register_default_from_input_index = 0',
+                        'import_erp_pi_register_default_to_input_index = 0',
+                        'import_erp_pi_register_default_buyer_input_index = 0',
+                        'import_erp_pi_register_submit_selector = "#show"',
+                        'import_erp_pi_register_download_format_selector = "text=CSV"',
+                        f'master_workbook_path_template = "{((root / "workbooks") / "{year}-master.xlsx").as_posix()}"',
+                        "excel_lock_timeout_seconds = 60",
+                        "print_enabled = true",
+                        'source_working_folder_entry_id = "src-folder"',
+                        'destination_success_entry_id = "dst-folder"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.inspect_playwright_report_download",
+                return_value={"status": "ready", "error": None},
+            ) as inspect_mock:
+                with redirect_stdout(buffer):
+                    exit_code = main(
+                        [
+                            "inspect-erp-download",
+                            "import_btb_lc",
+                            "--config",
+                            str(config_path),
+                        ]
+                    )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["workflow_id"], "import_btb_lc")
+        self.assertEqual(inspect_mock.call_args.kwargs["base_url"], "https://import-erp.local")
+        self.assertEqual(
+            inspect_mock.call_args.kwargs["report_relative_url"],
+            "/RptExportPInLC/PIRegisterCustomsPDL",
+        )
+        self.assertEqual(inspect_mock.call_args.kwargs["username"], "import-user")
+        self.assertEqual(inspect_mock.call_args.kwargs["password"], "import-pass")
+        self.assertEqual(inspect_mock.call_args.kwargs["login_url"], "https://import-erp.local/login")
+        self.assertEqual(inspect_mock.call_args.kwargs["username_selector"], "#username")
+        self.assertEqual(inspect_mock.call_args.kwargs["password_selector"], "#password")
+        self.assertEqual(inspect_mock.call_args.kwargs["login_submit_selector"], "#login")
+        self.assertEqual(inspect_mock.call_args.kwargs["post_login_wait_selector"], "#fromDate")
+        self.assertEqual(inspect_mock.call_args.kwargs["submit_selector"], "#show")
+        self.assertEqual(inspect_mock.call_args.kwargs["download_format_selector"], "text=CSV")
+        self.assertEqual(inspect_mock.call_args.kwargs["download_header_profile"], "import_pi_register")
+        self.assertEqual(len(inspect_mock.call_args.kwargs["field_values"]), 3)
+        self.assertEqual(inspect_mock.call_args.kwargs["field_values"][0][0], ":nth-match(#fromDate, 1)")
+        self.assertEqual(inspect_mock.call_args.kwargs["field_values"][1][0], ":nth-match(#toDate, 1)")
+        self.assertEqual(
+            inspect_mock.call_args.kwargs["field_values"][2],
+            (":nth-match(#buyerName, 1)", "PIONEER DENIM LIMITED"),
+        )
+
     def test_inspect_erp_download_command_defaults_to_live_download_flow_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

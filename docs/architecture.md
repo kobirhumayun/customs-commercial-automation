@@ -41,6 +41,7 @@ The architecture must optimize for:
 5. **ERP downloader**
    - Playwright login/navigation
    - `RptCommercialExport/DateWiseLCRegisterForDocuments` retrieval
+   - `RptExportPInLC/PIRegisterCustomsPDL` retrieval for `import_btb_lc` seller-PI value/quantity validation
    - normalization and row selection across all extracted file numbers, including family-consistency checks
 6. **Parsing and normalization layer**
    - subject parsing
@@ -272,13 +273,13 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Import BTB LC PDFs follow UCP clause structure, but bank formatting differs materially and minor same-bank formatting variation is expected; extraction must therefore validate BTB LC numbers against documented bank-specific identifier shapes rather than one generic layout.
 - Embedded spaces inside a BTB LC number are not allowed for any approved bank pattern; if a candidate number contains internal spaces, validation fails for deterministic phase-1 processing.
 - Import attachment filename and extracted BTB LC number are expected to match; a mismatch is warning-only evidence captured in reports and must not block workbook write or mail movement when all other required extracted values and workbook-selection checks for the affected import BTB LC still pass.
-- The low-quality scanned PI and export-LC pages appended below the BTB LC are out of phase-1 PDF extraction scope; PI yarn quantity remains a future import-ERP integration input rather than a direct PDF extraction target.
+- The low-quality scanned PI and export-LC pages appended below the BTB LC are out of phase-1 PDF extraction scope; seller-PI quantity must come from the import ERP PI register rather than direct PDF extraction.
 - Each PDF emits one `import_document_outcome` record binding classification/disposition, storage lineage, extracted fields, provenance, duplicate status, candidate evidence, selected row, warnings, discrepancies, and write-operation ids. Legacy extracted-identifier arrays remain projections only and must not be used to reconstruct document relationships.
 - Duplicate import BTB LC handling must detect already-recorded workbook `BTB L/C No.` values and same-run repeated BTB LC evidence across the same mail or different mails. Workbook duplicate equality is provable only when exactly one existing row carries the normalized number and that row's canonical related export LC plus normalized import amount equal the extracted evidence. Same-run equality additionally requires equal BTB date, currency, and ordered seller PI collection. Unprovable or disagreeing duplicate evidence hard-blocks.
 - Candidate processing groups all validated, non-duplicate import BTB LCs in the run by canonical related export LC family. The complete allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, then source snapshot/attachment order. Rows already claimed earlier in that order are excluded.
 - Import mail writes are mail-atomic. Before allocation, exclude mails with intrinsic extraction/validation/duplicate conflicts. During allocation, if the first unresolved document in priority order has no qualified row, hard-block its parent mail, release every tentative reservation made by that mail, and restart same-run duplicate ownership plus row allocation from the baseline workbook without blocked mails. Repeat until a complete pass adds no newly blocked mail.
-- Candidate workbook rows are filtered by matching canonical export LC with blank `UP No.`, blank `BTB L/C No.`, blank `BTB LC Issue Date`, and blank import `Amount` column 22.
-- `import_btb_lc` is strictly no-overwrite: it may write only its three destination cells, `BTB L/C No.`, `BTB LC Issue Date`, and import `Amount` column 22, and all three must be blank during candidate evaluation and still blank during live pre-write validation. It must never clear, append to, merge with, or replace an already populated workbook cell.
+- Candidate workbook rows are filtered by matching canonical export LC with blank `UP No.`, blank `BTB L/C No.`, blank `BTB LC Issue Date`, blank import `Amount` column 22, and blank `Quantity (Kgs)`.
+- `import_btb_lc` is strictly no-overwrite: it may write only its four destination cells, `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, and `Quantity (Kgs)`, and all four must be blank during candidate evaluation and still blank during live pre-write validation. It must never clear, append to, merge with, or replace an already populated workbook cell.
 - A proven workbook duplicate is a duplicate-only/no-write outcome, not permission to rewrite the existing values. Any other populated import target cell hard-blocks before the batch write begins.
 - Strict validation selects a row only when the normalized BTB LC value falls between 40% and 80% of the normalized workbook export LC value, inclusive.
 - If multiple workbook rows qualify for one import BTB LC, the selected row is the one where the normalized BTB LC value is the highest percentage of the normalized workbook export LC value; if a percentage tie remains, the lowest workbook row index wins.
@@ -697,7 +698,7 @@ At minimum, the configuration layer must expose these keys:
 - `backup_root`
 - `outlook_profile` for Outlook-backed launcher paths
 - `master_workbook_root`
-- `erp_base_url` when the active workflow requires ERP access
+- `erp_base_url` for workflows that use the export ERP
 - `playwright_browser_channel` (if applicable)
 
 Write-capable workflows must also provide:
@@ -722,6 +723,8 @@ Workflow modules must declare their own required key list (for example import do
 For `import_btb_lc`, this workflow-specific key set must distinguish between the two launcher paths:
 - both paths require `import_document_root`, `import_amount_currency`, and the write-capable workbook keys
 - `Current Full Path` additionally requires `outlook_profile`, shared Outlook intake folder mapping, `import_destination_success_entry_id` for the dedicated `Import` destination folder, and a valid import keyword module
+- bundled `import_btb_lc` launchers use live import PI-register retrieval by default and accept a saved CSV/JSON report only as an explicit offline fallback passed to the workflow as `--erp-pi-report`
+- live import PI-register retrieval uses the separate raw-material/yarn import ERP keys `import_erp_base_url`, `import_erp_pi_register_relative_url`, import ERP login selector/credential keys, and `import_erp_pi_register_*` report parameter/selector keys; it must not reuse export-ERP `erp_base_url` or export `erp_report_*` fill values
 - `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
 - Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
 

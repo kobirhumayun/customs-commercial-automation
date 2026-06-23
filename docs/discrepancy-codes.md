@@ -83,10 +83,14 @@ Every discrepancy payload should include:
 | `import_btb_lc_amount_invalid` | `hard_block` | import_btb_lc | BTB LC amount was missing, non-positive, ambiguous, or not a valid canonical decimal. |
 | `import_currency_missing_or_mismatch` | `hard_block` | import_btb_lc | Extracted currency was missing or differed from configured `import_amount_currency`. |
 | `import_pi_number_invalid` | `hard_block` | import_btb_lc | No seller PI was found, or at least one extracted seller PI-like value did not match an approved import PI pattern. |
+| `import_pi_register_unavailable` | `hard_block` | import_btb_lc | The ERP import PI register could not be loaded, downloaded, or parsed for PI value/quantity validation. |
+| `import_pi_register_row_missing` | `hard_block` | import_btb_lc | One or more extracted seller PI numbers were not present in the ERP import PI register. |
+| `import_pi_register_amount_invalid` | `hard_block` | import_btb_lc | An ERP import PI register row contained an invalid PI amount or quantity value. |
+| `import_pi_register_amount_mismatch` | `hard_block` | import_btb_lc | Aggregated ERP import PI value for the extracted seller PIs did not exactly match the extracted BTB LC value. |
 | `import_related_export_lc_invalid` | `hard_block` | import_btb_lc | Related export LC was missing or failed canonical LC/SC normalization. |
 | `import_workbook_duplicate_unverifiable` | `hard_block` | import_btb_lc | Workbook already contained the BTB LC number, but row count, related export LC, import amount, or populated BTB LC issue-date evidence could not prove one exact duplicate. |
 | `import_workbook_candidate_invalid` | `hard_block` | import_btb_lc | A matching-family workbook row had an invalid required export amount or a partial BTB-number/import-amount target state. |
-| `import_target_cell_already_populated` | `hard_block` | import_btb_lc | An import destination cell (`BTB L/C No.`, `BTB LC Issue Date`, or import `Amount` column 22) was populated when a blank target was required for staging or live pre-write validation; the batch must stop before any workbook mutation. |
+| `import_target_cell_already_populated` | `hard_block` | import_btb_lc | An import destination cell (`BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, or `Quantity (Kgs)`) was populated when a blank target was required for staging or live pre-write validation; the batch must stop before any workbook mutation. |
 | `import_storage_filename_content_conflict` | `hard_block` | import_btb_lc | The destination filename already existed with different file content; the existing file was not overwritten. |
 | `import_file_picker_source_invalid` | `hard_block` | import_btb_lc | A selected File Picker source was not a regular PDF beneath the configured import document root. |
 | `import_report_browser_open_failed` | `warning` | import_btb_lc | The import BTB LC HTML report was generated successfully, but the system could not open it automatically in the default browser. |

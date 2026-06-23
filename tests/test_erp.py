@@ -6,14 +6,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import project.erp.import_pi as import_pi_module
 from project.erp import (
     DelimitedERPExportRowProvider,
+    DelimitedImportPIRegisterProvider,
     inspect_playwright_report_download,
+    ImportPIRegisterRow,
     JsonManifestERPRowProvider,
+    PlaywrightImportPIRegisterProvider,
     PlaywrightERPRowProvider,
 )
+from project.erp.import_pi import format_import_pi_decimal, parse_import_pi_decimal
 from project.erp.normalization import normalize_lc_sc_date
-from project.erp.providers import _build_download_receipt
+from project.erp.providers import _build_download_receipt, _fill_report_field
 from project.workflows.erp_inspection import inspect_erp_rows
 
 
@@ -145,6 +150,12 @@ class ERPProviderTests(unittest.TestCase):
                     headless=False,
                     output_dir=output_dir,
                     field_values=[("#fromDate", "2026-03-01"), ("#toDate", "2026-03-31")],
+                    username="user",
+                    password="secret",
+                    username_selector="#username",
+                    password_selector="#password",
+                    login_submit_selector="#login",
+                    post_login_wait_selector="#fromDate",
                     submit_selector="#show",
                     post_submit_wait_selector="#downloadDropdown",
                     download_menu_selector="#downloadDropdown",
@@ -158,10 +169,113 @@ class ERPProviderTests(unittest.TestCase):
             self.assertTrue(Path(str(payload["downloaded_file_path"])).exists())
             self.assertEqual(len(payload["field_readbacks"]), 2)
             self.assertTrue(payload["field_readbacks"][0]["matched"])
+            self.assertEqual(payload["login"]["status"], "submitted")
+            self.assertNotIn("secret", json.dumps(payload))
             self.assertIsNotNone(payload["download_receipt"])
             self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
             self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
             self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
+
+    def test_import_pi_download_receipt_uses_import_register_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        '1,BADSHA TEXTILES LTD.,BTL/26/3920,"1,709","5,127."',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            receipt = _build_download_receipt(
+                downloaded_path=report_path,
+                suggested_filename="rptPIRegisterCustomsPDL.csv",
+                header_profile="import_pi_register",
+            )
+
+        self.assertTrue(receipt["has_required_erp_headers"])
+        self.assertEqual(receipt["erp_header_missing"], [])
+
+    def test_fill_report_field_uses_devexpress_datebox_when_plain_fill_does_not_stick(self) -> None:
+        class FakePage:
+            def __init__(self) -> None:
+                self.waits: list[int] = []
+
+            def wait_for_timeout(self, timeout: int) -> None:
+                self.waits.append(timeout)
+
+        class FakeDateLocator:
+            def __init__(self) -> None:
+                self.value = ""
+                self.evaluated_iso_value = None
+                self.clicks: list[dict[str, object]] = []
+
+            @property
+            def first(self):
+                return self
+
+            def wait_for(self, state: str, timeout: int) -> None:
+                self.wait_call = (state, timeout)
+
+            def click(self, **kwargs) -> None:
+                self.clicks.append(kwargs)
+
+            def fill(self, value: str) -> None:
+                self.filled_value = value
+                self.value = ""
+
+            def press(self, key: str) -> None:
+                self.last_key = key
+
+            def input_value(self) -> str:
+                return self.value
+
+            def evaluate(self, _script: str, iso_value: str) -> bool:
+                self.evaluated_iso_value = iso_value
+                self.value = "24-Mar-2026"
+                return True
+
+        page = FakePage()
+        locator = FakeDateLocator()
+
+        _fill_report_field(page, locator, "24-Mar-2026", timeout_ms=30_000)
+
+        self.assertEqual(locator.evaluated_iso_value, "2026-03-24T00:00:00")
+        self.assertEqual(locator.value, "24-Mar-2026")
+        self.assertEqual(page.waits, [250])
+
+    def test_live_import_pi_provider_rejects_unretained_report_parameters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {"selector": "#buyerName", "matched": False},
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                with self.assertRaisesRegex(ValueError, "did not retain"):
+                    provider.load_rows()
 
     def test_inspect_playwright_report_download_retries_force_click_when_pointer_events_intercept(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -196,6 +310,8 @@ class ERPProviderTests(unittest.TestCase):
                     return self
 
                 def count(self) -> int:
+                    if self.selector == "input[type=\"text\"]":
+                        return 2
                     return 1
 
                 def fill(self, value: str) -> None:
@@ -488,6 +604,117 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(rows["P/26/0042"][0].current_lc_value, "12345.00")
         self.assertEqual(rows["P/26/0042"][0].lc_unit, "MTR")
         self.assertEqual(rows["P/26/0042"][0].amd_no, "05")
+
+    def test_delimited_import_pi_register_reads_sample_style_headers_and_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,PI Date,Buyer Name,Description of Goods,Tenor,Bankers,HS Code,Qty.Bag,Qty.Kg,Price/KG,Total Amount,File No,LC Number",
+                        '3,BADSHA TEXTILES LTD.,BTL/26/3920,20/06/2026,PIONEER DENIM LIMITED,YARN,120,HSBC,5203,35,"1,709",3.,"5,127.",B3043/26,',
+                        "4,BADSHA TEXTILES LTD.,BTL/26/3920,20/06/2026,PIONEER DENIM LIMITED,YARN,120,HSBC,5203,35,20,3.,60.,B3043/26,",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+
+        self.assertEqual([row.source_row_index for row in rows["BTL/26/3920"]], [2, 3])
+        self.assertEqual(rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(rows["BTL/26/3920"][0].total_amount, "5127")
+        self.assertEqual(parse_import_pi_decimal("1,50,000."), parse_import_pi_decimal("150000"))
+        self.assertEqual(format_import_pi_decimal(parse_import_pi_decimal("1,709") or 0), "1709")
+
+    def test_delimited_import_pi_provider_caches_rows_and_pi_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                        "2,KAMAL YARN LIMITED,KYL/26/1925,300,900",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            provider = DelimitedImportPIRegisterProvider(export_path)
+            with patch(
+                "project.erp.import_pi._load_import_pi_rows_from_matrix",
+                wraps=import_pi_module._load_import_pi_rows_from_matrix,
+            ) as load_mock:
+                with patch(
+                    "project.erp.import_pi._build_pi_row_index",
+                    wraps=import_pi_module._build_pi_row_index,
+                ) as index_mock:
+                    first_rows = provider.lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+                    second_rows = provider.lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+
+        self.assertEqual(load_mock.call_count, 1)
+        self.assertEqual(index_mock.call_count, 1)
+        self.assertEqual(first_rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(second_rows["KYL/26/1925"][0].quantity_kg, "300")
+
+    def test_playwright_import_pi_provider_caches_download_rows_and_pi_index(self) -> None:
+        rows = [
+            ImportPIRegisterRow(
+                pi_number="BTL/26/3920",
+                quantity_kg="1709",
+                total_amount="5127",
+                source_row_index=2,
+            ),
+            ImportPIRegisterRow(
+                pi_number="KYL/26/1925",
+                quantity_kg="300",
+                total_amount="900",
+                source_row_index=3,
+            ),
+        ]
+        provider = PlaywrightImportPIRegisterProvider(
+            base_url="https://import-erp.local",
+            download_format_selector="text=CSV",
+        )
+
+        with patch(
+            "project.erp.import_pi._load_import_pi_rows_from_playwright_download",
+            return_value=rows,
+        ) as download_mock:
+            with patch(
+                "project.erp.import_pi._build_pi_row_index",
+                wraps=import_pi_module._build_pi_row_index,
+            ) as index_mock:
+                first_rows = provider.lookup_pi_numbers(pi_numbers=["BTL/26/3920"])
+                second_rows = provider.lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+
+        self.assertEqual(download_mock.call_count, 1)
+        self.assertEqual(index_mock.call_count, 1)
+        self.assertEqual(first_rows["BTL/26/3920"][0].quantity_kg, "1709")
+        self.assertEqual(second_rows["KYL/26/1925"][0].quantity_kg, "300")
+
+    def test_delimited_import_pi_register_accepts_erp_revision_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,PI Date,Buyer Name,Description of Goods,Tenor,Bankers,HS Code,Qty.Bag,Qty.Kg,Price/KG,Total Amount,File No,LC Number",
+                        '2,BADSHA TEXTILES LTD.,BTL/26/3761 REVISED-1,13.06.26,ARGON DENIMS LTD.,YARN,,Mercantile Bank PLC.,5510,13,650,3.35,"2,177.5",,',
+                        '612,KAMAL YARN LIMITED,KYL/26/1925,18.06.26,ANANTA GARMENTS LTD.,YARN,120,Mutual Trust Bank PLC.,5203,80,"3,992",3.7,"14,770.4",K1653/26,0002228260404850',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["KYL/26/1925"])
+            revised_rows = DelimitedImportPIRegisterProvider(export_path).lookup_pi_numbers(pi_numbers=["BTL/26/3761"])
+
+        self.assertEqual(len(rows["KYL/26/1925"]), 1)
+        self.assertEqual(rows["KYL/26/1925"][0].total_amount, "14770.4")
+        self.assertEqual(len(revised_rows["BTL/26/3761"]), 1)
+        self.assertEqual(revised_rows["BTL/26/3761"][0].pi_number, "BTL/26/3761")
 
     def test_delimited_export_provider_requires_ship_remarks_header_but_allows_blank_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

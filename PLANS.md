@@ -80,7 +80,7 @@ Goal: process fabric-related import emails and map validated BTB LC data to a si
 - Subject-based relevance filtering.
 - Audit subject-ineligible Outlook mails as non-actionable relevance outcomes without moving or processing them.
 - Acquire new import PDFs into run-scoped source evidence, then copy-promote validated documents atomically into the BTB-year hierarchy.
-- Extract import LC number/date/value/currency, all distinct seller PI numbers, and related export LC; PI yarn quantity remains deferred to later ERP integration.
+- Extract import LC number/date/value/currency, all distinct seller PI numbers, and related export LC; retrieve seller-PI quantities from the live import ERP PI register by default, with operator-supplied CSV/JSON retained as an offline fallback, and stage workbook `Quantity (Kgs)` only after aggregated PI value exactly matches the extracted BTB LC value.
 - Emit one structured outcome per PDF so duplicate, candidate, selected-row, warning, and discrepancy evidence remains relational.
 - Candidate-row filtering and exact-decimal 40%-80% validation using launcher-scoped import currency configuration.
 - One import LC mapped to exactly one row.

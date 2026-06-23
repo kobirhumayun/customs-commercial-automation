@@ -1,4 +1,12 @@
 from project.erp.models import ERPFamily, ERPRegisterRow
+from project.erp.import_pi import (
+    DelimitedImportPIRegisterProvider,
+    EmptyImportPIRegisterProvider,
+    ImportPIRegisterProvider,
+    ImportPIRegisterRow,
+    JsonManifestImportPIRegisterProvider,
+    PlaywrightImportPIRegisterProvider,
+)
 from project.erp.providers import (
     DelimitedERPExportRowProvider,
     EmptyERPRowProvider,
@@ -11,6 +19,12 @@ from project.erp.providers import (
 __all__ = [
     "ERPFamily",
     "ERPRegisterRow",
+    "DelimitedImportPIRegisterProvider",
+    "EmptyImportPIRegisterProvider",
+    "ImportPIRegisterProvider",
+    "ImportPIRegisterRow",
+    "JsonManifestImportPIRegisterProvider",
+    "PlaywrightImportPIRegisterProvider",
     "DelimitedERPExportRowProvider",
     "EmptyERPRowProvider",
     "ERPRowProvider",

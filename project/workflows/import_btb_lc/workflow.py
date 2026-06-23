@@ -12,6 +12,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
+from project.erp import EmptyImportPIRegisterProvider, ImportPIRegisterProvider
+from project.erp.import_pi import format_import_pi_decimal, parse_import_pi_decimal
 from project.models import EmailMessage, MailMoveOperation, WorkflowId, WriteOperation
 from project.outlook import MailMoveProvider
 from project.storage import AttachmentContentProvider
@@ -42,6 +44,7 @@ IMPORT_BTB_LC_WORKFLOW_SCHEMA_ID = "import_btb_lc_workflow"
 IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION = "1.1.0"
 IMPORT_BTB_LC_DATE_NUMBER_FORMAT = "dd/mm/yyyy"
 IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT = "#,##0.00"
+IMPORT_BTB_LC_QUANTITY_NUMBER_FORMAT = "#,##0.00"
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,6 +56,7 @@ class ImportBTBLCHeaderMapping:
     btb_lc_no: int
     btb_lc_issue_date: int
     import_amount: int
+    quantity_kgs: int
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -63,6 +67,7 @@ class ImportBTBLCHeaderMapping:
             "btb_lc_no": self.btb_lc_no,
             "btb_lc_issue_date": self.btb_lc_issue_date,
             "import_amount": self.import_amount,
+            "quantity_kgs": self.quantity_kgs,
         }
 
 
@@ -136,6 +141,7 @@ def run_import_btb_lc_file_picker(
     apply_live_writes: bool = False,
     workbook_path: Path | None = None,
     mutation_session_provider: WorkbookMutationSessionProvider | None = None,
+    pi_register_provider: ImportPIRegisterProvider | None = None,
 ) -> dict[str, object]:
     """Run the file-picker import path over local PDFs or extraction JSON artifacts."""
 
@@ -162,6 +168,7 @@ def run_import_btb_lc_file_picker(
         documents=documents,
         workbook_snapshot=workbook_snapshot,
         run_id=run_id,
+        pi_register_provider=pi_register_provider,
     )
     report = dict(allocation.workflow_report)
     report["state_timezone"] = state_timezone
@@ -233,6 +240,7 @@ def run_import_btb_lc_current_full(
     move_mails: bool = False,
     mail_move_provider: MailMoveProvider | None = None,
     page_provider=None,
+    pi_register_provider: ImportPIRegisterProvider | None = None,
 ) -> dict[str, object]:
     output_directory.mkdir(parents=True, exist_ok=True)
     source_documents_root = output_directory / "source_documents"
@@ -338,6 +346,7 @@ def run_import_btb_lc_current_full(
         documents=documents,
         workbook_snapshot=workbook_snapshot,
         run_id=run_id,
+        pi_register_provider=pi_register_provider,
     )
     report = dict(allocation.workflow_report)
     report["launcher_path"] = "current_full"
@@ -425,8 +434,10 @@ def allocate_import_btb_lc_documents(
     documents: list[ImportBTBLCDocument],
     workbook_snapshot: WorkbookSnapshot,
     run_id: str,
+    pi_register_provider: ImportPIRegisterProvider | None = None,
 ) -> ImportBTBLCAllocationResult:
     mapping = resolve_import_btb_lc_header_mapping(workbook_snapshot)
+    active_pi_register_provider = pi_register_provider or EmptyImportPIRegisterProvider()
     report: dict[str, object] = {
         "schema_id": IMPORT_BTB_LC_WORKFLOW_SCHEMA_ID,
         "schema_version": IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION,
@@ -476,6 +487,7 @@ def allocate_import_btb_lc_documents(
             run_id=run_id,
             reserved_rows=reserved_rows,
             accepted_signatures_by_btb=accepted_signatures_by_btb,
+            pi_register_provider=active_pi_register_provider,
         )
         outcomes_by_document_id[document.document_id] = outcome
         staged_write_plan.extend(operations)
@@ -524,6 +536,11 @@ def resolve_import_btb_lc_header_mapping(
     )
     export_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=6)
     import_amount_headers = _resolve_header_candidates(snapshot.headers, "Amount", required_column_index=22)
+    quantity_kgs = _resolve_header(
+        snapshot.headers,
+        "Quantity (Kgs)",
+        ("Quantity Kgs", "Quantity (Kg)", "Quantity Kg", "Qty.Kg", "Qty Kg", "Qty.Kgs", "Qty Kgs"),
+    )
     if (
         sl_no is None
         or lc_sc_no is None
@@ -532,6 +549,7 @@ def resolve_import_btb_lc_header_mapping(
         or btb_lc_issue_date is None
         or len(export_amount_headers) != 1
         or len(import_amount_headers) != 1
+        or quantity_kgs is None
     ):
         return None
     return ImportBTBLCHeaderMapping(
@@ -542,6 +560,7 @@ def resolve_import_btb_lc_header_mapping(
         btb_lc_no=btb_lc_no,
         btb_lc_issue_date=btb_lc_issue_date,
         import_amount=import_amount_headers[0],
+        quantity_kgs=quantity_kgs,
     )
 
 
@@ -787,6 +806,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
                 f"<td>{escape(str(fields.get('btb_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(_format_import_report_date(fields.get('btb_lc_date', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_value', '') if isinstance(fields, dict) else ''))}</td>"
+                f"<td>{escape(str(outcome.get('selected_quantity_kgs', '') or ''))}</td>"
                 f"<td>{escape(_format_related_export_lc_display(fields.get('related_export_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(outcome.get('selected_sl_no', '') or ''))}</td>"
                 f"<td>{escape(str(outcome.get('write_disposition', '')))}</td>"
@@ -810,7 +830,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
         ("Staged", summary.get("staged", 0)),
         ("Duplicate Only", summary.get("duplicate_only", 0)),
     ]
-    rows_html = "\n".join(rows) if rows else '<tr><td colspan="8" class="empty">No import BTB LC documents were processed.</td></tr>'
+    rows_html = "\n".join(rows) if rows else '<tr><td colspan="9" class="empty">No import BTB LC documents were processed.</td></tr>'
     return (
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
@@ -850,7 +870,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
         "      <h2 class=\"sticky-section-title\">Documents</h2>\n"
         "      <div class=\"table-wrap\">\n"
         "      <table class=\"wide-table\">\n"
-        "        <thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Related Export LC</th><th>SL.No.</th><th>Disposition</th></tr></thead>\n"
+        "        <thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Quantity (Kgs)</th><th>Related Export LC</th><th>SL.No.</th><th>Disposition</th></tr></thead>\n"
         "        <tbody>\n"
         f"{rows_html}\n"
         "        </tbody>\n"
@@ -1015,6 +1035,7 @@ def _allocate_one_document(
     run_id: str,
     reserved_rows: set[int],
     accepted_signatures_by_btb: dict[str, tuple[object, ...]],
+    pi_register_provider: ImportPIRegisterProvider,
 ) -> tuple[dict[str, object], list[WriteOperation]]:
     base = _base_document_outcome(document)
     extraction_decision = str(document.extraction_artifact.get("overall_extraction_decision", "hard_block"))
@@ -1033,9 +1054,10 @@ def _allocate_one_document(
             ("btb_lc_date", document.btb_lc_date),
             ("btb_lc_value", document.btb_lc_value),
             ("currency", document.currency),
+            ("seller_pi_numbers", document.seller_pi_numbers),
             ("related_export_lc_number", document.related_export_lc_number),
         )
-        if value is None
+        if value is None or value == ()
     ]
     if required_missing:
         base["decision"] = "hard_block"
@@ -1073,6 +1095,17 @@ def _allocate_one_document(
                 "details": {"btb_lc_number": document.btb_lc_number},
             }
         )
+        return base, []
+
+    pi_validation = _validate_document_pi_register(
+        document=document,
+        pi_register_provider=pi_register_provider,
+    )
+    base["pi_register_validation"] = pi_validation
+    if pi_validation["status"] != "pass":
+        base["decision"] = "hard_block"
+        base["hard_block_discrepancies"].append(pi_validation["discrepancy"])
+        base["decision_reasons"] = [str(pi_validation["reason"])]
         return base, []
 
     workbook_duplicate = _classify_workbook_duplicate(
@@ -1116,6 +1149,7 @@ def _allocate_one_document(
         workbook_snapshot=workbook_snapshot,
         mapping=mapping,
         row_index=row_index,
+        quantity_kgs=str(pi_validation["quantity_kgs"]),
     )
     reserved_rows.add(row_index)
     accepted_signatures_by_btb[document.btb_lc_number or ""] = signature
@@ -1127,6 +1161,7 @@ def _allocate_one_document(
         mapping=mapping,
         row_index=row_index,
     )
+    base["selected_quantity_kgs"] = str(pi_validation["quantity_kgs"])
     base["staged_write_operations"] = to_jsonable(operations)
     base["decision_reasons"] = [
         f"Selected workbook row {row_index} for import BTB LC write staging."
@@ -1141,6 +1176,7 @@ def _stage_import_write_operations(
     workbook_snapshot: WorkbookSnapshot,
     mapping: ImportBTBLCHeaderMapping,
     row_index: int,
+    quantity_kgs: str,
 ) -> list[WriteOperation]:
     assert document.btb_lc_number is not None
     assert document.btb_lc_date is not None
@@ -1149,6 +1185,7 @@ def _stage_import_write_operations(
         ("btb_lc_no", document.btb_lc_number, None),
         ("btb_lc_issue_date", document.btb_lc_date, IMPORT_BTB_LC_DATE_NUMBER_FORMAT),
         ("import_amount", document.btb_lc_value_text, IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT),
+        ("quantity_kgs", quantity_kgs, IMPORT_BTB_LC_QUANTITY_NUMBER_FORMAT),
     )
     operations: list[WriteOperation] = []
     for operation_index, (column_key, value, number_format) in enumerate(values):
@@ -1175,11 +1212,143 @@ def _stage_import_write_operations(
                     "import_up_no_blank",
                     "import_target_cell_blank",
                     "import_value_40_to_80_percent",
+                    "import_pi_register_amount_exact_match",
                 ],
                 number_format=number_format,
             )
         )
     return operations
+
+
+def _validate_document_pi_register(
+    *,
+    document: ImportBTBLCDocument,
+    pi_register_provider: ImportPIRegisterProvider,
+) -> dict[str, object]:
+    pi_numbers = list(document.seller_pi_numbers)
+    try:
+        rows_by_pi = pi_register_provider.lookup_pi_numbers(pi_numbers=pi_numbers)
+    except Exception as exc:
+        return {
+            "status": "hard_block",
+            "reason": "Import PI register could not be loaded or parsed.",
+            "quantity_kgs": None,
+            "total_amount": None,
+            "pi_rows": [],
+            "discrepancy": {
+                "code": "import_pi_register_unavailable",
+                "severity": "hard_block",
+                "message": "Import PI register data could not be loaded or parsed.",
+                "details": {
+                    "seller_pi_numbers": pi_numbers,
+                    "error": str(exc),
+                },
+            },
+        }
+
+    missing = [pi_number for pi_number in pi_numbers if not rows_by_pi.get(pi_number)]
+    pi_evidence = []
+    total_amount = Decimal("0")
+    total_quantity = Decimal("0")
+    for pi_number in pi_numbers:
+        matched_rows = rows_by_pi.get(pi_number, [])
+        pi_amount = Decimal("0")
+        pi_quantity = Decimal("0")
+        row_evidence = []
+        for row in matched_rows:
+            amount = parse_import_pi_decimal(row.total_amount)
+            quantity = parse_import_pi_decimal(row.quantity_kg)
+            if amount is None or quantity is None:
+                return {
+                    "status": "hard_block",
+                    "reason": "Import PI register row contained an invalid amount or quantity.",
+                    "quantity_kgs": None,
+                    "total_amount": None,
+                    "pi_rows": pi_evidence,
+                    "discrepancy": {
+                        "code": "import_pi_register_amount_invalid",
+                        "severity": "hard_block",
+                        "message": "Import PI register row amount or quantity was not a valid decimal.",
+                        "details": {
+                            "pi_number": pi_number,
+                            "source_row_index": row.source_row_index,
+                            "total_amount": row.total_amount,
+                            "quantity_kg": row.quantity_kg,
+                        },
+                    },
+                }
+            pi_amount += amount
+            pi_quantity += quantity
+            row_evidence.append(
+                {
+                    "source_row_index": row.source_row_index,
+                    "quantity_kg": row.quantity_kg,
+                    "total_amount": row.total_amount,
+                    "raw_values": row.raw_values,
+                }
+            )
+        total_amount += pi_amount
+        total_quantity += pi_quantity
+        pi_evidence.append(
+            {
+                "pi_number": pi_number,
+                "row_count": len(matched_rows),
+                "source_row_indexes": [row.source_row_index for row in matched_rows],
+                "quantity_kg": format_import_pi_decimal(pi_quantity),
+                "total_amount": format_import_pi_decimal(pi_amount),
+                "rows": row_evidence,
+            }
+        )
+
+    if missing:
+        return {
+            "status": "hard_block",
+            "reason": "One or more extracted seller PIs were missing from the import PI register.",
+            "quantity_kgs": None,
+            "total_amount": format_import_pi_decimal(total_amount),
+            "pi_rows": pi_evidence,
+            "discrepancy": {
+                "code": "import_pi_register_row_missing",
+                "severity": "hard_block",
+                "message": "One or more extracted seller PI numbers were not found in the import PI register.",
+                "details": {
+                    "missing_pi_numbers": missing,
+                    "seller_pi_numbers": pi_numbers,
+                    "pi_rows": pi_evidence,
+                },
+            },
+        }
+
+    if document.btb_lc_value is None or total_amount != document.btb_lc_value:
+        return {
+            "status": "hard_block",
+            "reason": "Aggregated import PI register value did not exactly match the extracted BTB LC value.",
+            "quantity_kgs": format_import_pi_decimal(total_quantity),
+            "total_amount": format_import_pi_decimal(total_amount),
+            "pi_rows": pi_evidence,
+            "discrepancy": {
+                "code": "import_pi_register_amount_mismatch",
+                "severity": "hard_block",
+                "message": "Aggregated import PI value did not exactly match the extracted BTB LC value.",
+                "details": {
+                    "btb_lc_number": document.btb_lc_number,
+                    "btb_lc_value": document.btb_lc_value_text,
+                    "seller_pi_numbers": pi_numbers,
+                    "aggregated_pi_total_amount": format_import_pi_decimal(total_amount),
+                    "aggregated_pi_quantity_kg": format_import_pi_decimal(total_quantity),
+                    "pi_rows": pi_evidence,
+                },
+            },
+        }
+
+    return {
+        "status": "pass",
+        "reason": "Aggregated import PI register value exactly matched the extracted BTB LC value.",
+        "quantity_kgs": format_import_pi_decimal(total_quantity),
+        "total_amount": format_import_pi_decimal(total_amount),
+        "pi_rows": pi_evidence,
+        "discrepancy": None,
+    }
 
 
 def _select_candidate_row(
@@ -1201,10 +1370,13 @@ def _select_candidate_row(
         btb_no = row.values.get(mapping.btb_lc_no, "").strip()
         issue_date_raw = row.values.get(mapping.btb_lc_issue_date, "").strip()
         import_amount_raw = row.values.get(mapping.import_amount, "").strip()
-        partial = related_match and (bool(btb_no) != bool(import_amount_raw))
+        quantity_raw = row.values.get(mapping.quantity_kgs, "").strip()
+        populated_import_targets = [bool(btb_no), bool(issue_date_raw), bool(import_amount_raw), bool(quantity_raw)]
+        partial = related_match and any(populated_import_targets) and not all(populated_import_targets)
         up_blank = not row.values.get(mapping.up_no, "").strip()
         issue_date_blank = not issue_date_raw
-        targets_blank = not btb_no and issue_date_blank and not import_amount_raw
+        quantity_blank = not quantity_raw
+        targets_blank = not btb_no and issue_date_blank and not import_amount_raw and quantity_blank
         value_ratio = None
         value_eligible = False
         if export_amount is not None and document.btb_lc_value is not None and export_amount > 0:
@@ -1220,6 +1392,7 @@ def _select_candidate_row(
             "btb_lc_no_blank": not btb_no,
             "btb_lc_issue_date_blank": issue_date_blank,
             "import_amount_blank": not import_amount_raw,
+            "quantity_kgs_blank": quantity_blank,
             "partial_import_target_state": partial,
             "reserved_in_run": row.row_index in reserved_rows,
             "export_amount_raw": row.values.get(mapping.export_amount, ""),
@@ -1252,6 +1425,7 @@ def _select_candidate_row(
         and candidate["btb_lc_no_blank"]
         and candidate["btb_lc_issue_date_blank"]
         and candidate["import_amount_blank"]
+        and candidate["quantity_kgs_blank"]
         and not candidate["reserved_in_run"]
         and candidate["value_eligible_40_to_80"]
     ]
@@ -1298,6 +1472,7 @@ def _classify_workbook_duplicate(
         if raw_btb != document.btb_lc_number:
             continue
         import_amount = _parse_workbook_decimal(row.values.get(mapping.import_amount, ""))
+        quantity_kgs = _parse_workbook_decimal(row.values.get(mapping.quantity_kgs, ""))
         issue_date = _normalize_date_value(row.values.get(mapping.btb_lc_issue_date, ""))
         related = _canonicalize_workbook_lc(row.values.get(mapping.lc_sc_no, ""))
         matches.append(
@@ -1308,6 +1483,8 @@ def _classify_workbook_duplicate(
                 "related_export_lc_canonical": related,
                 "import_amount_raw": row.values.get(mapping.import_amount, ""),
                 "import_amount_canonical": str(import_amount) if import_amount is not None else None,
+                "quantity_kgs_raw": row.values.get(mapping.quantity_kgs, ""),
+                "quantity_kgs_canonical": str(quantity_kgs) if quantity_kgs is not None else None,
                 "btb_lc_issue_date_raw": row.values.get(mapping.btb_lc_issue_date, ""),
                 "btb_lc_issue_date_canonical": issue_date,
                 "matches_related_export_lc": related == document.related_export_lc_number,
@@ -1371,6 +1548,8 @@ def _base_document_outcome(document: ImportBTBLCDocument) -> dict[str, object]:
         "write_disposition": "not_staged",
         "selected_row_index": None,
         "selected_sl_no": None,
+        "selected_quantity_kgs": None,
+        "pi_register_validation": None,
         "candidate_rows": [],
         "staged_write_operations": [],
         "warnings": list(document.extraction_artifact.get("warnings", [])),
@@ -1739,6 +1918,7 @@ def _import_column_index_by_key(mapping: ImportBTBLCHeaderMapping) -> dict[str, 
         "btb_lc_no": mapping.btb_lc_no,
         "btb_lc_issue_date": mapping.btb_lc_issue_date,
         "import_amount": mapping.import_amount,
+        "quantity_kgs": mapping.quantity_kgs,
     }
 
 
@@ -2179,6 +2359,7 @@ def _selected_row_summary(outcomes: object) -> list[dict[str, object]]:
                 "related_export_lc_number": fields.get("related_export_lc_number"),
                 "selected_sl_no": outcome.get("selected_sl_no"),
                 "selected_row_index": outcome.get("selected_row_index"),
+                "quantity_kgs": outcome.get("selected_quantity_kgs"),
             }
         )
     return rows

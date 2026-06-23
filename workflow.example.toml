@@ -26,7 +26,7 @@ erp_base_url = "https://erp.example.local"
 playwright_browser_channel = "msedge"
 playwright_headless = true
 
-# Live ERP report settings.
+# Export ERP report settings.
 erp_lc_register_relative_url = "/RptCommercialExport/DateWiseLCRegisterForDocuments"
 erp_download_timeout_seconds = 120
 erp_report_default_lookback_days = 365
@@ -46,6 +46,42 @@ erp_report_table_selector = "table"
 # Optional ERP report selectors for `inspect-erp-download`.
 # Fill these from Playwright codegen or manual inspection.
 # erp_report_fill_values = ["#fromDate=2026-03-01", "#toDate=2026-03-31"]
+
+# Import ERP report settings for live `import_btb_lc` seller-PI
+# quantity/value retrieval. This is a separate raw-material/yarn ERP from
+# the export ERP above.
+import_erp_base_url = "https://btlerp.badshatex.com"
+import_erp_login_url = "https://btlerp.badshatex.com"
+import_erp_pi_register_relative_url = "/RptExportPInLC/PIRegisterCustomsPDL"
+# Keep real credentials outside git, preferably in environment variables:
+# CCA_IMPORT_ERP_USERNAME and CCA_IMPORT_ERP_PASSWORD.
+# import_erp_username = "REPLACE_WITH_USERNAME"
+# import_erp_password = "REPLACE_WITH_PASSWORD"
+import_erp_username_selector = "#UserID"
+import_erp_password_selector = "#PasswordH"
+import_erp_login_submit_selector = "#btnSubmit"
+import_erp_post_login_wait_selector = ""
+import_erp_pi_register_default_lookback_days = 90
+import_erp_pi_register_default_from_input_selector = 'input[aria-label="From Date :"]'
+import_erp_pi_register_default_to_input_selector = 'input[aria-label="To Date :"]'
+import_erp_pi_register_default_buyer_input_selector = 'input[aria-label="Buyer Name:"]'
+import_erp_pi_register_default_from_input_index = 0
+import_erp_pi_register_default_to_input_index = 0
+import_erp_pi_register_default_buyer_input_index = 0
+import_erp_pi_register_default_buyer_name = "PIONEER DENIM LIMITED"
+import_erp_pi_register_submit_selector = '[aria-label="Submit"]'
+import_erp_pi_register_post_submit_wait_selector = ".dxrd-preview-export-to:not(.dx-state-disabled)"
+import_erp_pi_register_download_menu_selector = ".dxrd-preview-export-to"
+import_erp_pi_register_download_format_selector = '.dxrd-preview-export-item-text:text-is("CSV")'
+# Optional exact overrides from Playwright codegen or manual inspection.
+# Values here replace the computed lookback/current/buyer defaults:
+# import_erp_pi_register_fill_values = [
+#   ':nth-match(input[aria-label="From Date :"], 1)=24-Mar-2026',
+#   ':nth-match(input[aria-label="To Date :"], 1)=22-Jun-2026',
+#   ':nth-match(input[aria-label="Buyer Name:"], 1)=PIONEER DENIM LIMITED',
+# ]
+# For offline deterministic verification, direct CLI use may still pass:
+# uv run python -m project run-import-btb-lc-current ... --erp-pi-report "<path>"
 
 # Bangladesh Bank dashboard live settings for `bb_dashboard_verification`.
 # The workflow also supports deterministic fixtures through:
