@@ -18,7 +18,7 @@ from project.erp import (
 )
 from project.erp.import_pi import format_import_pi_decimal, parse_import_pi_decimal
 from project.erp.normalization import normalize_lc_sc_date
-from project.erp.providers import _build_download_receipt, _fill_report_field
+from project.erp.providers import _build_download_receipt, _collect_field_readbacks, _fill_report_field
 from project.workflows.erp_inspection import inspect_erp_rows
 
 
@@ -266,6 +266,113 @@ class ERPProviderTests(unittest.TestCase):
                     "downloaded_file_path": str(report_path),
                     "field_readbacks": [
                         {"selector": "#buyerName", "matched": False},
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                with self.assertRaisesRegex(ValueError, "did not retain"):
+                    provider.load_rows()
+
+    def test_field_readback_captures_devexpress_tagbox_selection_without_changing_input_match(self) -> None:
+        class FakeLocator:
+            @property
+            def first(self):
+                return self
+
+            def count(self) -> int:
+                return 1
+
+            def input_value(self) -> str:
+                return ""
+
+            def evaluate(self, _script: str) -> list[str]:
+                return ["PIONEER DENIM LIMITED"]
+
+        class FakePage:
+            def locator(self, _selector: str) -> FakeLocator:
+                return FakeLocator()
+
+        records = _collect_field_readbacks(
+            FakePage(),
+            [("#buyerName", "PIONEER DENIM LIMITED")],
+        )
+
+        self.assertEqual(records[0]["observed_value"], "")
+        self.assertEqual(records[0]["selected_display_values"], ["PIONEER DENIM LIMITED"])
+        self.assertFalse(records[0]["matched"])
+
+    def test_live_import_pi_provider_accepts_exact_devexpress_tagbox_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {
+                            "selector": "#buyerName",
+                            "expected_value": "PIONEER DENIM LIMITED",
+                            "observed_value": "",
+                            "selected_display_values": ["PIONEER DENIM LIMITED"],
+                            "matched": False,
+                        },
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                rows = provider.load_rows()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].pi_number, "BTL/26/3920")
+
+    def test_live_import_pi_provider_rejects_multiple_tagbox_selections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {
+                            "selector": "#buyerName",
+                            "expected_value": "PIONEER DENIM LIMITED",
+                            "observed_value": "",
+                            "selected_display_values": [
+                                "PIONEER DENIM LIMITED",
+                                "ANOTHER BUYER",
+                            ],
+                            "matched": False,
+                        },
                     ],
                 },
             ):

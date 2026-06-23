@@ -880,6 +880,7 @@ def _collect_field_readbacks(page, field_values: list[tuple[str, str]]) -> list[
                     "selector": selector,
                     "expected_value": expected_value,
                     "observed_value": None,
+                    "selected_display_values": [],
                     "matched": False,
                     "matched_count": None,
                     "error": str(exc),
@@ -888,23 +889,46 @@ def _collect_field_readbacks(page, field_values: list[tuple[str, str]]) -> list[
             continue
 
         observed_value: str | None = None
+        selected_display_values: list[str] = []
         error: str | None = None
         if matched_count > 0:
             try:
                 observed_value = locator.first.input_value()
             except Exception as exc:
                 error = str(exc)
+            selected_display_values = _read_devexpress_tagbox_display_values(locator.first)
         records.append(
             {
                 "selector": selector,
                 "expected_value": expected_value,
                 "observed_value": observed_value,
+                "selected_display_values": selected_display_values,
                 "matched": observed_value == expected_value,
                 "matched_count": matched_count,
                 "error": error,
             }
         )
     return records
+
+
+def _read_devexpress_tagbox_display_values(locator) -> list[str]:
+    try:
+        values = locator.evaluate(
+            """
+            (input) => {
+              const host = input.closest && input.closest('.dx-tagbox');
+              if (!host) return [];
+              return Array.from(host.querySelectorAll('.dx-tag-content > span'))
+                .map((element) => (element.textContent || '').trim())
+                .filter(Boolean);
+            }
+            """
+        )
+    except Exception:
+        return []
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
 def _build_download_receipt(
