@@ -905,7 +905,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - every staged import write operation must persist a blank `expected_pre_write_value`; a non-blank expected pre-write value is an invalid staged plan
 - if any destination cell becomes populated after allocation but before batch apply, emit `import_target_cell_already_populated` and hard-block the batch before any workbook mutation; do not reinterpret the late value as a duplicate
 - a proven workbook duplicate remains a duplicate-only/no-write outcome and must not generate staged write operations
-- if a matching-family row has only a partial set of import destination cells populated among `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, and `Quantity (Kgs)`, hard-block as partial target state
+- if a matching-family row has only a partial set of import destination cells populated among `BTB L/C No.`, `BTB LC Issue Date`, import `Amount` column 22, and `Quantity (Kgs)`, treat that row as ineligible and preserve the partial-target evidence in candidate reporting; do not block selection of another fully blank eligible row in the same related-export-LC family
 - if a matching-family export `Amount` column 6 value is missing, non-positive, or unparseable, hard-block rather than silently rejecting only that row
 - eligible row requires BTB LC value between 40% and 80% of export LC value, inclusive
 - if multiple rows qualify, select the row where the BTB LC value is the highest percentage of the normalized export LC value
@@ -947,7 +947,7 @@ Before enabling either launcher in production, tests must cover:
 - filename mismatch warning without replacement of extracted values
 - same-name/same-hash storage reuse and same-name/different-hash hard block
 - all four import destination cells blank at candidate evaluation, staging, and live pre-write validation
-- any import destination cell populated initially, including partial target state, with no overwrite
+- any import destination cell populated initially, including partial target state, with no overwrite and with selection continuing only to fully blank eligible rows
 - any import destination cell populated after staging but before apply, causing whole-batch hard block with zero workbook mutation
 - exact workbook duplicate remains no-write and never rewrites existing cells
 - deterministic non-import exclusion, ambiguous attachment classification, and relevant mail with no valid import document

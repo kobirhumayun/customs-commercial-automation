@@ -1392,7 +1392,6 @@ def _select_candidate_row(
     reserved_rows: set[int],
 ) -> dict[str, object]:
     candidate_rows = []
-    partial_conflicts = []
     for row in sorted(workbook_snapshot.rows, key=lambda item: item.row_index):
         related_match = (
             _canonicalize_workbook_lc(row.values.get(mapping.lc_sc_no, ""))
@@ -1435,20 +1434,6 @@ def _select_candidate_row(
         }
         if related_match:
             candidate_rows.append(evidence)
-        if partial:
-            partial_conflicts.append(evidence)
-    if partial_conflicts:
-        return {
-            "status": "hard_block",
-            "candidate_rows": candidate_rows,
-            "reason": "A matching related-export-LC row has a partial import target state.",
-            "discrepancy": {
-                "code": "import_workbook_candidate_invalid",
-                "severity": "hard_block",
-                "message": "Matching workbook row has exactly one import target populated.",
-                "details": {"partial_conflicts": partial_conflicts},
-            },
-        }
 
     eligible = [
         candidate
