@@ -799,6 +799,30 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
             if not isinstance(outcome, dict):
                 continue
             fields = outcome.get("extracted_fields") if isinstance(outcome.get("extracted_fields"), dict) else {}
+            bank_detection = (
+                outcome.get("bank_detection")
+                if isinstance(outcome.get("bank_detection"), dict)
+                else {}
+            )
+            pi_validation = (
+                outcome.get("pi_register_validation")
+                if isinstance(outcome.get("pi_register_validation"), dict)
+                else {}
+            )
+            extraction_field_evidence = (
+                outcome.get("extraction_field_evidence")
+                if isinstance(outcome.get("extraction_field_evidence"), dict)
+                else {}
+            )
+            pi_numbers = fields.get("seller_pi_numbers", []) if isinstance(fields, dict) else []
+            pi_numbers_display = ", ".join(
+                str(value) for value in pi_numbers
+            ) if isinstance(pi_numbers, list) else str(pi_numbers or "")
+            calculated_quantity = (
+                pi_validation.get("quantity_kgs")
+                or outcome.get("selected_quantity_kgs")
+                or ""
+            )
             rows.append(
                 "<tr>"
                 f"<td>{escape(str(outcome.get('decision', '')))}</td>"
@@ -806,10 +830,19 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
                 f"<td>{escape(str(fields.get('btb_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(_format_import_report_date(fields.get('btb_lc_date', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(fields.get('btb_lc_value', '') if isinstance(fields, dict) else ''))}</td>"
-                f"<td>{escape(str(outcome.get('selected_quantity_kgs', '') or ''))}</td>"
+                f"<td>{escape(str(calculated_quantity))}</td>"
                 f"<td>{escape(_format_related_export_lc_display(fields.get('related_export_lc_number', '') if isinstance(fields, dict) else ''))}</td>"
                 f"<td>{escape(str(outcome.get('selected_sl_no', '') or ''))}</td>"
+                f"<td>{escape(pi_numbers_display)}</td>"
                 f"<td>{escape(str(outcome.get('write_disposition', '')))}</td>"
+                f"<td>{escape(_format_import_report_messages(outcome.get('decision_reasons')))}</td>"
+                f"<td>{escape(str(bank_detection.get('bank_name') or bank_detection.get('bank_id') or ''))}</td>"
+                f"<td>{escape(_format_import_report_issues(outcome.get('warnings')))}</td>"
+                f"<td>{escape(str(pi_validation.get('total_amount') or ''))}</td>"
+                f"<td>{escape(str(fields.get('currency', '') if isinstance(fields, dict) else ''))}</td>"
+                f"<td>{escape(_format_import_raw_field_evidence(extraction_field_evidence))}</td>"
+                f"<td>{escape(_format_import_candidate_evidence(outcome.get('candidate_rows')))}</td>"
+                f"<td>{escape(_format_import_report_issues(outcome.get('hard_block_discrepancies')))}</td>"
                 "</tr>"
             )
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
@@ -830,7 +863,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
         ("Staged", summary.get("staged", 0)),
         ("Duplicate Only", summary.get("duplicate_only", 0)),
     ]
-    rows_html = "\n".join(rows) if rows else '<tr><td colspan="9" class="empty">No import BTB LC documents were processed.</td></tr>'
+    rows_html = "\n".join(rows) if rows else '<tr><td colspan="18" class="empty">No import BTB LC documents were processed.</td></tr>'
     return (
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
@@ -870,7 +903,7 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
         "      <h2 class=\"sticky-section-title\">Documents</h2>\n"
         "      <div class=\"table-wrap\">\n"
         "      <table class=\"wide-table\">\n"
-        "        <thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>Value</th><th>Quantity (Kgs)</th><th>Related Export LC</th><th>SL.No.</th><th>Disposition</th></tr></thead>\n"
+        "        <thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th><th>BTB LC Issue Date</th><th>BTB Value</th><th>Calculated Quantity (Kgs)</th><th>Related Export LC</th><th>SL.No.</th><th>Seller PI Number(s)</th><th>Disposition</th><th>Decision Reasons</th><th>Bank</th><th>Warnings</th><th>ERP PI Amount</th><th>Currency</th><th>Raw Extracted Values</th><th>Candidate Evidence</th><th>Discrepancies</th></tr></thead>\n"
         "        <tbody>\n"
         f"{rows_html}\n"
         "        </tbody>\n"
@@ -1542,6 +1575,7 @@ def _base_document_outcome(document: ImportBTBLCDocument) -> dict[str, object]:
             "seller_pi_numbers": list(document.seller_pi_numbers),
             "related_export_lc_number": document.related_export_lc_number,
         },
+        "extraction_field_evidence": document.extraction_artifact.get("fields", {}),
         "bank_detection": document.extraction_artifact.get("bank_detection"),
         "filename_comparison": document.extraction_artifact.get("filename_comparison"),
         "decision": "pass",
@@ -1913,6 +1947,109 @@ def _format_related_export_lc_display(value: object) -> str:
     return text
 
 
+def _format_import_candidate_evidence(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    rendered = []
+    for candidate in value:
+        if not isinstance(candidate, dict):
+            continue
+        ratio = candidate.get("value_ratio")
+        ratio_display = ""
+        if ratio not in {None, ""}:
+            try:
+                ratio_display = f"{Decimal(str(ratio)) * Decimal('100'):.4f}%"
+            except InvalidOperation:
+                ratio_display = str(ratio)
+        target_states = ", ".join(
+            f"{label}={'yes' if bool(candidate.get(key)) else 'no'}"
+            for key, label in (
+                ("up_no_blank", "UP blank"),
+                ("btb_lc_no_blank", "BTB blank"),
+                ("btb_lc_issue_date_blank", "date blank"),
+                ("import_amount_blank", "amount blank"),
+                ("quantity_kgs_blank", "quantity blank"),
+                ("reserved_in_run", "reserved"),
+                ("value_eligible_40_to_80", "value eligible"),
+            )
+        )
+        evidence_parts = [
+            f"SL.No. {candidate.get('sl_no') or ''}",
+            f"row {candidate.get('row_index') or ''}",
+            f"export LC {candidate.get('related_export_lc_raw') or ''}",
+            "export amount "
+            + str(
+                candidate.get("export_amount_canonical")
+                or candidate.get("export_amount_raw")
+                or ""
+            ),
+            f"ratio {ratio_display}",
+            target_states,
+        ]
+        rendered.append("; ".join(evidence_parts))
+    return " | ".join(rendered)
+
+
+def _format_import_raw_field_evidence(value: object) -> str:
+    if not isinstance(value, dict):
+        return ""
+    labels = (
+        ("btb_lc_number", "BTB LC"),
+        ("btb_lc_date", "issue date"),
+        ("btb_lc_value", "value"),
+        ("currency", "currency"),
+        ("seller_pi_numbers", "seller PI"),
+        ("related_export_lc_number", "related export LC"),
+    )
+    rendered = []
+    for field_name, label in labels:
+        field = value.get(field_name)
+        if not isinstance(field, dict):
+            continue
+        raw = field.get("raw")
+        if isinstance(raw, list):
+            raw_text = ", ".join(str(item) for item in raw)
+        else:
+            raw_text = str(raw or "")
+        if raw_text:
+            rendered.append(f"{label}={raw_text}")
+    return "; ".join(rendered)
+
+
+def _format_import_report_messages(value: object) -> str:
+    if not isinstance(value, list):
+        return str(value or "")
+    return " | ".join(str(item) for item in value if str(item or "").strip())
+
+
+def _format_import_report_issues(value: object) -> str:
+    if not isinstance(value, list):
+        return str(value or "")
+    rendered = []
+    for item in value:
+        if not isinstance(item, dict):
+            if str(item or "").strip():
+                rendered.append(str(item))
+            continue
+        code = str(item.get("code") or "").strip()
+        message = str(item.get("message") or "").strip()
+        details = item.get("details")
+        details_text = ""
+        if details:
+            details_text = json.dumps(
+                details,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        rendered.append(
+            ": ".join(part for part in (code, message) if part)
+            + (f" ({details_text})" if details_text else "")
+        )
+    return " | ".join(rendered)
+
+
 def _import_column_index_by_key(mapping: ImportBTBLCHeaderMapping) -> dict[str, int]:
     return {
         "btb_lc_no": mapping.btb_lc_no,
@@ -2060,8 +2197,13 @@ def _build_current_full_mail_outcomes(
         elif mail_acquisition_discrepancies or any(document.get("decision") == "hard_block" for document in documents):
             decision = "hard_block"
             processing_disposition = "blocked"
-            write_disposition = "not_staged"
-            reasons = ["One or more import BTB LC documents in the mail hard-blocked."]
+            write_disposition = (
+                _mail_write_disposition(documents) if documents else "not_staged"
+            )
+            reasons = [
+                "One or more import BTB LC documents in the mail hard-blocked; "
+                "independently writable documents retained their staged writes."
+            ]
         elif not documents:
             decision = "hard_block"
             processing_disposition = "blocked"

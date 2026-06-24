@@ -229,6 +229,65 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                     "hard_block",
                 )
 
+    def test_pi_number_is_bounded_before_attached_dated_label(self) -> None:
+        artifact = _extract_synthetic(
+            _sample_text(pi_text="BTL/26/4271DATED 2026-06-18")
+        )
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["seller_pi_numbers"]["canonical"],
+            ["BTL/26/4271"],
+        )
+
+    def test_city_bank_related_export_lc_clause_can_span_adjacent_pages(self) -> None:
+        provider = _StaticPageProvider(
+            embedded=[
+                ExtractedPage(
+                    1,
+                    _sample_text(
+                        pi_text="BTL/26/4271DATED 2026-06-18",
+                        related_text=(
+                            "ALL DOCUMENTS MUST QUOTE GOODS SUPPLIED AGAINST EXPORT L/C\n"
+                            "6/23/26, 6:13 PM\n"
+                            "Eximbills Enterprise -- SWIFT\n"
+                            "https://impex.thecitybank.com/EximBillWeb/screen/index.htm\n"
+                            "2/3"
+                        ),
+                    ),
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+                ExtractedPage(
+                    2,
+                    "NO. DPCBD1184260 DATE 16-06-2026 AND SALES CONTRACT NO. TAU14W27",
+                    "embedded_text",
+                    1.0,
+                    True,
+                ),
+            ],
+            ocr=[],
+        )
+
+        artifact = _extract_synthetic("", provider=provider)
+
+        self.assertEqual(artifact["overall_extraction_decision"], "pass")
+        self.assertEqual(
+            artifact["fields"]["related_export_lc_number"]["canonical"],
+            "LC-DPCBD1184260",
+        )
+
+    def test_related_export_lc_removes_spaces_and_leading_zeroes(self) -> None:
+        self.assertEqual(
+            _canonicalize_related_export_lc("DC BD1184074", "LC"),
+            "LC-DCBD1184074",
+        )
+        self.assertEqual(
+            _canonicalize_related_export_lc("000012345", "LC"),
+            "LC-12345",
+        )
+
     def test_ocr_fallback_and_confidence_thresholds(self) -> None:
         passing_provider = _StaticPageProvider(
             embedded=[
@@ -312,7 +371,7 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         )
         self.assertEqual(
             _canonicalize_related_export_lc("lc  -0038", None),
-            "LC-0038",
+            "LC-38",
         )
         self.assertEqual(
             _canonicalize_related_export_lc("DPCBDA033739", "LC"),
@@ -320,7 +379,7 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         )
         self.assertEqual(
             _canonicalize_related_export_lc("DPCBDA 033739", "LC"),
-            "LC-DPCBDA-033739",
+            "LC-DPCBDA033739",
         )
         self.assertEqual(
             _canonicalize_related_export_lc(
@@ -488,7 +547,7 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
                 self.assertEqual(artifact["overall_extraction_decision"], "pass")
                 self.assertEqual(
                     artifact["fields"]["related_export_lc_number"]["canonical"],
-                    "LC-0000223260400954",
+                    "LC-223260400954",
                 )
 
     def test_scb_related_export_lc_continues_on_next_page(self) -> None:
@@ -556,7 +615,7 @@ class ImportBTBLCExtractionTests(unittest.TestCase):
         self.assertEqual(artifact["overall_extraction_decision"], "pass")
         self.assertEqual(
             artifact["fields"]["related_export_lc_number"]["canonical"],
-            "LC-0000201260400909",
+            "LC-201260400909",
         )
 
     def test_mtb_related_export_lc_accepts_compact_dt_boundary(self) -> None:

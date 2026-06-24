@@ -466,17 +466,25 @@ def _currency_amount_from_block(block: str) -> tuple[str, str] | None:
 
 
 def _collect_pi_candidates(pages: list[ExtractedPage]) -> list[FieldCandidate]:
-    pattern = re.compile(
-        r"(?i)\b(?:BTL|KYL)(?:\s*[/\\-]\s*|\s+)"
-        r"[A-Z0-9]{1,4}(?:\s*[/\\-]\s*|\s+)[A-Z0-9]{1,8}\b"
+    patterns = (
+        re.compile(
+            r"(?i)\b(?:BTL|KYL)(?:\s*[/\\-]\s*|\s+)"
+            r"\d{2}(?:\s*[/\\-]\s*|\s+)\d{4}"
+            r"(?=\s*(?:DATED|DATE|DT)\b|[^A-Z0-9]|$)"
+        ),
+        re.compile(
+            r"(?i)\b(?:BTL|KYL)(?:\s*[/\\-]\s*|\s+)"
+            r"[A-Z0-9]{1,4}(?:\s*[/\\-]\s*|\s+)[A-Z0-9]{1,8}\b"
+        ),
     )
     candidates = []
     for page in pages:
         if not _is_lc_message_page(page.text):
             continue
         compact = _compact_text(page.text)
-        for match in pattern.finditer(compact):
-            candidates.append(_candidate(page, match.group(0), match.group(0)))
+        for pattern in patterns:
+            for match in pattern.finditer(compact):
+                candidates.append(_candidate(page, match.group(0), match.group(0)))
     return _dedupe_candidates_in_order(candidates)
 
 
@@ -534,6 +542,37 @@ def _collect_related_export_lc_candidates(
         for pattern in patterns:
             for match in pattern.finditer(compact):
                 candidates.append(_field_candidate_from_match(page, match))
+    if not candidates:
+        ordered_pages = sorted(pages, key=lambda page: page.page_number)
+        for current_page, next_page in zip(ordered_pages, ordered_pages[1:]):
+            if current_page.page_number + 1 != next_page.page_number:
+                continue
+            combined_page = ExtractedPage(
+                page_number=next_page.page_number,
+                text=(
+                    f"{_strip_known_page_chrome(current_page.text)}\n"
+                    f"{_strip_known_page_chrome(next_page.text)}"
+                ),
+                extraction_method=(
+                    current_page.extraction_method
+                    if current_page.extraction_method == next_page.extraction_method
+                    else next_page.extraction_method
+                ),
+                confidence=min(current_page.confidence, next_page.confidence),
+                embedded_text_reliable=(
+                    current_page.embedded_text_reliable
+                    and next_page.embedded_text_reliable
+                ),
+                token_confidences=(
+                    current_page.token_confidences + next_page.token_confidences
+                ),
+            )
+            compact = _compact_text(combined_page.text)
+            for pattern in patterns:
+                for match in pattern.finditer(compact):
+                    candidates.append(
+                        _field_candidate_from_match(combined_page, match)
+                    )
     return _dedupe_candidates(candidates)
 
 
@@ -1012,7 +1051,8 @@ def _canonicalize_related_export_lc(raw: str, hint: str | None) -> str | None:
         body = value
     else:
         return None
-    body = re.sub(r"\s+", "-", body)
+    body = re.sub(r"\s+", "", body)
+    body = body.lstrip("0")
     body = re.sub(r"-+", "-", body).strip("-")
     if not re.fullmatch(r"[A-Z0-9]+(?:(?:-|/)[A-Z0-9]+)*", body):
         return None
@@ -1210,6 +1250,26 @@ def _safe_text(value: object) -> str:
 
 def _compact_text(value: object) -> str:
     return re.sub(r"\s+", " ", _safe_text(value)).strip()
+
+
+def _strip_known_page_chrome(value: object) -> str:
+    retained_lines = []
+    for raw_line in _safe_text(value).splitlines():
+        line = raw_line.strip()
+        if re.fullmatch(
+            r"\d{1,2}/\d{1,2}/\d{2,4},\s*\d{1,2}:\d{2}\s*(?:AM|PM)",
+            line,
+            re.IGNORECASE,
+        ):
+            continue
+        if line.casefold() == "eximbills enterprise -- swift":
+            continue
+        if "impex.thecitybank.com/eximbillweb/" in line.casefold():
+            continue
+        if re.fullmatch(r"\d+/\d+", line):
+            continue
+        retained_lines.append(raw_line)
+    return "\n".join(retained_lines)
 
 
 def _embedded_text_is_reliable(text: str) -> bool:

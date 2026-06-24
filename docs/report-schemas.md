@@ -173,8 +173,8 @@ Each `allocation_attempts[]` item must include:
 - `attempt_index`
 - `candidate_rows`
 - `tentative_selected_row_index`
-- `reservation_released`
-- `restart_reason` (nullable)
+- `reservation_released` (normally `false`; retained for backward-compatible audit payloads)
+- `restart_reason` (nullable; retained for backward compatibility)
 
 For every staged `import_btb_lc` write operation:
 - `column_key` must identify `btb_lc_no`, `btb_lc_issue_date`, `import_amount`, or `quantity_kgs`; no other workbook column is writable by this workflow
@@ -183,13 +183,13 @@ For every staged `import_btb_lc` write operation:
 - `import_target_cell_already_populated` details must include `sheet_name`, `row_index`, `column_key`, `expected_pre_write_value`, and `observed_value`
 - a populated target discovered after staging must produce zero applied workbook mutations for the complete atomic batch
 
-When `duplicate_classification` is `same_mail_exact` or `same_run_exact`, `duplicate_evidence` must include the primary `mail_id` and `import_document_outcome_id`. If that primary is later excluded by mail-level atomicity, the next restart must replace the stale duplicate evidence.
+When `duplicate_classification` is `same_mail_exact` or `same_run_exact`, `duplicate_evidence` must include the primary `mail_id` and `import_document_outcome_id`. The primary must be an accepted non-hard-block document; a hard-blocked parent mail does not invalidate a primary document that independently passed.
 
 The legacy `btb_lc_numbers_extracted`, `pi_numbers_extracted`, and `related_export_lc_numbers_extracted` arrays are ordered projections from `import_document_outcomes`. They must never be zipped together or treated as the authoritative document relationship model.
-Import BTB LC HTML rendering may apply display-only formatting: BTB LC dates use `DD/MM/YYYY`, generated timestamps use the configured state timezone, and Related Export LC values omit a leading `LC-` prefix. The canonical JSON fields remain unchanged.
+Import BTB LC HTML rendering may apply display-only formatting: BTB LC dates use `DD/MM/YYYY`, generated timestamps use the configured state timezone, and Related Export LC values omit a leading `LC-` prefix. The canonical JSON fields remain unchanged. Each document row must render every available extracted or derived value even for a hard-block outcome: bank, BTB LC number/date/value/currency, ordered seller PI numbers, ERP aggregated PI amount and quantity, related export LC, candidate-row evidence, selected `SL.No.`, write disposition, decision reasons, warnings, and discrepancies. A later failure must not suppress values established by an earlier successful extraction or ERP-validation phase.
 
 For `document_processing_disposition=candidate`, any null canonical required field must correspond to a document-level hard-block discrepancy explaining why the value was unavailable or invalid. Deterministic `ignored_non_import` records may keep import extraction fields null without a document discrepancy.
-`candidate_rows` represents the decisive/final allocation attempt; `allocation_attempts` preserves earlier tentative selections and restart evidence.
+`candidate_rows` represents the decisive/final allocation attempt; `allocation_attempts` remains a backward-compatible ordered audit collection when more than one attempt exists.
 
 ## 4) Discrepancy report schema
 - `schema_id`: `discrepancy_report`

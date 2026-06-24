@@ -14,6 +14,7 @@ from project.workbook import WorkbookHeader, WorkbookRow, WorkbookSnapshot
 from project.workflows.import_btb_lc.extraction import ExtractedPage
 from project.workflows.import_btb_lc.workflow import (
     DirectoryAttachmentContentProvider,
+    _build_current_full_mail_outcomes,
     _document_from_artifact,
     allocate_import_btb_lc_documents,
     evaluate_import_mail_relevance,
@@ -89,6 +90,48 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             "import_no_qualified_workbook_row",
         )
         self.assertEqual(result.staged_write_plan, [])
+
+    def test_workbook_related_export_lc_filter_removes_spaces_and_leading_zeroes(self) -> None:
+        snapshot = _workbook_snapshot(
+            rows=[
+                _row(3, lc="DC BD1184074", export_amount="100000"),
+                _row(4, lc="0001883260400042", export_amount="100000"),
+            ]
+        )
+        documents = [
+            _document(
+                _artifact(
+                    path="C:/source/0742260401049.pdf",
+                    related="LC-DCBD1184074",
+                ),
+                snapshot_index=0,
+            ),
+            _document(
+                _artifact(
+                    path="C:/source/0742260401050.pdf",
+                    btb="0742260401050",
+                    related="LC-1883260400042",
+                ),
+                snapshot_index=1,
+            ),
+        ]
+
+        result = allocate_import_btb_lc_documents(
+            documents=documents,
+            workbook_snapshot=snapshot,
+            run_id="run-import-normalization-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
+        )
+
+        self.assertEqual(
+            [outcome["decision"] for outcome in result.workflow_report["document_outcomes"]],
+            ["pass", "pass"],
+        )
+        self.assertEqual(
+            [outcome["selected_row_index"] for outcome in result.workflow_report["document_outcomes"]],
+            [3, 4],
+        )
+        self.assertEqual(len(result.staged_write_plan), 8)
 
     def test_allocation_hard_blocks_when_pi_register_total_mismatches_btb_value(self) -> None:
         document = _document(_artifact(value="50000"))
@@ -396,6 +439,87 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertIn("<td>633</td>", html)
         self.assertNotIn("<td>11</td>", html)
         self.assertIn("20/06/2026 04:30:00 PM (Asia/Dhaka)", html)
+
+    def test_import_report_shows_erp_values_and_candidate_evidence_on_failure(self) -> None:
+        document = _document(_artifact(value="39000"))
+        result = allocate_import_btb_lc_documents(
+            documents=[document],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-report-failure-test",
+            pi_register_provider=_StaticPIRegisterProvider(
+                total_amount="39000",
+                quantity_kg="8297",
+            ),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(result.workflow_report)
+
+        self.assertEqual(outcome["decision"], "hard_block")
+        expected_header = (
+            "<thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th>"
+            "<th>BTB LC Issue Date</th><th>BTB Value</th>"
+            "<th>Calculated Quantity (Kgs)</th><th>Related Export LC</th>"
+            "<th>SL.No.</th><th>Seller PI Number(s)</th><th>Disposition</th>"
+            "<th>Decision Reasons</th><th>Bank</th><th>Warnings</th>"
+            "<th>ERP PI Amount</th><th>Currency</th>"
+            "<th>Raw Extracted Values</th><th>Candidate Evidence</th>"
+            "<th>Discrepancies</th></tr></thead>"
+        )
+        self.assertIn(expected_header, html)
+        self.assertIn("Calculated Quantity (Kgs)", html)
+        self.assertIn("Raw Extracted Values", html)
+        self.assertIn("seller PI=BTL/26/3183", html)
+        self.assertIn("BTL/26/3183", html)
+        self.assertIn("<td>39000</td>", html)
+        self.assertIn("<td>8297</td>", html)
+        self.assertIn("ratio 39.0000%", html)
+        self.assertIn("import_no_qualified_workbook_row", html)
+
+    def test_mixed_result_mail_retains_writable_document_disposition(self) -> None:
+        passing_document = _document(_artifact(), snapshot_index=0)
+        blocked_artifact = _artifact(
+            path="C:/source/0742260401051.pdf",
+            btb="0742260401051",
+            decision="hard_block",
+        )
+        blocked_artifact["hard_block_discrepancies"] = [
+            {
+                "code": "import_pi_number_invalid",
+                "severity": "hard_block",
+                "message": "Seller PI was invalid.",
+                "details": {},
+            }
+        ]
+        blocked_document = _document(blocked_artifact, snapshot_index=0)
+        allocation = allocate_import_btb_lc_documents(
+            documents=[passing_document, blocked_document],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-mixed-mail-test",
+            pi_register_provider=_StaticPIRegisterProvider(),
+        )
+        mail = _mail_snapshot()[0]
+        outcomes = allocation.workflow_report["document_outcomes"]
+
+        mail_outcomes = _build_current_full_mail_outcomes(
+            mail_snapshot=[mail],
+            relevance_by_mail_id={
+                mail.mail_id: {
+                    "eligible": True,
+                    "import_keyword_revision": "2026-06-16.1",
+                }
+            },
+            document_outcomes=outcomes,
+            document_mail_id={
+                str(outcome["document_id"]): mail.mail_id for outcome in outcomes
+            },
+            acquisition_discrepancies=[],
+            run_id="run-import-mixed-mail-test",
+        )
+
+        self.assertEqual(len(allocation.staged_write_plan), 4)
+        self.assertEqual(mail_outcomes[0]["final_decision"], "hard_block")
+        self.assertEqual(mail_outcomes[0]["write_disposition"], "new_writes_staged")
+        self.assertFalse(mail_outcomes[0]["eligible_for_mail_move"])
 
     def test_cli_file_picker_can_skip_report_browser_open(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -816,12 +940,15 @@ def _artifact(
         },
         "bank_detection": {"status": "detected", "bank_id": "the_city_bank_plc"},
         "fields": {
-            "btb_lc_number": {"canonical": btb},
-            "btb_lc_date": {"canonical": date},
-            "btb_lc_value": {"canonical": value},
-            "currency": {"canonical": currency},
-            "seller_pi_numbers": {"canonical": pi_numbers or ["BTL/26/3183"]},
-            "related_export_lc_number": {"canonical": related},
+            "btb_lc_number": {"raw": btb, "canonical": btb},
+            "btb_lc_date": {"raw": date, "canonical": date},
+            "btb_lc_value": {"raw": value, "canonical": value},
+            "currency": {"raw": currency, "canonical": currency},
+            "seller_pi_numbers": {
+                "raw": pi_numbers or ["BTL/26/3183"],
+                "canonical": pi_numbers or ["BTL/26/3183"],
+            },
+            "related_export_lc_number": {"raw": related, "canonical": related},
         },
         "filename_comparison": {"matches": True},
         "warnings": [],

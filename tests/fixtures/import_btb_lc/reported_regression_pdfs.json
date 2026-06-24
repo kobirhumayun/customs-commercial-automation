@@ -112,7 +112,7 @@
     "currency": "USD",
     "decision": "pass",
     "file_sha256": "c55d0a204b48b9678d64b43d1daa6066b3bbdcf07f2065390598bd9ce6d24847",
-    "related_export_lc_number": "LC-0000223260400211",
+    "related_export_lc_number": "LC-223260400211",
     "seller_pi_numbers": [
       "BTL/26/0753"
     ]
@@ -229,7 +229,7 @@
     "currency": "USD",
     "decision": "pass",
     "file_sha256": "8337d4e86ec84118ae52d2133931350dcb2e3db09e7eb39f756818c33f24ad79",
-    "related_export_lc_number": "LC-0000223260400954",
+    "related_export_lc_number": "LC-223260400954",
     "seller_pi_numbers": [
       "KYL/26/1732"
     ]
@@ -307,7 +307,7 @@
     "currency": "USD",
     "decision": "pass",
     "file_sha256": "c64555396f7a82c232887180ee042fa55fda7026485a90df3abc8552aa72f771",
-    "related_export_lc_number": "LC-0000201260400909",
+    "related_export_lc_number": "LC-201260400909",
     "seller_pi_numbers": [
       "BTL/26/3195"
     ]

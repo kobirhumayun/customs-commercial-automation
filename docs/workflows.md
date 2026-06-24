@@ -99,7 +99,7 @@ The debug run writes page HTML, a full-page screenshot, and any downloaded expor
 
 #### Decision enum
 - Allowed values: `pass`, `warning`, `hard_block`.
-- `hard_block` is terminal for the affected mail in the active run (no staged write, no print eligibility, no mail move eligibility).
+- `hard_block` is terminal for the affected mail in the active run (no staged write, no print eligibility, no mail move eligibility), except that `import_btb_lc` may retain staged writes belonging to other independently validated BTB LC documents in the same blocked mail. The blocked import document contributes no writes and the parent mail remains ineligible for movement.
 
 #### Warning-to-action decision table
 | Mail discrepancy profile | Staged write allowed | Print allowed | Mail move allowed |
@@ -197,7 +197,7 @@ Any PR that adds/removes/changes rule logic must include:
 
 ### Batch write contract (normative)
 Batch atomicity applies only to mails with approved staged write operations, not to all mails in the run snapshot.
-If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set.
+If one mail in the run snapshot is blocked while others are approved, the blocked mail contributes no workbook writes and each approved mail still participates in the same atomic commit of the approved staged write set. `import_btb_lc` is document-selective for writes: validated BTB LC documents in a mixed-result blocked mail still participate in the atomic staged-write batch.
 Example run (3 mails): Mail A = blocked, Mail B = approved (2 staged writes), Mail C = approved (1 staged write) ⇒ batch write outcome: commit Mail B + Mail C writes together (3 total) in one atomic transaction; commit none if that transaction fails; Mail A writes remain zero.
 
 ### Write transaction protocol and `write_phase_status` transitions (shared, normative)
@@ -857,14 +857,15 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - for bank outputs that preserve SWIFT `d` amount syntax, a terminal decimal comma with no fractional digits is valid and canonicalizes to the exact integer value (for example, raw `41379,` becomes canonical `41379`); the raw value remains in provenance
 - extracted currency is mandatory and must match configured `import_amount_currency`
 - all distinct seller PI numbers in deterministic document-occurrence order
-- validate every extracted seller PI number from LC clauses against one of these case-insensitive regex patterns:
+- validate every extracted seller PI number from LC clauses against one of these case-insensitive regex patterns; an approved PI immediately followed by a date label without whitespace, such as `BTL/26/4271DATED`, is bounded before the date label and canonicalizes to `BTL/26/4271`:
   - `btl/\d{2}/\d{4}`
   - `kyl/\d{2}/\d{4}`
 - these import seller PI references are distinct from the export PI profile `PDL-YY-NNNN` and must not be normalized with export PI rules
 - canonical import PI output uppercases ASCII letters and preserves slash separators
 - related export LC number from clause text
-- normalize related export LC using the shared LC/SC canonicalization profile before workbook matching
+- normalize related export LC before workbook matching by removing all whitespace from the identifier body and stripping leading zero digits from that body; apply the same normalization to workbook `L/C & S/C No.` values, preserve slash and dash separators, and compare by exact canonical equality after normalization
 - in Mutual Trust Bank Limited `EXPORT LC/SC NO.` clauses, accept compact `DT` date boundaries without an intervening space
+- allow an authoritative related-export-LC clause label/value to span two immediately adjacent inspected pages, including a page ending in `EXPORT L/C` followed by `NO. <identifier> DATE...` on the next page
 - in Standard Chartered Bank `EXPORT CONTRACT NUMBER/EXPORT L/C NUMBER:` clauses, allow the value to continue onto the immediately following inspected page and accept `DTED` as an observed date-label boundary
 - in BRAC `ALL SHIPPING DOCUMENTS MUST BEAR...` clauses, use the first occurrence of `L/C NUMBER [WITH DATE]`, `L/C NUMBER WITH DATE AND EXPORT SALES CONTRACT NO.`, `EXPORT NO.`, or `EXPORT SALES CONTRACT NO.` as the authoritative related export LC clause; preserve slash-delimited body segments and treat `DATE`, `DATED`, `DAT`, or `DT` as the following date boundary
 - compare the entire attachment filename stem with the canonical extracted BTB LC number after the same safe case/dash/outer-whitespace normalization; prefixes, suffixes, and repaired separators do not count as a match
@@ -885,10 +886,9 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - Normalize import BTB LC values and workbook export LC values to exact canonical decimals before comparison; both are interpreted in configured `import_amount_currency`
 - Group all validated import BTB LCs in the run by related export LC
 - Allocation order is canonical related export LC ascending, normalized BTB LC value descending, normalized BTB LC number ascending, `snapshot_index` ascending, then attachment index or synthetic source path ascending
-- Exclude any mail with intrinsic extraction, required-field, storage, or duplicate-conflict hard blocks before row allocation
-- Treat tentative row reservations as mail-atomic: when the first document in allocation order has no qualified row, hard-block its parent mail, release all rows tentatively reserved by that mail, and restart from the baseline workbook with blocked mails excluded
-- Every restart must recompute same-run duplicate ownership before row allocation; a later exact duplicate must become the surviving primary document when its earlier duplicate owner belonged to a newly blocked mail
-- Repeat the deterministic restart until one complete allocation pass adds no newly blocked mail; each restart and released reservation must remain visible in audit evidence
+- Exclude each document with intrinsic extraction, required-field, storage, or duplicate-conflict hard blocks from row allocation without excluding independently valid documents from the same mail
+- Keep tentative row reservations document-selective: a document that later hard-blocks contributes no reservation or staged write, while reservations and writes already earned by other validated documents in the same mail remain active
+- Compute same-run duplicate ownership in deterministic document allocation order; a hard-blocked document cannot become a primary accepted duplicate owner
 - Before row allocation, detect duplicate import BTB LC evidence already present in the workbook and duplicate import BTB LC evidence repeated earlier in the same run across the same mail or different mails
 - Workbook duplicate-only success requires exactly one existing row with the normalized BTB LC number, the same canonical related export LC, and the same normalized import `Amount` column 22 value; workbook state cannot verify PI/date, so those fields remain new-source audit evidence only
 - Zero or multiple matching workbook rows, blank/unparseable existing import amount, related-export mismatch, or amount mismatch makes the existing-number evidence unprovable/conflicting and hard-blocks before candidate filtering
@@ -914,7 +914,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - if an extracted import BTB LC does not qualify any workbook row, that import BTB LC is hard-blocked and the report must include the failed candidate evidence
 - each PDF must emit one `import_document_outcome` object containing classification/disposition, source identity/hash, storage decision/path, extracted raw and canonical fields with provenance/confidence, duplicate classification, ordered candidate evidence, selected `SL.No.` plus row-index audit trace, document decision, discrepancy codes, warning codes, and staged write-operation ids
 - the mail-level extracted identifier arrays remain backward-compatible projections from `import_document_outcomes` and are not authoritative relationship records
-- mail decision is the highest document severity; if any document is `hard_block`, discard all tentative writes for that mail
+- mail decision is the highest document severity; if any document is `hard_block`, keep the parent mail blocked from movement but retain staged writes belonging to other writable BTB LC documents in that mail
 
 ### Batch execution behavior
 - blocked emails remain in `working`
@@ -922,6 +922,7 @@ Result: UD is written to rows 11 and 14 only; the selection report records the e
 - emit the standard run-level and mail-level JSON artifacts plus an HTML report that may summarize affected export-LC groups
 - no separate import-specific JSON summary artifact is required beyond the standard `run_metadata.json` and `mail_outcomes.jsonl`; the canonical import-specific summary artifact is `import_btb_lc_report.html`
 - reports must include duplicate-only import BTB LC outcomes, filename-mismatch warnings, import BTB LCs that produced no qualified workbook row, and import mails where no BTB LC PDF was extracted deterministically
+- every import HTML document row must display every available extracted or deterministically derived value even when the document later hard-blocks, including bank, BTB LC number/date/value/currency, ordered seller PI numbers, aggregated ERP PI amount, aggregated ERP PI quantity, related export LC, candidate-row evidence, selected `SL.No.`, decision reasons, warnings, and discrepancies; unavailable values remain visibly blank rather than suppressing other available evidence
 - import HTML report dates display as `DD/MM/YYYY`; selected workbook targets display `SL.No.` from the workbook as text rather than workbook row index; metadata and summary follow the `bb_dashboard_verification` report layout with a `Generated at: DD/MM/YYYY hh:mm:ss AM/PM (<state_timezone>)` timestamp resolved from config; Related Export LC display omits a leading `LC-` prefix while canonical JSON values remain unchanged
 - automatically open the generated HTML report in the default browser after terminal workflow success; for Outlook-backed runs this occurs after mail-move success, and for the `File Picker Path` it occurs after report generation completes
 - if the HTML report is generated successfully but the browser cannot be opened automatically, append run-scoped warning discrepancy `import_report_browser_open_failed`, atomically refresh run metadata, and keep mail decisions/moves unchanged
