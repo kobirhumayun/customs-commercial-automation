@@ -261,7 +261,7 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             "import_duplicate_document_conflict",
         )
 
-    def test_partial_target_state_hard_blocks_matching_family(self) -> None:
+    def test_partial_target_state_without_eligible_row_reports_no_qualified_row(self) -> None:
         snapshot = _workbook_snapshot(
             rows=[
                 _row(
@@ -286,8 +286,68 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertEqual(outcome["decision"], "hard_block")
         self.assertEqual(
             outcome["hard_block_discrepancies"][0]["code"],
-            "import_workbook_candidate_invalid",
+            "import_no_qualified_workbook_row",
         )
+
+    def test_partial_target_state_does_not_block_fully_eligible_blank_row(self) -> None:
+        snapshot = _workbook_snapshot(
+            rows=[
+                _row(
+                    316,
+                    sl_no="314",
+                    lc="DPCBD1165335",
+                    export_amount="1854.2",
+                    up_no="UP-314",
+                    btb="411012600000-L",
+                ),
+                _row(
+                    724,
+                    sl_no="722",
+                    lc="DPCBD1165335",
+                    export_amount="2294",
+                    up_no="UP-722",
+                    btb="411012600001-L",
+                ),
+                _row(
+                    915,
+                    sl_no="913",
+                    lc="DPCBD1165335",
+                    export_amount="5508",
+                ),
+            ]
+        )
+        document = _document(
+            _artifact(
+                path="C:/source/411012645358-L.pdf",
+                btb="411012645358-L",
+                value="3605.80",
+                pi_numbers=["KYL/26/2117"],
+                related="LC-DPCBD1165335",
+            )
+        )
+
+        result = allocate_import_btb_lc_documents(
+            documents=[document],
+            workbook_snapshot=snapshot,
+            run_id="run-import-partial-ignored-test",
+            pi_register_provider=_StaticPIRegisterProvider(
+                pi_number="KYL/26/2117",
+                total_amount="3605.80",
+                quantity_kg="1240",
+            ),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+
+        self.assertEqual(outcome["decision"], "pass")
+        self.assertEqual(outcome["selected_sl_no"], "913")
+        self.assertEqual(outcome["selected_row_index"], 915)
+        self.assertEqual(len(result.staged_write_plan), 4)
+        partial_rows = [
+            candidate
+            for candidate in outcome["candidate_rows"]
+            if candidate["partial_import_target_state"]
+        ]
+        self.assertEqual([row["sl_no"] for row in partial_rows], ["314", "722"])
 
     def test_cli_file_picker_workflow_reads_json_artifacts_and_writes_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
