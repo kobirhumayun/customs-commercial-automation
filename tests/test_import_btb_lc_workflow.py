@@ -455,6 +455,17 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         html = render_import_btb_lc_html_report(result.workflow_report)
 
         self.assertEqual(outcome["decision"], "hard_block")
+        expected_header = (
+            "<thead><tr><th>Decision</th><th>Filename</th><th>BTB LC</th>"
+            "<th>BTB LC Issue Date</th><th>BTB Value</th>"
+            "<th>Calculated Quantity (Kgs)</th><th>Related Export LC</th>"
+            "<th>SL.No.</th><th>Seller PI Number(s)</th><th>Disposition</th>"
+            "<th>Decision Reasons</th><th>Bank</th><th>Warnings</th>"
+            "<th>ERP PI Amount</th><th>Currency</th>"
+            "<th>Raw Extracted Values</th><th>Candidate Evidence</th>"
+            "<th>Discrepancies</th></tr></thead>"
+        )
+        self.assertIn(expected_header, html)
         self.assertIn("Calculated Quantity (Kgs)", html)
         self.assertIn("Raw Extracted Values", html)
         self.assertIn("seller PI=BTL/26/3183", html)
