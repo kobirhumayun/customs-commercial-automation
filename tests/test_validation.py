@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import tempfile
@@ -638,6 +638,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -775,6 +776,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -910,6 +912,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1045,6 +1048,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1084,7 +1088,7 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(operations_by_column["lc_issuing_bank"], "Abc Bank, Dhaka Branch")
             self.assertEqual(operations_by_column["lien_bank"], "Xyz Bank")
 
-    def test_validate_run_snapshot_maps_ship_remarks_to_bangladesh_bank_ref_when_header_exists(self) -> None:
+    def test_validate_run_snapshot_maps_valid_ship_remarks_to_bangladesh_bank_ref_when_header_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workflow_year = __import__("datetime").datetime.now(
@@ -1155,7 +1159,7 @@ class ValidationTests(unittest.TestCase):
                             "nego_bank": "XYZ BANK",
                             "master_lc_no": "MLC-001",
                             "master_lc_date": "2025-12-20",
-                            "ship_remarks": "BB-REF-2026-0042",
+                            "ship_remarks": " 1234567890 ",
                         }
                     ]
                 ),
@@ -1181,6 +1185,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 15, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1216,9 +1221,10 @@ class ValidationTests(unittest.TestCase):
                 operation.column_key: operation.expected_post_write_value
                 for operation in validation_result.staged_write_plan
             }
-            self.assertEqual(operations_by_column["bangladesh_bank_ref"], "BB-REF-2026-0042")
+            self.assertEqual(operations_by_column["bangladesh_bank_ref"], "1234567890")
+            self.assertEqual(operations_by_column["master_lc_recv_date"], "-")
 
-    def test_validate_run_snapshot_allows_blank_ship_remarks_and_stages_blank_bangladesh_bank_ref(self) -> None:
+    def test_validate_run_snapshot_allows_blank_ship_remarks_and_skips_bangladesh_bank_ref(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workflow_year = __import__("datetime").datetime.now(
@@ -1315,6 +1321,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 15, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1351,8 +1358,8 @@ class ValidationTests(unittest.TestCase):
                 operation.column_key: operation.expected_post_write_value
                 for operation in validation_result.staged_write_plan
             }
-            self.assertIn("bangladesh_bank_ref", operations_by_column)
-            self.assertEqual(operations_by_column["bangladesh_bank_ref"], "")
+            self.assertNotIn("bangladesh_bank_ref", operations_by_column)
+            self.assertEqual(operations_by_column["master_lc_recv_date"], "-")
 
     def test_validate_run_snapshot_stages_multiple_new_mails_on_distinct_rows_when_one_mail_is_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1490,6 +1497,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 13, "text": "Lien Bank"},
                             {"column_index": 14, "text": "Master L/C No."},
                             {"column_index": 15, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 29, "text": "Commercial File No."},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1640,6 +1648,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1785,6 +1794,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -1935,6 +1945,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],
@@ -2101,6 +2112,7 @@ class ValidationTests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 22, "text": "Amount"},
                             {"column_index": 33, "text": "Bangladesh Bank Ref."},
                         ],

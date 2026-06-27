@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import tempfile
@@ -185,6 +185,7 @@ class WritePreparationTests(unittest.TestCase):
                         {"column_index": 12, "text": "Lien Bank"},
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
+                        {"column_index": 34, "text": "Master L/C Recv. Date"},
                         {"column_index": 22, "text": "Amount"},
                         {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],

@@ -36,12 +36,13 @@ EXPORT_FIELD_VALUE_MAP = (
     ("shipment_date", lambda match: match.canonical_row.ship_date),
     ("expiry_date", lambda match: match.canonical_row.expiry_date),
     ("quantity_fabrics", lambda match: match.canonical_row.lc_qty),
-    ("lc_amnd_no", lambda match: match.canonical_row.amd_no),
-    ("lc_amnd_date", lambda match: match.canonical_row.amd_date),
+    ("lc_amnd_no", lambda match: _default_dash_if_blank(match.canonical_row.amd_no)),
+    ("lc_amnd_date", lambda match: _default_dash_if_blank(match.canonical_row.amd_date)),
     ("lien_bank", lambda match: _format_lien_bank_for_sheet(match.canonical_row.nego_bank)),
     ("master_lc_no", lambda match: match.canonical_row.master_lc_no),
     ("master_lc_issue_date", lambda match: match.canonical_row.master_lc_date),
-    ("bangladesh_bank_ref", lambda match: match.canonical_row.ship_remarks),
+    ("master_lc_recv_date", lambda match: "-"),
+    ("bangladesh_bank_ref", lambda match: _valid_bangladesh_bank_ref_or_none(match.canonical_row.ship_remarks)),
 )
 OPTIONAL_EXPORT_FIELD_VALUE_MAP = ()
 
@@ -133,6 +134,9 @@ def stage_export_append_operations(
             continue
 
         for column_key, value_getter in EXPORT_FIELD_VALUE_MAP:
+            expected_post_write_value = value_getter(match)
+            if expected_post_write_value is None:
+                continue
             number_format = (
                 MTR_QUANTITY_NUMBER_FORMAT
                 if column_key == "quantity_fabrics" and match.canonical_row.lc_unit.strip().upper() == "MTR"
@@ -155,7 +159,7 @@ def stage_export_append_operations(
                     row_index=next_row_index,
                     column_key=column_key,
                     expected_pre_write_value=None,
-                    expected_post_write_value=value_getter(match),
+                    expected_post_write_value=expected_post_write_value,
                     row_eligibility_checks=[
                         "append_target_row_has_blank_buyer_name_or_is_new",
                         "target_cell_blank_by_construction",
@@ -245,6 +249,17 @@ def _format_bank_name_for_sheet(value: str) -> str:
 def _format_lien_bank_for_sheet(value: str) -> str:
     primary_value = value.split("\\", 1)[0].strip()
     return _title_case_words(primary_value)
+
+
+def _default_dash_if_blank(value: str | None) -> str:
+    return value.strip() if value and value.strip() else "-"
+
+
+def _valid_bangladesh_bank_ref_or_none(value: str | None) -> str | None:
+    normalized = value.strip() if value else ""
+    if re.fullmatch(r"\d{10,}", normalized):
+        return normalized
+    return None
 
 
 def _title_case_words(value: str) -> str:

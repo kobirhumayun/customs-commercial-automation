@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import tempfile
@@ -189,6 +189,7 @@ class RecoveryTests(unittest.TestCase):
                         {"column_index": 12, "text": "Lien Bank"},
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
+                        {"column_index": 34, "text": "Master L/C Recv. Date"},
                         {"column_index": 22, "text": "Amount"},
                         {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],
@@ -238,6 +239,7 @@ class RecoveryTests(unittest.TestCase):
             "lien_bank": 12,
             "master_lc_no": 13,
             "master_lc_issue_date": 14,
+            "master_lc_recv_date": 34,
             "bangladesh_bank_ref": 33,
         }
         for operation in staged_write_plan:
@@ -265,6 +267,7 @@ class RecoveryTests(unittest.TestCase):
                         {"column_index": 12, "text": "Lien Bank"},
                         {"column_index": 13, "text": "Master L/C No."},
                         {"column_index": 14, "text": "Master L/C Issue Dt."},
+                        {"column_index": 34, "text": "Master L/C Recv. Date"},
                         {"column_index": 22, "text": "Amount"},
                         {"column_index": 33, "text": "Bangladesh Bank Ref."},
                     ],

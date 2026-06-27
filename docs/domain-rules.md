@@ -255,7 +255,10 @@ Duplicate header text is disallowed by default unless explicitly declared in thi
 |---|---|---|---|---|
 | `export_lc_sc` | `quantity_fabrics` | `Quantity of Fabrics (Yds/Mtr)` | `append_only` | ERP unit/value available; target blank |
 | `export_lc_sc` | `export_amount` | `Amount` (column 6) | `append_only` | ERP current LC value available; target blank |
-| `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; ERP row value may be blank; target blank |
+| `export_lc_sc` | `lc_amnd_no` | `L/C Amnd No.` | `append_only` | ERP `Amd No` value, or `-` when blank/missing/null; target blank |
+| `export_lc_sc` | `lc_amnd_date` | `L/C Amnd Date` | `append_only` | ERP `Amd DT` value, or `-` when blank/missing/null; target blank |
+| `export_lc_sc` | `master_lc_recv_date` | `Master L/C Recv. Date` | `append_only` | always write `-`; target blank |
+| `export_lc_sc` | `bangladesh_bank_ref` | `Bangladesh Bank Ref.` | `append_only` | workbook header and ERP `Ship. Remarks` column required; write only trimmed all-numeric values with at least 10 digits; otherwise skip this cell write |
 | `ud_ip_exp` | `ud_ip_shared` | `UD No. & IP No.` | `update_if_blank` | selected UD target rows, or all verified-family rows for EXP-only / EXP+IP mails; exact already-recorded matches no-op instead of appending |
 | `ud_ip_exp` | `ud_ip_date` | `UD & IP Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source normalized document date formatted `DD/MM/YYYY` |
 | `ud_ip_exp` | `ud_recv_date` | `UD Recv. Date` | `update_if_blank` | selected structured UD/AM target rows, or all verified-family rows for EXP-only / EXP+IP mails; source current workflow date formatted `DD/MM/YYYY` |
