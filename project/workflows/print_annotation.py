@@ -377,6 +377,7 @@ def _build_checklist_rows(
                     "ud_or_amendment_no": _annotation_document_number(annotation_document),
                     "lc_sc": lc_sc_value,
                     "bangladesh_bank_ref": bangladesh_bank_ref,
+                    "ud_amendment_lc_value": _annotation_ud_amendment_lc_value(annotation_document),
                     "sl_no_values": sl_no_values,
                     "mail_subject": outcome.subject_raw,
                     "document_filename": str(annotation_document.get("document_filename", "")),
@@ -951,6 +952,10 @@ def build_print_annotation_source_documents(
                 "document_filename": str(saved_document.get("normalized_filename", "")),
                 "document_type": str(saved_document.get("document_type", "")),
                 "document_number": _annotation_document_number_or_blank(selection_item, saved_document),
+                "ud_amendment_lc_value": _annotation_ud_amendment_lc_value_or_blank(
+                    selection_item,
+                    saved_document,
+                ),
                 "row_indexes": _selected_row_indexes(selection_item.get("selection")) if selection_item is not None else [],
                 "checklist_required": (
                     _saved_document_requires_checklist_row(
@@ -1014,6 +1019,10 @@ def _annotation_document_number(annotation_document: dict[str, Any]) -> str:
     )
 
 
+def _annotation_ud_amendment_lc_value(annotation_document: dict[str, Any]) -> str:
+    return str(annotation_document.get("ud_amendment_lc_value", "") or "").strip()
+
+
 def _annotation_document_number_or_blank(
     selection_item: dict[str, Any] | None,
     saved_document: dict[str, Any],
@@ -1023,6 +1032,17 @@ def _annotation_document_number_or_blank(
         if document_number:
             return document_number
     return str(saved_document.get("extracted_document_number", "")).strip()
+
+
+def _annotation_ud_amendment_lc_value_or_blank(
+    selection_item: dict[str, Any] | None,
+    saved_document: dict[str, Any],
+) -> str:
+    if selection_item is not None:
+        value = str(selection_item.get("ud_amendment_lc_value", "") or "").strip()
+        if value:
+            return value
+    return str(saved_document.get("extracted_lc_sc_value", "") or "").strip()
 
 
 def _selection_by_saved_document_id(outcome: MailOutcomeRecord) -> dict[str, dict[str, Any]]:
@@ -1358,6 +1378,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         f"<td>{escape(str(row.get('ud_or_amendment_no', '')))}</td>"
         f"<td>{escape(str(row.get('lc_sc', '')))}</td>"
         f"<td>{escape(str(row.get('bangladesh_bank_ref', '')))}</td>"
+        f"<td>{escape(str(row.get('ud_amendment_lc_value', '')))}</td>"
         f"<td>{escape(', '.join(str(value) for value in row.get('sl_no_values', [])))}</td>"
         f"<td>{escape(str(row.get('mail_subject', '')))}</td>"
         f"<td>{escape(str(row.get('document_filename', '')))}</td>"
@@ -1367,7 +1388,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
     )
     if not table_body:
         table_body = (
-            '        <tr><td colspan="7" class="empty">'
+            '        <tr><td colspan="8" class="empty">'
             "No printed UD/Amendment documents required annotation for this run."
             "</td></tr>"
         )
@@ -1398,6 +1419,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "          <th>UD/Amendment No.</th>\n"
         "          <th>LC/SC</th>\n"
         "          <th>Bangladesh Bank Ref.</th>\n"
+        "          <th>UD/Amendment LC Value</th>\n"
         "          <th>SL.No.</th>\n"
         "          <th>Mail Subject</th>\n"
         "          <th>Document Filename</th>\n"

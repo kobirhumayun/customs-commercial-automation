@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -588,6 +591,48 @@ class SavedDocumentAnalysisProviderTests(unittest.TestCase):
         self.assertEqual(report["page_count"], 1)
         self.assertEqual(report["pages"][0]["page_number"], 1)
         self.assertEqual(report["combined_text"], "L/C No. | LC-0038")
+
+    def test_raw_img2table_report_suppresses_tesseract_probe_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "img2table-quiet.pdf"
+            pdf_path.write_bytes(b"fake scanned table pdf")
+
+            class FakePDF:
+                def __init__(self, src: str):
+                    self.src = src
+
+                @staticmethod
+                def extract_tables(**kwargs):
+                    _ = kwargs["ocr"]
+                    return {}
+
+            class FakeOCR:
+                def __init__(self, **kwargs):
+                    self.kwargs = kwargs
+                    print("tesseract v5.5.0.20241111")
+                    print("leptonica-1.85.0", file=sys.stderr)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch("project.documents.providers._load_img2table_pdf_class", return_value=FakePDF):
+                with patch("project.documents.providers._load_img2table_tesseract_ocr_class", return_value=FakeOCR):
+                    with redirect_stdout(stdout), redirect_stderr(stderr):
+                        report = extract_saved_document_raw_report(
+                            saved_document=SavedDocument(
+                                saved_document_id="doc-raw-img2table-quiet",
+                                mail_id="mail-1",
+                                attachment_name="img2table-quiet.pdf",
+                                normalized_filename="img2table-quiet.pdf",
+                                destination_path=str(pdf_path),
+                                file_sha256="q" * 64,
+                                save_decision="saved_new",
+                            ),
+                            mode="img2table",
+                        )
+
+        self.assertEqual(report["mode"], "img2table")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_json_manifest_provider_matches_by_destination_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

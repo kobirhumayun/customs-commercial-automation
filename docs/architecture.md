@@ -114,7 +114,7 @@ Required checklist fields per checklist row:
 - `document_filename`
 
 Workflow-specific checklist row fields:
-- `ud_ip_exp`: `ud_or_amendment_no`, `lc_sc`, `bangladesh_bank_ref`
+- `ud_ip_exp`: `ud_or_amendment_no`, `lc_sc`, `bangladesh_bank_ref`, `ud_amendment_lc_value`
 - `export_lc_sc`: workbook-driven export row values rendered in workbook header order
 
 Audit-support fields may also include `row_indexes`, but operators must not be asked to infer `SL.No.` from row coordinates.
@@ -596,7 +596,7 @@ Required fields:
 - `print_group_index` (integer): deterministic rank in `print_group_order`.
 - `document_path_hashes` (array): SHA-256 hashes for print payload documents in group order.
 - `completion_marker_id` (string): `sha256(run_id + "|" + mail_id + "|" + print_group_index + "|" + joined_document_hashes)`.
-- `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `row_indexes`, and `checklist_required`. For `export_lc_sc`, the preferred persisted shape is one printed PDF per record in print-plan order with `annotation_scope="export_document"`, `saved_document_id`, `document_path`, `document_path_hash`, `document_filename`, `row_indexes`, and `checklist_required`. The runtime may also encounter legacy `annotation_scope="export_row_bundle"` records during compatibility/recovery handling.
+- `annotation_documents` (array, may be empty): persisted checklist-source records in document print order. For `ud_ip_exp`, each record should include `saved_document_id`, `document_path_hash`, `document_filename`, `document_number`, `ud_amendment_lc_value`, `row_indexes`, and `checklist_required`. For `export_lc_sc`, the preferred persisted shape is one printed PDF per record in print-plan order with `annotation_scope="export_document"`, `saved_document_id`, `document_path`, `document_path_hash`, `document_filename`, `row_indexes`, and `checklist_required`. The runtime may also encounter legacy `annotation_scope="export_row_bundle"` records during compatibility/recovery handling.
 - `export_lc_sc` checklist generation and validation should aggregate persisted per-document records back into workbook-row-oriented checklist rows so operator output remains row-centric while recovery and audit evidence stay document-exact. If persisted export annotation records are missing entirely, the current implementation may reconstruct equivalent export-document evidence from the active saved-document lineage, but it must hard-block when saved-document lineage or workbook-row membership cannot be reconciled deterministically.
 
 ### `MailMoveOperation`

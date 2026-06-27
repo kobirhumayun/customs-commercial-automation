@@ -341,6 +341,7 @@ class PrintPlanningTests(unittest.TestCase):
                         "print_eligible": True,
                         "document_type": "ud_document",
                         "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                        "extracted_lc_sc_value": "10000",
                     },
                     {
                         "saved_document_id": "doc-2",
@@ -393,9 +394,11 @@ class PrintPlanningTests(unittest.TestCase):
         self.assertEqual(len(annotation_documents), 2)
         self.assertTrue(annotation_documents[0]["checklist_required"])
         self.assertEqual(annotation_documents[0]["row_indexes"], [11])
+        self.assertEqual(annotation_documents[0]["ud_amendment_lc_value"], "10000")
         self.assertFalse(annotation_documents[1]["checklist_required"])
         payload = build_print_plan_payload(result.print_batches)
         self.assertEqual(payload["print_groups"][0]["annotation_documents"][0]["document_number"], "BGMEA/DHK/UD/2026/1001")
+        self.assertEqual(payload["print_groups"][0]["annotation_documents"][0]["ud_amendment_lc_value"], "10000")
 
     def test_plan_print_batches_persists_annotation_documents_for_export_lc_sc(self) -> None:
         run_report = RunReport(

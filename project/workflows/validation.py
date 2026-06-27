@@ -528,6 +528,9 @@ def _evaluate_ud_ip_exp_mail(
                     "document_index": document_index,
                     "document_number": ud_document.document_number.value,
                     "document_date": ud_document.document_date.value if ud_document.document_date else None,
+                    "ud_amendment_lc_value": (
+                        ud_document.lc_sc_value.value if ud_document.lc_sc_value is not None else None
+                    ),
                     "source_saved_document_id": ud_document.source_saved_document_id,
                     "selection": assembly.ud_selection,
                 }
