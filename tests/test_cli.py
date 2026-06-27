@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import io
@@ -3180,6 +3180,7 @@ class CLITests(unittest.TestCase):
                         WorkbookHeader(column_index=12, text="Lien Bank"),
                         WorkbookHeader(column_index=13, text="Master L/C No."),
                         WorkbookHeader(column_index=14, text="Master L/C Issue Dt."),
+                        WorkbookHeader(column_index=34, text="Master L/C Recv. Date"),
                         WorkbookHeader(column_index=22, text="Amount"),
                         WorkbookHeader(column_index=33, text="Bangladesh Bank Ref."),
                     ],
@@ -3812,6 +3813,7 @@ class CLITests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 15, "text": "Bangladesh Bank Ref."},
                             {"column_index": 16, "text": "LC Issue Date"},
                         ],
@@ -3993,6 +3995,7 @@ class CLITests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 15, "text": "Bangladesh Bank Ref."},
                             {"column_index": 16, "text": "LC Issue Date"},
                         ],
@@ -4135,6 +4138,7 @@ class CLITests(unittest.TestCase):
                             {"column_index": 12, "text": "Lien Bank"},
                             {"column_index": 13, "text": "Master L/C No."},
                             {"column_index": 14, "text": "Master L/C Issue Dt."},
+                            {"column_index": 34, "text": "Master L/C Recv. Date"},
                             {"column_index": 15, "text": "Bangladesh Bank Ref."},
                             {"column_index": 16, "text": "LC Issue Date"},
                         ],

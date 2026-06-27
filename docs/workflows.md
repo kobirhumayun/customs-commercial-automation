@@ -592,11 +592,14 @@ Use ERP fields to populate:
 - `Lien Bank` ← `Nego Bank`
 - `Master L/C No.` ← `Master LC No.`
 - `Master L/C Issue Dt.` ← `M.L/C Date`
+- `Master L/C Recv. Date` ← `-`
 - `Bangladesh Bank Ref.` ← `Ship. Remarks`
 - `Commercial File No.` ← `File No.`
 
 Note: the master workbook intentionally contains duplicate `Amount` headers. The export workflow must write only to column 6. Column 22 `Amount` is reserved for Import LC (Back-to-Back) workflow writes.
-The `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are mandatory for export mapping. The ERP `Ship. Remarks` row value may be blank; in that case the workflow writes a blank workbook value and does not hard-block the mail for that field alone.
+The `L/C Amnd No.` and `L/C Amnd Date` workbook fields use ERP `Amd No` and `Amd DT` respectively; if the ERP row value is blank, missing, or null, the workflow writes `-`.
+The `Master L/C Recv. Date` workbook field always writes `-` for `export_lc_sc`.
+The `Bangladesh Bank Ref.` workbook header and ERP `Ship. Remarks` report column are mandatory for export mapping. The ERP `Ship. Remarks` row value is trimmed and written only when the trimmed value contains at least 10 digits and every character is numeric. If `Ship. Remarks` is blank, null, fewer than 10 digits, or contains any nonnumeric character, the workflow skips only the `Bangladesh Bank Ref.` cell write and does not hard-block the mail for that field alone.
 
 ### No-write rules
 - any extracted file number is missing its required ERP row

@@ -40,6 +40,7 @@ EXPORT_HEADER_SPECS = (
     HeaderMappingSpec("lien_bank", "Lien Bank"),
     HeaderMappingSpec("master_lc_no", "Master L/C No."),
     HeaderMappingSpec("master_lc_issue_date", "Master L/C Issue Dt."),
+    HeaderMappingSpec("master_lc_recv_date", "Master L/C Recv. Date"),
     HeaderMappingSpec(
         "bangladesh_bank_ref",
         "Bangladesh Bank Ref.",
