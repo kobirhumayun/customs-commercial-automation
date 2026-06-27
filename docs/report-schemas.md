@@ -310,6 +310,7 @@ Each `rows[]` item must include these shared fields:
 - `ud_or_amendment_no`
 - `lc_sc`
 - `bangladesh_bank_ref`
+- `ud_amendment_lc_value`
 - `saved_document_id`
 - `document_path_hash`
 
@@ -338,6 +339,7 @@ When `print_plan.json` includes `annotation_documents` for a print group, each i
 - `document_path_hash`
 - `document_filename`
 - `document_number`
+- `ud_amendment_lc_value` for `ud_ip_exp` UD/Amendment checklist rows
 - `row_indexes`
 - `checklist_required`
 

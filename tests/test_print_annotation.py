@@ -74,12 +74,14 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
                         "normalized_filename": "UD-ONE.pdf",
                         "destination_path": "C:/docs/UD-ONE.pdf",
                         "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                        "extracted_lc_sc_value": "10000",
                     },
                     {
                         "saved_document_id": "doc-2",
                         "normalized_filename": "UD-TWO.pdf",
                         "destination_path": "C:/docs/UD-TWO.pdf",
                         "extracted_document_number": "BGMEA/DHK/AM/2026/1002",
+                        "extracted_lc_sc_value": "15000",
                     },
                 ],
                 ud_selection={
@@ -148,11 +150,21 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         self.assertEqual(result.payload["rows"][0]["ud_or_amendment_no"], "BGMEA/DHK/UD/2026/1001")
         self.assertEqual(result.payload["rows"][0]["lc_sc"], "LC-0043")
         self.assertEqual(result.payload["rows"][0]["bangladesh_bank_ref"], "BB-001")
+        self.assertEqual(result.payload["rows"][0]["ud_amendment_lc_value"], "10000")
         self.assertEqual(result.payload["rows"][0]["sl_no_values"], ["17", "18"])
         self.assertEqual(result.payload["rows"][1]["print_sequence"], 2)
         self.assertEqual(result.payload["rows"][1]["bangladesh_bank_ref"], "BB-002")
+        self.assertEqual(result.payload["rows"][1]["ud_amendment_lc_value"], "15000")
         self.assertEqual(result.payload["rows"][1]["sl_no_values"], ["21A"])
         self.assertIn("Print Annotation Checklist", result.html)
+        self.assertLess(
+            result.html.index("<th>Bangladesh Bank Ref.</th>"),
+            result.html.index("<th>UD/Amendment LC Value</th>"),
+        )
+        self.assertLess(
+            result.html.index("<th>UD/Amendment LC Value</th>"),
+            result.html.index("<th>SL.No.</th>"),
+        )
 
     def test_build_print_annotation_checklist_renders_export_rows_with_mail_level_rowspans(self) -> None:
         run_report = _build_export_run_report()
@@ -1442,6 +1454,7 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
                         "document_path_hash": "hash-1",
                         "document_filename": "UD-ONE.pdf",
                         "document_number": "BGMEA/DHK/UD/2026/1001",
+                        "ud_amendment_lc_value": "25000",
                         "row_indexes": [11],
                         "checklist_required": True,
                     },
@@ -1468,6 +1481,7 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         self.assertEqual(result.payload["checklist_row_count"], 1)
         self.assertEqual(result.payload["rows"][0]["document_filename"], "UD-ONE.pdf")
         self.assertEqual(result.payload["rows"][0]["ud_or_amendment_no"], "BGMEA/DHK/UD/2026/1001")
+        self.assertEqual(result.payload["rows"][0]["ud_amendment_lc_value"], "25000")
         self.assertEqual(result.payload["rows"][0]["row_indexes"], [11])
 
     def test_build_print_annotation_checklist_falls_back_to_staged_write_rows_for_single_document_runs(self) -> None:
