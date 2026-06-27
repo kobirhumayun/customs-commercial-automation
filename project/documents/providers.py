@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import json
+import os
 import re
+import subprocess
+import sys
 import unicodedata
 from io import BytesIO
 from dataclasses import dataclass, field
@@ -898,7 +902,8 @@ def _build_img2table_extraction_report(
     ocr_class: object,
 ) -> dict[str, object]:
     pdf_document = pdf_class(str(document_path))
-    ocr_instance = ocr_class(n_threads=1, lang="eng")
+    with _suppress_tesseract_probe_output():
+        ocr_instance = ocr_class(n_threads=1, lang="eng")
     extracted = pdf_document.extract_tables(
         ocr=ocr_instance,
         implicit_rows=True,
@@ -2023,3 +2028,65 @@ def _load_pil_image_module():
     except ImportError as exc:
         raise ValueError("Pillow is required for OCR saved-document analysis") from exc
     return Image
+
+
+@contextmanager
+def _suppress_tesseract_probe_output():
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        with (
+            redirect_stdout(devnull),
+            redirect_stderr(devnull),
+            _redirect_standard_fds(devnull.fileno()),
+            _suppress_tesseract_version_probe_subprocess(),
+        ):
+            yield
+
+
+@contextmanager
+def _redirect_standard_fds(target_fd: int):
+    saved_fds: list[tuple[int, int]] = []
+    try:
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+                fd = stream.fileno()
+                saved_fd = os.dup(fd)
+            except (AttributeError, OSError, ValueError):
+                continue
+            saved_fds.append((fd, saved_fd))
+            os.dup2(target_fd, fd)
+        yield
+    finally:
+        for fd, saved_fd in reversed(saved_fds):
+            try:
+                os.dup2(saved_fd, fd)
+            finally:
+                os.close(saved_fd)
+
+
+@contextmanager
+def _suppress_tesseract_version_probe_subprocess():
+    original_run = subprocess.run
+
+    def quiet_run(*popenargs, **kwargs):
+        command = popenargs[0] if popenargs else kwargs.get("args")
+        if _is_tesseract_version_probe_command(command):
+            kwargs = dict(kwargs)
+            kwargs.setdefault("stdout", subprocess.DEVNULL)
+            kwargs.setdefault("stderr", subprocess.DEVNULL)
+        return original_run(*popenargs, **kwargs)
+
+    subprocess.run = quiet_run
+    try:
+        yield
+    finally:
+        subprocess.run = original_run
+
+
+def _is_tesseract_version_probe_command(command: object) -> bool:
+    if isinstance(command, str):
+        return command.strip().lower() == "tesseract --version"
+    if isinstance(command, (list, tuple)):
+        normalized = [str(part).strip().lower() for part in command]
+        return len(normalized) >= 2 and normalized[0] == "tesseract" and normalized[1] == "--version"
+    return False
