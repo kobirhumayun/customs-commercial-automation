@@ -1021,8 +1021,9 @@ Rows where:
     - dashboard `LC Value` exactly matches ERP `Current LC Value` and the summed dashboard quantity exactly matches aggregated ERP `LC Qty`
     - dashboard `LC Value` exceeds ERP by at least `100`, dashboard quantity also exceeds ERP `LC Qty`, and dashboard quantity excess is between `20%` and `80%` of the dashboard value excess, inclusive
 - workbook `Master L/C No.` may contain one or more line-break-separated values
+- workbook `Master L/C No.` is an identifier field and must be treated as text, using live Excel display text when available rather than numeric cell value semantics
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
-- foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing
+- foreign-LC comparison normalization uses trim, whitespace collapse, case-insensitive comparison, and special-character normalization on each value before overlap testing; numeric-looking identifier text may ignore Excel integer `.0` artifacts and leading-zero padding for overlap comparison
 - within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - `OK (KGS)` when all non-quantity checks above pass, dashboard `LC Value` exactly matches ERP `Current LC Value`, and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
 - if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately

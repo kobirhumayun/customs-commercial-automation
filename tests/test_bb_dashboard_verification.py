@@ -29,6 +29,7 @@ from project.workflows.bb_dashboard_verification import (
     _build_report_html,
     _compare_buyer_details,
     _compare_dashboard_snapshot,
+    _resolve_master_lc_values_by_row,
     _resolve_sl_no_values_by_row,
     validate_bb_dashboard_verification_run,
 )
@@ -228,6 +229,36 @@ class BBDashboardVerificationTests(unittest.TestCase):
             hard_block_outcome.staged_write_operations[0]["expected_post_write_value"],
             "No ERP rows were available for workbook family LC-003.",
         )
+
+    def test_erp_lc_date_conflict_remains_hard_block_with_specific_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path, workbook_manifest_path, erp_manifest_path, dashboard_manifest_path = _write_dashboard_fixture_bundle(root)
+            erp_payload = json.loads(erp_manifest_path.read_text(encoding="utf-8"))
+            erp_payload[1]["lc_sc_date"] = "2026-01-11"
+            erp_manifest_path.write_text(json.dumps(erp_payload), encoding="utf-8")
+
+            descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            config = load_workflow_config(descriptor=descriptor, config_path=config_path)
+            rule_pack = load_rule_pack(WorkflowId.BB_DASHBOARD_VERIFICATION)
+            initialized = initialize_workflow_run(
+                descriptor=descriptor,
+                config=config,
+                rule_pack=rule_pack,
+                mail_snapshot=[],
+            )
+            workbook_snapshot = JsonManifestWorkbookSnapshotProvider(workbook_manifest_path).load_snapshot()
+            workflow_result = validate_bb_dashboard_verification_run(
+                run_report=initialized.run_report,
+                workbook_snapshot=workbook_snapshot,
+                erp_rows=JsonManifestERPRowProvider(erp_manifest_path).load_rows(),
+                dashboard_provider=JsonManifestDashboardLookupProvider(dashboard_manifest_path),
+            )
+
+        lc001_family = workflow_result.report_payload["families"][0]
+        self.assertEqual(lc001_family["final_decision"], "hard_block")
+        self.assertIn("LC Date values conflicted (2026-01-10, 2026-01-11)", lc001_family["final_workbook_value"])
+        self.assertEqual(workflow_result.validation_result.discrepancy_reports[0].severity.value, "hard_block")
 
     def test_validate_run_missing_sl_no_hard_blocks_without_staging_date_writeback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -432,6 +463,51 @@ class BBDashboardVerificationTests(unittest.TestCase):
         fake_sheet = FakeApp.last_instance.books.book.sheets[0]
         self.assertEqual(resolved, {11: "21A", 13: "23A"})
         self.assertEqual(fake_sheet.range_calls, [((11, 1),), ((13, 1),)])
+
+    def test_resolve_master_lc_values_by_row_uses_live_workbook_display_text(self) -> None:
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[WorkbookHeader(column_index=5, text="Master L/C No.")],
+            rows=[WorkbookRow(row_index=11, values={5: "10120260003.0"}, number_formats={})],
+        )
+
+        class FakeCell:
+            def __init__(self, text: str) -> None:
+                self.api = type("Api", (), {"Text": text})()
+
+        class FakeSheet:
+            def range(self, coordinates):
+                self.last_coordinates = coordinates
+                return FakeCell("010120260003")
+
+        class FakeBook:
+            def __init__(self) -> None:
+                self.sheets = [FakeSheet()]
+
+            def close(self) -> None:
+                return None
+
+        class FakeBooks:
+            def open(self, *_args, **_kwargs):
+                return FakeBook()
+
+        class FakeApp:
+            def __init__(self, **_kwargs) -> None:
+                self.books = FakeBooks()
+
+            def quit(self) -> None:
+                return None
+
+        fake_xlwings = type("FakeXLWings", (), {"App": FakeApp})
+
+        with patch.dict(sys.modules, {"xlwings": fake_xlwings}):
+            resolved = _resolve_master_lc_values_by_row(
+                workbook_snapshot=workbook_snapshot,
+                master_lc_column_index=5,
+                live_workbook_path=Path("D:/customs-automation/2026-master.xlsx"),
+            )
+
+        self.assertEqual(resolved, {11: ["010120260003"]})
 
     def test_validate_run_exception_report_does_not_reuse_prior_family_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1369,6 +1445,63 @@ class BBDashboardVerificationTests(unittest.TestCase):
 
         self.assertEqual(comparison["status"], "OK")
         self.assertEqual(comparison["decision_reasons"], ["Dashboard quantity matched ERP LC quantity."])
+
+    def test_compare_dashboard_snapshot_treats_numeric_master_lc_values_as_text_identifiers(self) -> None:
+        family = DashboardCandidateFamily(
+            family_id="mail-1a",
+            lc_sc_no="1345260400761",
+            lc_sc_key="1345260400761",
+            row_indexes=[861],
+            sl_no_values=["859"],
+            master_lc_values=["10120260003.0"],
+            rows=[
+                DashboardCandidateRow(
+                    row_index=861,
+                    sl_no="859",
+                    lc_sc_no="1345260400761",
+                    lc_sc_key="1345260400761",
+                    master_lc_values=["10120260003.0"],
+                    dashboard_status="",
+                    shipment_date="",
+                    expiry_date="",
+                    shipment_date_number_format="dd/mm/yyyy",
+                    expiry_date_number_format="dd/mm/yyyy",
+                    number_formats={},
+                )
+            ],
+        )
+        aggregate = ERPFamilyAggregate(
+            lc_sc_no="1345260400761",
+            lc_sc_key="1345260400761",
+            buyer_name="NALIN TEX LTD",
+            lc_date="2026-06-08",
+            ship_date="20-Jul-26",
+            expiry_date="05-Aug-26",
+            current_lc_value=Decimal("17100"),
+            lc_qty=Decimal("6000"),
+            net_weight=Decimal("3118.48"),
+            ship_remarks=None,
+            source_row_count=1,
+        )
+        snapshot = DashboardFamilySnapshot(
+            beneficiary_name="PIONEER DENIM LIMITED",
+            irc_details="NALIN TEX LTD",
+            erc_details="NALIN TEX LTD",
+            lc_date="08-Jun-2026",
+            last_date_of_shipment="20-Jul-2026",
+            lc_expiry_date="05-Aug-2026",
+            lc_value="17100",
+            foreign_lc_numbers=["010120260003"],
+            commodity_quantities=["3118.48"],
+        )
+
+        comparison = _compare_dashboard_snapshot(
+            family=family,
+            aggregate=aggregate,
+            snapshot=snapshot,
+        )
+
+        self.assertEqual(comparison["status"], "OK (KGS)")
 
     def test_compare_dashboard_snapshot_does_not_add_quantity_mismatch_when_quantity_matches(self) -> None:
         family = DashboardCandidateFamily(
