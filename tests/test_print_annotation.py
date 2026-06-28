@@ -1576,6 +1576,94 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
         self.assertIn("ud_filename_lc_suffix_mismatch", row["discrepancies"])
         self.assertIn("UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf", result.html)
 
+    def test_processed_duplicate_ud_diagnostic_uses_live_sl_no_display_text(self) -> None:
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-1",
+                workflow_id=WorkflowId.UD_IP_EXP,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=FinalDecision.PASS,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=False,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-1",
+                subject_raw="UD duplicate subject",
+                sender_address="ud@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-1",
+                        "normalized_filename": "UD-ONE.pdf",
+                        "destination_path": "C:/docs/UD-ONE.pdf",
+                        "save_decision": "skipped_duplicate_filename",
+                        "print_eligible": True,
+                        "document_type": "ud_document",
+                        "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                        "extracted_lc_sc_number": "LC-0043",
+                    }
+                ],
+                write_disposition="duplicate_only_noop",
+                ud_selection={
+                    "documents": [
+                        {
+                            "document_index": 0,
+                            "document_number": "BGMEA/DHK/UD/2026/1001",
+                            "source_saved_document_id": "doc-1",
+                            "selection": {
+                                "final_decision": "already_recorded",
+                                "candidates": [
+                                    {"selected": True, "row_indexes": [11]},
+                                ],
+                            },
+                        },
+                    ],
+                },
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[
+                WorkbookRow(row_index=11, values={1: 17.0, 2: "LC-0043", 3: "BB-001"}),
+            ],
+        )
+
+        def live_values(*, workbook_path, column_index, row_indexes, error_code, error_message):
+            del workbook_path, error_code, error_message
+            values_by_column = {
+                1: {11: "17"},
+                2: {11: "LC-0043"},
+                3: {11: "BB-001"},
+            }
+            return {
+                row_index: values_by_column[column_index][row_index]
+                for row_index in row_indexes
+            }
+
+        with patch(
+            "project.workflows.print_annotation._resolve_live_column_values_by_row",
+            side_effect=live_values,
+        ):
+            result = build_print_annotation_checklist(
+                run_report=_build_run_report(),
+                mail_outcomes=mail_outcomes,
+                print_batches=[],
+                workbook_snapshot=workbook_snapshot,
+                live_workbook_path=Path("C:/workbook.xlsx"),
+            )
+
+        row = result.payload["processed_document_rows"][0]
+        self.assertEqual(row["print_sequence"], "Not printed")
+        self.assertEqual(row["disposition"], "skipped_duplicate_filename")
+        self.assertEqual(row["sl_no_values"], ["17"])
+        self.assertNotIn("17.0", result.html)
+
     def test_validate_print_annotation_checklist_accepts_ud_only_subset_of_printed_documents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

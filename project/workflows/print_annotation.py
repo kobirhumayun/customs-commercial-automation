@@ -137,20 +137,29 @@ def build_print_annotation_checklist(
             sl_no_values_by_row=_merge_snapshot_column_values(
                 workbook_snapshot=workbook_snapshot,
                 column_index=sl_no_column_index,
+                live_workbook_path=live_workbook_path,
                 row_indexes=diagnostic_row_indexes,
                 resolved_values=sl_no_values_by_row,
+                error_code="print_annotation_sl_no_unresolved",
+                error_message="The live workbook SL.No. display text could not be read for a selected diagnostic row.",
             ),
             lc_sc_values_by_row=_merge_snapshot_column_values(
                 workbook_snapshot=workbook_snapshot,
                 column_index=lc_sc_column_index,
+                live_workbook_path=live_workbook_path,
                 row_indexes=diagnostic_row_indexes,
                 resolved_values=lc_sc_values_by_row,
+                error_code="print_annotation_generation_failed",
+                error_message="The live workbook L/C & S/C No. display text could not be read for a selected diagnostic row.",
             ),
             bangladesh_bank_ref_values_by_row=_merge_snapshot_column_values(
                 workbook_snapshot=workbook_snapshot,
                 column_index=bangladesh_bank_ref_column_index,
+                live_workbook_path=live_workbook_path,
                 row_indexes=diagnostic_row_indexes,
                 resolved_values=bangladesh_bank_ref_values_by_row,
+                error_code="print_annotation_generation_failed",
+                error_message="The live workbook Bangladesh Bank Ref. display text could not be read for a selected diagnostic row.",
             ),
         )
     generated_at = utc_now()
@@ -1282,14 +1291,32 @@ def _merge_snapshot_column_values(
     *,
     workbook_snapshot: WorkbookSnapshot,
     column_index: int,
+    live_workbook_path: Path | None,
     row_indexes: set[int],
     resolved_values: dict[int, str],
+    error_code: str,
+    error_message: str,
 ) -> dict[int, str]:
     merged = dict(resolved_values)
+    missing_row_indexes = {
+        row_index
+        for row_index in row_indexes
+        if row_index not in merged
+    }
+    if live_workbook_path is not None and missing_row_indexes:
+        merged.update(
+            _resolve_column_values_by_row(
+                workbook_snapshot=workbook_snapshot,
+                column_index=column_index,
+                live_workbook_path=live_workbook_path,
+                row_indexes=missing_row_indexes,
+                error_code=error_code,
+                error_message=error_message,
+            )
+        )
+        return merged
     rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
-    for row_index in row_indexes:
-        if row_index in merged:
-            continue
+    for row_index in missing_row_indexes:
         row = rows_by_index.get(row_index)
         if row is not None:
             merged[row_index] = str(row.values.get(column_index, "") or "")
