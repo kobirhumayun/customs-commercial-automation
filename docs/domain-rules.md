@@ -424,8 +424,9 @@ Comparison rules:
 - dashboard `LC Expiry Date` must be on or after ERP `Expiry DT.` and between `5` and `90` days after dashboard `Last Date of Shipment`, inclusive
 - dashboard `LC Value` lower than aggregated ERP `Current LC Value` fails immediately
 - workbook `Master L/C No.` may contain one or more line-break-separated values
+- workbook `Master L/C No.` is an identifier field and must be treated as text, using live Excel display text when available rather than numeric cell value semantics
 - dashboard `Related Foreign LC/Contract Information -> Foreign LC No` may contain one or more rows
-- foreign-LC comparison normalizes each workbook/dashboard value using trim, whitespace collapse, case-insensitive comparison, and special-character normalization
+- foreign-LC comparison normalizes each workbook/dashboard value using trim, whitespace collapse, case-insensitive comparison, and special-character normalization; numeric-looking identifier text may ignore Excel integer `.0` artifacts and leading-zero padding for overlap comparison
 - within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - foreign-LC comparison passes when at least one normalized workbook `Master L/C No.` value is common with at least one normalized dashboard `Foreign LC No` value
 - sum all dashboard `Local LC Commodity Detail -> QUANTITY` rows before quantity comparison

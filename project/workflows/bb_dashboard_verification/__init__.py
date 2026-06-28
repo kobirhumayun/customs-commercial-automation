@@ -154,10 +154,16 @@ def validate_bb_dashboard_verification_run(
         sl_no_column_index=header_mapping["sl_no"],
         live_workbook_path=live_workbook_path,
     )
+    master_lc_values_by_row = _resolve_master_lc_values_by_row(
+        workbook_snapshot=workbook_snapshot,
+        master_lc_column_index=header_mapping["master_lc_no"],
+        live_workbook_path=live_workbook_path,
+    )
     candidate_families = _build_candidate_families(
         workbook_snapshot=workbook_snapshot,
         header_mapping=header_mapping,
         sl_no_values_by_row=sl_no_values_by_row,
+        master_lc_values_by_row=master_lc_values_by_row,
     )
     erp_rows_by_family = _group_erp_rows_by_family(erp_rows)
 
@@ -491,6 +497,7 @@ def _build_candidate_families(
     workbook_snapshot: WorkbookSnapshot,
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
+    master_lc_values_by_row: dict[int, list[str]],
 ) -> list[DashboardCandidateFamily]:
     families: dict[str, list[DashboardCandidateRow]] = {}
     ordered_keys: list[str] = []
@@ -499,6 +506,7 @@ def _build_candidate_families(
             row=row,
             header_mapping=header_mapping,
             sl_no_values_by_row=sl_no_values_by_row,
+            master_lc_values_by_row=master_lc_values_by_row,
         )
         if candidate is None:
             continue
@@ -536,6 +544,7 @@ def _build_candidate_row(
     row: WorkbookRow,
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
+    master_lc_values_by_row: dict[int, list[str]],
 ) -> DashboardCandidateRow | None:
     up_no = row.values.get(header_mapping["up_no"], "").strip()
     if up_no:
@@ -558,7 +567,9 @@ def _build_candidate_row(
         return None
 
     sl_no = sl_no_values_by_row.get(row.row_index, "").strip()
-    master_lc_values = _split_multiline_values(row.values.get(header_mapping["master_lc_no"], ""))
+    master_lc_values = master_lc_values_by_row.get(row.row_index)
+    if master_lc_values is None:
+        master_lc_values = _split_multiline_values(row.values.get(header_mapping["master_lc_no"], ""))
     return DashboardCandidateRow(
         row_index=row.row_index,
         sl_no=sl_no,
@@ -588,10 +599,11 @@ def _resolve_sl_no_values_by_row(
 ) -> dict[int, str]:
     row_indexes = {row.row_index for row in workbook_snapshot.rows}
     if live_workbook_path is not None:
-        return _resolve_live_sl_no_values_by_row(
+        return _resolve_live_display_values_by_row(
             workbook_path=live_workbook_path,
             column_index=sl_no_column_index,
             row_indexes=row_indexes,
+            field_label="SL.No.",
         )
     rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
     resolved: dict[int, str] = {}
@@ -603,25 +615,57 @@ def _resolve_sl_no_values_by_row(
     return resolved
 
 
-def _resolve_live_sl_no_values_by_row(
+def _resolve_master_lc_values_by_row(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    master_lc_column_index: int,
+    live_workbook_path: Path | None,
+) -> dict[int, list[str]]:
+    row_indexes = {row.row_index for row in workbook_snapshot.rows}
+    if live_workbook_path is not None:
+        displayed_values = _resolve_live_display_values_by_row(
+            workbook_path=live_workbook_path,
+            column_index=master_lc_column_index,
+            row_indexes=row_indexes,
+            field_label="Master L/C No.",
+        )
+        return {
+            row_index: _split_multiline_values(value)
+            for row_index, value in displayed_values.items()
+        }
+
+    rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
+    resolved: dict[int, list[str]] = {}
+    for row_index in row_indexes:
+        row = rows_by_index.get(row_index)
+        if row is None:
+            continue
+        resolved[row_index] = _split_multiline_values(row.values.get(master_lc_column_index, ""))
+    return resolved
+
+
+def _resolve_live_display_values_by_row(
     *,
     workbook_path: Path,
     column_index: int,
     row_indexes: set[int],
+    field_label: str,
 ) -> dict[int, str]:
     if not row_indexes:
         return {}
     try:
         import xlwings  # type: ignore
     except ImportError as exc:
-        raise ValueError("xlwings is required to resolve displayed workbook SL.No. values from the live workbook.") from exc
+        raise ValueError(
+            f"xlwings is required to resolve displayed workbook {field_label} values from the live workbook."
+        ) from exc
 
     app = xlwings.App(visible=False, add_book=False)
     book = None
     try:
         book = app.books.open(str(workbook_path), update_links=False, read_only=True)
         sheet = book.sheets[0]
-        return _read_live_sl_no_values(
+        return _read_live_display_values(
             sheet=sheet,
             column_index=column_index,
             row_indexes=sorted(row_indexes),
@@ -632,7 +676,7 @@ def _resolve_live_sl_no_values_by_row(
         app.quit()
 
 
-def _read_live_sl_no_values(*, sheet, column_index: int, row_indexes: list[int]) -> dict[int, str]:
+def _read_live_display_values(*, sheet, column_index: int, row_indexes: list[int]) -> dict[int, str]:
     if not row_indexes:
         return {}
     resolved: dict[int, str] = {}
@@ -720,11 +764,22 @@ def _build_erp_family_aggregate(
         for row in deduped_rows
         if normalize_dashboard_search_key(getattr(row, "ship_remarks", ""))
     )
-    if not buyer_names or len(buyer_names) != 1 or len(lc_dates) != 1 or len(ship_dates) != 1 or len(expiry_dates) != 1 or len(ship_remarks) > 1:
+    consistency_issues = _build_erp_consistency_issues(
+        buyer_names=buyer_names,
+        lc_dates=lc_dates,
+        ship_dates=ship_dates,
+        expiry_dates=expiry_dates,
+        ship_remarks=ship_remarks,
+    )
+    if consistency_issues:
+        issue_text = "; ".join(consistency_issues)
         return None, _build_discrepancy(
             run_report=run_report,
             code="bb_dashboard_family_input_invalid",
-            message=f"ERP family inputs were not deterministically consistent for workbook family {family.lc_sc_no}.",
+            message=(
+                f"ERP family inputs were not deterministically consistent for workbook family {family.lc_sc_no}: "
+                f"{issue_text}."
+            ),
             mail_id=family.family_id,
             details={
                 "lc_sc_no": family.lc_sc_no,
@@ -1488,11 +1543,57 @@ def _normalize_special_text(value: str) -> str:
 
 
 def _normalize_foreign_lc_reference(value: str) -> str:
+    numeric_text = _normalize_numeric_foreign_lc_reference(str(value))
+    if numeric_text:
+        return numeric_text
     normalized = _normalize_special_text(value)
     if not normalized:
         return ""
     tokens = [token for token in normalized.split() if token != "AND"]
-    return " ".join(tokens)
+    normalized = " ".join(tokens)
+    numeric_text = _normalize_numeric_foreign_lc_reference(normalized)
+    return numeric_text or normalized
+
+
+def _normalize_numeric_foreign_lc_reference(value: str) -> str:
+    compact = _WHITESPACE_RE.sub("", str(value).strip())
+    if not compact:
+        return ""
+    match = re.fullmatch(r"(\d+)(?:\.0+)?", compact)
+    if match is None:
+        return ""
+    normalized = match.group(1).lstrip("0")
+    return normalized or "0"
+
+
+def _build_erp_consistency_issues(
+    *,
+    buyer_names: list[str],
+    lc_dates: list[str],
+    ship_dates: list[str],
+    expiry_dates: list[str],
+    ship_remarks: list[str],
+) -> list[str]:
+    issues: list[str] = []
+    if not buyer_names:
+        issues.append("buyer name was missing")
+    elif len(buyer_names) != 1:
+        issues.append(f"buyer name values conflicted ({', '.join(buyer_names)})")
+    if len(lc_dates) != 1:
+        issues.append(_format_single_value_consistency_issue("LC Date", lc_dates))
+    if len(ship_dates) != 1:
+        issues.append(_format_single_value_consistency_issue("Shipment Date", ship_dates))
+    if len(expiry_dates) != 1:
+        issues.append(_format_single_value_consistency_issue("Expiry Date", expiry_dates))
+    if len(ship_remarks) > 1:
+        issues.append(f"Ship. Remarks values conflicted ({', '.join(ship_remarks)})")
+    return issues
+
+
+def _format_single_value_consistency_issue(field_label: str, values: list[str]) -> str:
+    if not values:
+        return f"{field_label} was missing"
+    return f"{field_label} values conflicted ({', '.join(values)})"
 
 
 def _normalize_buyer_comparison_text(value: str) -> str:
