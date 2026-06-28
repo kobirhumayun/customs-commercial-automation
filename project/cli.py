@@ -36,10 +36,13 @@ from project.printing import AcrobatPrintProvider, inspect_acrobat_print_adapter
 from project.models import (
     DiscrepancyReport,
     FinalDecision,
+    MailOutcomeRecord,
     MailMovePhaseStatus,
     PrintPhaseStatus,
+    RunReport,
     SavedDocument,
     WorkflowId,
+    WriteOperation,
 )
 from project.reporting.persistence import (
     append_discrepancy,
@@ -1554,6 +1557,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use the configured live workbook so checklist SL.No. values preserve displayed business text.",
     )
     print_annotation_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the generated checklist HTML in the default browser after generation.",
+    )
+    print_annotation_parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -2229,10 +2237,15 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
             config_path=args.config,
             overrides=_parse_overrides(args.overrides),
         )
-        run_report, mail_outcomes, _staged_write_plan = load_print_planning_bundle(
+        run_report, mail_outcomes, staged_write_plan = load_print_planning_bundle(
             run_artifact_root=config.run_artifact_root,
             workflow_id=descriptor.workflow_id,
             run_id=args.run_id,
+        )
+        unplanned_hard_block_report = _is_unplanned_hard_block_print_annotation_report(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            staged_write_plan=staged_write_plan,
         )
         if run_report.print_phase_status not in {
             PrintPhaseStatus.PLANNED,
@@ -2240,15 +2253,18 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
             PrintPhaseStatus.UNCERTAIN_INCOMPLETE,
             PrintPhaseStatus.HARD_BLOCKED,
             PrintPhaseStatus.COMPLETED,
-        }:
+        } and not unplanned_hard_block_report:
             raise ValueError(
                 "Print-annotation checklist generation requires print_phase_status=planned, printing, uncertain_incomplete, hard_blocked, or completed."
             )
-        print_batches = load_print_batches(
-            run_artifact_root=config.run_artifact_root,
-            workflow_id=descriptor.workflow_id,
-            run_id=args.run_id,
-        )
+        if unplanned_hard_block_report:
+            print_batches = []
+        else:
+            print_batches = load_print_batches(
+                run_artifact_root=config.run_artifact_root,
+                workflow_id=descriptor.workflow_id,
+                run_id=args.run_id,
+            )
         workbook_snapshot = _load_workbook_snapshot(
             workbook_json=args.workbook_json,
             live_workbook=args.live_workbook,
@@ -2284,6 +2300,30 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
             ),
         )
         write_run_metadata(artifact_paths, to_jsonable(updated_run_report))
+        print_annotation_html_opened = None
+        if args.open_browser:
+            try:
+                open_print_annotation_checklist_in_browser(artifact_paths=artifact_paths)
+                print_annotation_html_opened = True
+            except Exception as exc:
+                print_annotation_html_opened = False
+                append_discrepancy(
+                    artifact_paths,
+                    to_jsonable(
+                        _build_cli_print_annotation_discrepancy(
+                            run_report=updated_run_report,
+                            code="print_annotation_browser_open_failed",
+                            message=(
+                                "The print-annotation checklist HTML was generated successfully, "
+                                "but the default browser could not be opened automatically."
+                            ),
+                            details={
+                                "html_path": str(artifact_paths.print_annotation_checklist_html_path),
+                                "error": str(exc),
+                            },
+                        )
+                    ),
+                )
     except PrintAnnotationChecklistError as exc:
         if artifact_paths is not None and run_report is not None:
             write_run_metadata(
@@ -2328,11 +2368,26 @@ def _handle_generate_print_annotation_html(args: argparse.Namespace) -> int:
         "workflow_id": updated_run_report.workflow_id.value,
         "print_phase_status": updated_run_report.print_phase_status.value,
         "checklist_row_count": int(result.payload.get("checklist_row_count", 0)),
+        "processed_document_row_count": int(result.payload.get("processed_document_row_count", 0)),
         "json_path": str(artifact_paths.print_annotation_checklist_json_path),
         "html_path": str(artifact_paths.print_annotation_checklist_html_path),
+        "print_annotation_html_opened": print_annotation_html_opened,
     }
     print(pretty_json_dumps(payload), end="")
     return 0
+
+
+def _is_unplanned_hard_block_print_annotation_report(
+    *,
+    run_report: RunReport,
+    mail_outcomes: list[MailOutcomeRecord],
+    staged_write_plan: list[WriteOperation],
+) -> bool:
+    return (
+        run_report.print_phase_status == PrintPhaseStatus.NOT_STARTED
+        and not staged_write_plan
+        and any(outcome.final_decision == FinalDecision.HARD_BLOCK for outcome in mail_outcomes)
+    )
 
 
 def _handle_execute_print(args: argparse.Namespace) -> int:
