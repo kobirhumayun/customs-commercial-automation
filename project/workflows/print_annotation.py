@@ -69,6 +69,7 @@ def build_print_annotation_checklist(
             details={"run_id": run_report.run_id},
         )
 
+    processed_document_rows: list[dict[str, Any]] = []
     if run_report.workflow_id == WorkflowId.EXPORT_LC_SC:
         workbook_columns, rows = _build_export_checklist_rows(
             run_report=run_report,
@@ -126,6 +127,32 @@ def build_print_annotation_checklist(
             lc_sc_values_by_row=lc_sc_values_by_row,
             bangladesh_bank_ref_values_by_row=bangladesh_bank_ref_values_by_row,
         )
+        diagnostic_row_indexes = _processed_ud_ip_exp_document_row_indexes(
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+        )
+        processed_document_rows = _build_processed_ud_ip_exp_document_rows(
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            sl_no_values_by_row=_merge_snapshot_column_values(
+                workbook_snapshot=workbook_snapshot,
+                column_index=sl_no_column_index,
+                row_indexes=diagnostic_row_indexes,
+                resolved_values=sl_no_values_by_row,
+            ),
+            lc_sc_values_by_row=_merge_snapshot_column_values(
+                workbook_snapshot=workbook_snapshot,
+                column_index=lc_sc_column_index,
+                row_indexes=diagnostic_row_indexes,
+                resolved_values=lc_sc_values_by_row,
+            ),
+            bangladesh_bank_ref_values_by_row=_merge_snapshot_column_values(
+                workbook_snapshot=workbook_snapshot,
+                column_index=bangladesh_bank_ref_column_index,
+                row_indexes=diagnostic_row_indexes,
+                resolved_values=bangladesh_bank_ref_values_by_row,
+            ),
+        )
     generated_at = utc_now()
     payload = {
         "schema_id": PRINT_ANNOTATION_CHECKLIST_SCHEMA_ID,
@@ -149,6 +176,9 @@ def build_print_annotation_checklist(
     }
     if workbook_columns is not None:
         payload["workbook_columns"] = workbook_columns
+    if run_report.workflow_id == WorkflowId.UD_IP_EXP:
+        payload["processed_document_row_count"] = len(processed_document_rows)
+        payload["processed_document_rows"] = processed_document_rows
     return PrintAnnotationChecklistBuildResult(
         payload=payload,
         html=_build_print_annotation_html(payload),
@@ -1221,6 +1251,410 @@ def _planned_row_indexes(
     return row_indexes
 
 
+def _processed_ud_ip_exp_document_row_indexes(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+) -> set[int]:
+    row_indexes: set[int] = set()
+    annotation_by_saved_document_id = _ud_annotation_documents_by_saved_document_id(
+        print_batches=print_batches,
+    )
+    for outcome in mail_outcomes:
+        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
+        staged_row_indexes = _row_indexes_from_staged_write_operations(outcome.staged_write_operations)
+        for saved_document in outcome.saved_documents:
+            if not _is_processed_ud_ip_exp_document(saved_document):
+                continue
+            saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+            selection_item = selection_by_saved_document_id.get(saved_document_id)
+            if selection_item is not None:
+                row_indexes.update(_selected_row_indexes(selection_item.get("selection")))
+            annotation_document = annotation_by_saved_document_id.get(saved_document_id)
+            if annotation_document is not None:
+                row_indexes.update(_annotation_row_indexes(annotation_document))
+            if _is_ip_exp_saved_document(saved_document):
+                row_indexes.update(staged_row_indexes)
+    return row_indexes
+
+
+def _merge_snapshot_column_values(
+    *,
+    workbook_snapshot: WorkbookSnapshot,
+    column_index: int,
+    row_indexes: set[int],
+    resolved_values: dict[int, str],
+) -> dict[int, str]:
+    merged = dict(resolved_values)
+    rows_by_index = {row.row_index: row for row in workbook_snapshot.rows}
+    for row_index in row_indexes:
+        if row_index in merged:
+            continue
+        row = rows_by_index.get(row_index)
+        if row is not None:
+            merged[row_index] = str(row.values.get(column_index, "") or "")
+    return merged
+
+
+def _build_processed_ud_ip_exp_document_rows(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+    sl_no_values_by_row: dict[int, str],
+    lc_sc_values_by_row: dict[int, str],
+    bangladesh_bank_ref_values_by_row: dict[int, str],
+) -> list[dict[str, Any]]:
+    print_sequence_by_saved_document_id, print_sequence_by_path = _ud_print_sequence_indexes(
+        mail_outcomes=mail_outcomes,
+        print_batches=print_batches,
+    )
+    annotation_by_saved_document_id = _ud_annotation_documents_by_saved_document_id(
+        print_batches=print_batches,
+    )
+    rows: list[dict[str, Any]] = []
+    for outcome in sorted(mail_outcomes, key=lambda item: item.snapshot_index):
+        selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
+        staged_row_indexes = _row_indexes_from_staged_write_operations(outcome.staged_write_operations)
+        staged_column_keys = _staged_column_keys(outcome.staged_write_operations)
+        for saved_document in outcome.saved_documents:
+            if not _is_processed_ud_ip_exp_document(saved_document):
+                continue
+            saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+            document_path = str(saved_document.get("destination_path", "")).strip()
+            selection_item = selection_by_saved_document_id.get(saved_document_id)
+            annotation_document = annotation_by_saved_document_id.get(saved_document_id)
+            row_indexes = _processed_document_row_indexes(
+                saved_document=saved_document,
+                selection_item=selection_item,
+                annotation_document=annotation_document,
+                staged_row_indexes=staged_row_indexes,
+            )
+            rows.append(
+                {
+                    "print_sequence": (
+                        print_sequence_by_saved_document_id.get(saved_document_id)
+                        or print_sequence_by_path.get(document_path)
+                        or "Not printed"
+                    ),
+                    "mail_id": outcome.mail_id,
+                    "mail_subject": outcome.subject_raw,
+                    "document_filename": _saved_document_filename(saved_document),
+                    "document_type": str(saved_document.get("document_type", "") or ""),
+                    "decision": _processed_document_decision(
+                        outcome=outcome,
+                        selection_item=selection_item,
+                    ),
+                    "disposition": _processed_document_disposition(
+                        outcome=outcome,
+                        saved_document=saved_document,
+                    ),
+                    "document_number": _processed_document_number(
+                        saved_document=saved_document,
+                        selection_item=selection_item,
+                        annotation_document=annotation_document,
+                    ),
+                    "document_date": str(saved_document.get("extracted_document_date", "") or ""),
+                    "lc_sc": _join_distinct_optional_values(
+                        row_indexes=row_indexes,
+                        values_by_row=lc_sc_values_by_row,
+                    )
+                    or str(saved_document.get("extracted_lc_sc_number", "") or ""),
+                    "bangladesh_bank_ref": _join_distinct_optional_values(
+                        row_indexes=row_indexes,
+                        values_by_row=bangladesh_bank_ref_values_by_row,
+                    ),
+                    "lc_value": _processed_document_lc_value(
+                        saved_document=saved_document,
+                        selection_item=selection_item,
+                        annotation_document=annotation_document,
+                    ),
+                    "quantity": _processed_document_quantity(saved_document),
+                    "sl_no_values": _distinct_row_values(
+                        row_indexes=row_indexes,
+                        values_by_row=sl_no_values_by_row,
+                    ),
+                    "row_indexes": row_indexes,
+                    "raw_extracted_values": _raw_extracted_values_summary(saved_document),
+                    "candidate_evidence": _candidate_evidence_summary(
+                        selection_item=selection_item,
+                        row_indexes=row_indexes,
+                        staged_column_keys=staged_column_keys,
+                    ),
+                    "discrepancies": _discrepancy_summary(outcome.discrepancies),
+                    "saved_document_id": saved_document_id,
+                    "document_path": document_path,
+                    "save_decision": str(saved_document.get("save_decision", "") or ""),
+                }
+            )
+    return rows
+
+
+def _ud_print_sequence_indexes(
+    *,
+    mail_outcomes: list[MailOutcomeRecord],
+    print_batches: list,
+) -> tuple[dict[str, str], dict[str, str]]:
+    outcomes_by_mail_id = {outcome.mail_id: outcome for outcome in mail_outcomes}
+    sequence_by_saved_document_id: dict[str, str] = {}
+    sequence_by_path: dict[str, str] = {}
+    sequence = 1
+    for batch in print_batches:
+        outcome = outcomes_by_mail_id.get(batch.mail_id)
+        saved_documents_by_path = (
+            {
+                str(document.get("destination_path", "")).strip(): document
+                for document in outcome.saved_documents
+                if str(document.get("destination_path", "")).strip()
+            }
+            if outcome is not None
+            else {}
+        )
+        for document_path in batch.document_paths:
+            sequence_text = str(sequence)
+            document_path_text = str(document_path)
+            sequence_by_path[document_path_text] = sequence_text
+            saved_document = saved_documents_by_path.get(document_path_text)
+            if isinstance(saved_document, dict):
+                saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+                if saved_document_id:
+                    sequence_by_saved_document_id[saved_document_id] = sequence_text
+            sequence += 1
+    return sequence_by_saved_document_id, sequence_by_path
+
+
+def _ud_annotation_documents_by_saved_document_id(
+    *,
+    print_batches: list,
+) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    for batch in print_batches:
+        for annotation_document in getattr(batch, "annotation_documents", []):
+            if not isinstance(annotation_document, dict):
+                continue
+            saved_document_id = str(annotation_document.get("saved_document_id", "")).strip()
+            if saved_document_id and saved_document_id not in indexed:
+                indexed[saved_document_id] = annotation_document
+    return indexed
+
+
+def _is_processed_ud_ip_exp_document(saved_document: dict[str, Any]) -> bool:
+    document_type = str(saved_document.get("document_type", "") or "").strip()
+    if document_type in {"ud_document", "ip_document", "exp_document"}:
+        return True
+    document_number = str(saved_document.get("extracted_document_number", "") or "").strip().upper()
+    return document_number.startswith(("BGMEA/", "UD-", "IP-", "EXP-"))
+
+
+def _is_ip_exp_saved_document(saved_document: dict[str, Any]) -> bool:
+    return str(saved_document.get("document_type", "") or "").strip() in {
+        "ip_document",
+        "exp_document",
+    }
+
+
+def _processed_document_row_indexes(
+    *,
+    saved_document: dict[str, Any],
+    selection_item: dict[str, Any] | None,
+    annotation_document: dict[str, Any] | None,
+    staged_row_indexes: list[int],
+) -> list[int]:
+    row_indexes: set[int] = set()
+    if selection_item is not None:
+        row_indexes.update(_selected_row_indexes(selection_item.get("selection")))
+    if annotation_document is not None:
+        row_indexes.update(_annotation_row_indexes(annotation_document))
+    if _is_ip_exp_saved_document(saved_document):
+        row_indexes.update(staged_row_indexes)
+    return sorted(row_indexes)
+
+
+def _staged_column_keys(staged_write_operations: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for operation in staged_write_operations:
+        if not isinstance(operation, dict):
+            continue
+        column_key = str(operation.get("column_key", "") or "").strip()
+        if column_key and column_key not in values:
+            values.append(column_key)
+    return values
+
+
+def _saved_document_filename(saved_document: dict[str, Any]) -> str:
+    return str(
+        saved_document.get("normalized_filename")
+        or saved_document.get("attachment_name")
+        or Path(str(saved_document.get("destination_path", ""))).name
+        or ""
+    ).strip()
+
+
+def _processed_document_decision(
+    *,
+    outcome: MailOutcomeRecord,
+    selection_item: dict[str, Any] | None,
+) -> str:
+    if selection_item is not None:
+        selection = selection_item.get("selection")
+        if isinstance(selection, dict):
+            final_decision = str(selection.get("final_decision", "") or "").strip()
+            if final_decision:
+                return final_decision
+    final_decision = outcome.final_decision
+    if final_decision is not None:
+        return getattr(final_decision, "value", str(final_decision))
+    return getattr(outcome.processing_status, "value", str(outcome.processing_status))
+
+
+def _processed_document_disposition(
+    *,
+    outcome: MailOutcomeRecord,
+    saved_document: dict[str, Any],
+) -> str:
+    save_decision = str(saved_document.get("save_decision", "") or "").strip()
+    if save_decision and save_decision != "saved_new":
+        return save_decision
+    if outcome.write_disposition:
+        return str(outcome.write_disposition)
+    return save_decision
+
+
+def _processed_document_number(
+    *,
+    saved_document: dict[str, Any],
+    selection_item: dict[str, Any] | None,
+    annotation_document: dict[str, Any] | None,
+) -> str:
+    for source in (selection_item, annotation_document, saved_document):
+        if not isinstance(source, dict):
+            continue
+        for key in ("document_number", "extracted_document_number"):
+            value = str(source.get(key, "") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _processed_document_lc_value(
+    *,
+    saved_document: dict[str, Any],
+    selection_item: dict[str, Any] | None,
+    annotation_document: dict[str, Any] | None,
+) -> str:
+    for source in (selection_item, annotation_document, saved_document):
+        if not isinstance(source, dict):
+            continue
+        for key in ("ud_amendment_lc_value", "extracted_lc_sc_value"):
+            value = str(source.get(key, "") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _processed_document_quantity(saved_document: dict[str, Any]) -> str:
+    quantity_by_unit = saved_document.get("extracted_quantity_by_unit")
+    if isinstance(quantity_by_unit, dict) and quantity_by_unit:
+        return ", ".join(
+            f"{unit}:{quantity}"
+            for unit, quantity in sorted(
+                (str(key), str(value))
+                for key, value in quantity_by_unit.items()
+                if str(value).strip()
+            )
+        )
+    quantity = str(saved_document.get("extracted_quantity", "") or "").strip()
+    unit = str(saved_document.get("extracted_quantity_unit", "") or "").strip()
+    return " ".join(part for part in (quantity, unit) if part)
+
+
+def _raw_extracted_values_summary(saved_document: dict[str, Any]) -> str:
+    fields = {
+        "document_number": saved_document.get("extracted_document_number"),
+        "document_date": saved_document.get("extracted_document_date"),
+        "document_subtype": saved_document.get("extracted_document_subtype"),
+        "lc_sc_number": saved_document.get("extracted_lc_sc_number"),
+        "lc_sc_date": saved_document.get("extracted_lc_sc_date"),
+        "lc_sc_value": saved_document.get("extracted_lc_sc_value"),
+        "lc_sc_value_currency": saved_document.get("extracted_lc_sc_value_currency"),
+        "quantity": saved_document.get("extracted_quantity"),
+        "quantity_unit": saved_document.get("extracted_quantity_unit"),
+        "quantity_by_unit": saved_document.get("extracted_quantity_by_unit"),
+    }
+    return _compact_json({key: value for key, value in fields.items() if _has_report_value(value)})
+
+
+def _candidate_evidence_summary(
+    *,
+    selection_item: dict[str, Any] | None,
+    row_indexes: list[int],
+    staged_column_keys: list[str],
+) -> str:
+    if selection_item is not None and isinstance(selection_item.get("selection"), dict):
+        return _compact_json(selection_item["selection"])
+    evidence: dict[str, Any] = {}
+    if row_indexes:
+        evidence["row_indexes"] = row_indexes
+    if staged_column_keys:
+        evidence["staged_column_keys"] = staged_column_keys
+    return _compact_json(evidence) if evidence else "n/a"
+
+
+def _discrepancy_summary(discrepancies: list[dict[str, Any]]) -> str:
+    items: list[str] = []
+    for discrepancy in discrepancies:
+        if not isinstance(discrepancy, dict):
+            continue
+        code = str(discrepancy.get("code", "") or "").strip()
+        message = str(discrepancy.get("message", "") or "").strip()
+        rendered = ": ".join(part for part in (code, message) if part)
+        if rendered:
+            items.append(rendered)
+    return " | ".join(items)
+
+
+def _join_distinct_optional_values(
+    *,
+    row_indexes: list[int],
+    values_by_row: dict[int, str],
+) -> str:
+    return ", ".join(_distinct_row_values(row_indexes=row_indexes, values_by_row=values_by_row))
+
+
+def _distinct_row_values(
+    *,
+    row_indexes: list[int],
+    values_by_row: dict[int, str],
+) -> list[str]:
+    values: list[str] = []
+    for row_index in row_indexes:
+        value = str(values_by_row.get(row_index, "") or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _has_report_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _compact_json(value: Any) -> str:
+    if not _has_report_value(value):
+        return ""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
 def _resolve_sl_no_column_index(workbook_snapshot: WorkbookSnapshot) -> int:
     return _resolve_required_column_index(
         workbook_snapshot=workbook_snapshot,
@@ -1392,6 +1826,7 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
             "No printed UD/Amendment documents required annotation for this run."
             "</td></tr>"
         )
+    processed_document_section = _build_processed_ud_ip_exp_html_section(payload)
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
@@ -1405,6 +1840,10 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         "    table { width: 100%; border-collapse: collapse; }\n"
         "    th, td { border: 1px solid #d9e2ec; padding: 10px 12px; text-align: left; vertical-align: top; }\n"
         "    th { background: #f0f4f8; }\n"
+        "    .diagnostic-section { margin-top: 28px; }\n"
+        "    .table-wrap { width: 100%; max-width: 100%; overflow-x: auto; padding-bottom: 8px; }\n"
+        "    .wide-table { width: max-content; min-width: 100%; table-layout: auto; }\n"
+        "    .wide-table th, .wide-table td { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }\n"
         "    .empty { color: #7b8794; font-style: italic; }\n"
         "  </style>\n"
         "</head>\n"
@@ -1429,9 +1868,79 @@ def _build_print_annotation_html(payload: dict[str, Any]) -> str:
         f"{table_body}\n"
         "      </tbody>\n"
         "    </table>\n"
+        f"{processed_document_section}"
         "  </main>\n"
         "</body>\n"
         "</html>\n"
+    )
+
+
+def _build_processed_ud_ip_exp_html_section(payload: dict[str, Any]) -> str:
+    rows = payload.get("processed_document_rows", [])
+    if not isinstance(rows, list):
+        rows = []
+    table_rows: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        table_rows.append(
+            "          <tr>"
+            f"<td>{escape(str(row.get('print_sequence', '')))}</td>"
+            f"<td>{_html_with_line_breaks(str(row.get('mail_subject', '')))}</td>"
+            f"<td>{escape(str(row.get('document_filename', '')))}</td>"
+            f"<td>{escape(str(row.get('document_type', '')))}</td>"
+            f"<td>{escape(str(row.get('decision', '')))}</td>"
+            f"<td>{escape(str(row.get('disposition', '')))}</td>"
+            f"<td>{escape(str(row.get('document_number', '')))}</td>"
+            f"<td>{escape(str(row.get('document_date', '')))}</td>"
+            f"<td>{escape(str(row.get('lc_sc', '')))}</td>"
+            f"<td>{escape(str(row.get('bangladesh_bank_ref', '')))}</td>"
+            f"<td>{escape(str(row.get('lc_value', '')))}</td>"
+            f"<td>{escape(str(row.get('quantity', '')))}</td>"
+            f"<td>{escape(', '.join(str(value) for value in row.get('sl_no_values', [])))}</td>"
+            f"<td>{escape(', '.join(str(value) for value in row.get('row_indexes', [])))}</td>"
+            f"<td>{escape(str(row.get('raw_extracted_values', '')))}</td>"
+            f"<td>{escape(str(row.get('candidate_evidence', '')))}</td>"
+            f"<td>{escape(str(row.get('discrepancies', '')))}</td>"
+            "</tr>"
+        )
+    rows_html = "\n".join(table_rows)
+    if not rows_html:
+        rows_html = (
+            '          <tr><td colspan="17" class="empty">'
+            "No processed UD/IP/EXP PDF documents were found for this run."
+            "</td></tr>"
+        )
+    return (
+        "    <section class=\"diagnostic-section\">\n"
+        "      <h2>Processed UD/IP/EXP PDF Documents</h2>\n"
+        "      <div class=\"table-wrap\">\n"
+        "        <table class=\"wide-table\">\n"
+        "          <thead><tr>"
+        "<th>Print Sequence</th>"
+        "<th>Mail Subject</th>"
+        "<th>Document Filename</th>"
+        "<th>Document Type</th>"
+        "<th>Decision</th>"
+        "<th>Disposition</th>"
+        "<th>UD/IP/EXP No.</th>"
+        "<th>Document Date</th>"
+        "<th>LC/SC</th>"
+        "<th>Bangladesh Bank Ref.</th>"
+        "<th>LC Value</th>"
+        "<th>Quantity</th>"
+        "<th>SL.No.</th>"
+        "<th>Workbook Row Indexes</th>"
+        "<th>Raw Extracted Values</th>"
+        "<th>Candidate Evidence</th>"
+        "<th>Discrepancies</th>"
+        "</tr></thead>\n"
+        "          <tbody>\n"
+        f"{rows_html}\n"
+        "          </tbody>\n"
+        "        </table>\n"
+        "      </div>\n"
+        "    </section>\n"
     )
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from project.models import (
+    FinalDecision,
     MailMovePhaseStatus,
     MailOutcomeRecord,
     MailProcessingStatus,
@@ -1300,6 +1301,200 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
 
         self.assertEqual(result.payload["checklist_row_count"], 1)
         self.assertEqual([row["document_filename"] for row in result.payload["rows"]], ["UD-ONE.pdf"])
+
+    def test_build_print_annotation_checklist_adds_ud_ip_exp_processed_pdf_diagnostics(self) -> None:
+        run_report = _build_run_report()
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-1",
+                workflow_id=WorkflowId.UD_IP_EXP,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.WRITTEN,
+                final_decision=FinalDecision.PASS,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=True,
+                eligible_for_mail_move=True,
+                source_entry_id="entry-1",
+                subject_raw="UD/IP/EXP subject",
+                sender_address="ud@example.com",
+                saved_documents=[
+                    {
+                        "saved_document_id": "doc-ud",
+                        "normalized_filename": "UD-ONE.pdf",
+                        "destination_path": "C:/docs/UD-ONE.pdf",
+                        "save_decision": "saved_new",
+                        "print_eligible": True,
+                        "document_type": "ud_document",
+                        "extracted_document_number": "BGMEA/DHK/UD/2026/1001",
+                        "extracted_document_date": "2026-04-01",
+                        "extracted_lc_sc_number": "LC-0043",
+                        "extracted_lc_sc_value": "10000",
+                        "extracted_quantity_by_unit": {"YDS": "1000"},
+                    },
+                    {
+                        "saved_document_id": "doc-supporting",
+                        "normalized_filename": "supporting.pdf",
+                        "destination_path": "C:/docs/supporting.pdf",
+                        "save_decision": "saved_new",
+                        "print_eligible": True,
+                        "document_type": "supporting_pdf",
+                    },
+                    {
+                        "saved_document_id": "doc-exp",
+                        "normalized_filename": "123-EXP.pdf",
+                        "destination_path": "C:/docs/123-EXP.pdf",
+                        "save_decision": "saved_new",
+                        "print_eligible": True,
+                        "document_type": "exp_document",
+                        "extracted_document_number": "EXP-123",
+                        "extracted_document_date": "2026-04-02",
+                        "extracted_lc_sc_number": "LC-0043",
+                        "extracted_quantity": "1000",
+                        "extracted_quantity_unit": "YDS",
+                    },
+                    {
+                        "saved_document_id": "doc-ip",
+                        "normalized_filename": "IP-ONE.pdf",
+                        "destination_path": "C:/docs/IP-ONE.pdf",
+                        "save_decision": "skipped_duplicate_filename",
+                        "print_eligible": True,
+                        "document_type": "ip_document",
+                        "extracted_document_number": "IP-123",
+                        "extracted_document_date": "2026-04-03",
+                        "extracted_lc_sc_number": "LC-0043",
+                    },
+                ],
+                staged_write_operations=[
+                    {
+                        "row_index": 11,
+                        "column_key": "ud_ip_shared",
+                        "expected_post_write_value": "BGMEA/DHK/UD/2026/1001",
+                    },
+                    {
+                        "row_index": 12,
+                        "column_key": "ud_ip_shared",
+                        "expected_post_write_value": "EXP: EXP-123\nIP: IP-123",
+                    },
+                    {
+                        "row_index": 12,
+                        "column_key": "ud_ip_date",
+                        "expected_post_write_value": "02/04/2026",
+                    },
+                ],
+                discrepancies=[
+                    {
+                        "code": "ud_duplicate_document_same_mail",
+                        "message": "Duplicate UD/IP/EXP evidence was ignored.",
+                    }
+                ],
+                write_disposition="new_writes_staged",
+                ud_selection={
+                    "documents": [
+                        {
+                            "document_index": 0,
+                            "document_number": "BGMEA/DHK/UD/2026/1001",
+                            "source_saved_document_id": "doc-ud",
+                            "ud_amendment_lc_value": "10000",
+                            "selection": {
+                                "final_decision": "selected",
+                                "candidates": [
+                                    {"selected": True, "row_indexes": [11]},
+                                ],
+                            },
+                        },
+                    ],
+                },
+            )
+        ]
+        print_batches = [
+            PrintBatch(
+                print_group_id="group-1",
+                run_id="run-1",
+                mail_id="mail-1",
+                print_group_index=0,
+                document_paths=[
+                    "C:/docs/UD-ONE.pdf",
+                    "C:/docs/supporting.pdf",
+                    "C:/docs/123-EXP.pdf",
+                ],
+                document_path_hashes=["hash-ud", "hash-supporting", "hash-exp"],
+                completion_marker_id="completion-1",
+                manual_verification_summary={},
+                annotation_documents=[
+                    {
+                        "saved_document_id": "doc-ud",
+                        "document_path": "C:/docs/UD-ONE.pdf",
+                        "document_path_hash": "hash-ud",
+                        "document_filename": "UD-ONE.pdf",
+                        "document_type": "ud_document",
+                        "document_number": "BGMEA/DHK/UD/2026/1001",
+                        "ud_amendment_lc_value": "10000",
+                        "row_indexes": [11],
+                        "checklist_required": True,
+                    },
+                    {
+                        "saved_document_id": "doc-supporting",
+                        "document_path": "C:/docs/supporting.pdf",
+                        "document_path_hash": "hash-supporting",
+                        "document_filename": "supporting.pdf",
+                        "document_type": "supporting_pdf",
+                        "row_indexes": [],
+                        "checklist_required": False,
+                    },
+                    {
+                        "saved_document_id": "doc-exp",
+                        "document_path": "C:/docs/123-EXP.pdf",
+                        "document_path_hash": "hash-exp",
+                        "document_filename": "123-EXP.pdf",
+                        "document_type": "exp_document",
+                        "document_number": "EXP-123",
+                        "row_indexes": [],
+                        "checklist_required": False,
+                    },
+                ],
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[
+                WorkbookRow(row_index=11, values={1: "17", 2: "LC-0043", 3: "BB-001"}),
+                WorkbookRow(row_index=12, values={1: "18", 2: "LC-0043", 3: "BB-002"}),
+            ],
+        )
+
+        result = build_print_annotation_checklist(
+            run_report=run_report,
+            mail_outcomes=mail_outcomes,
+            print_batches=print_batches,
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 1)
+        self.assertEqual(result.payload["processed_document_row_count"], 3)
+        diagnostics = {
+            row["document_filename"]: row
+            for row in result.payload["processed_document_rows"]
+        }
+        self.assertEqual(diagnostics["UD-ONE.pdf"]["print_sequence"], "1")
+        self.assertEqual(diagnostics["UD-ONE.pdf"]["decision"], "selected")
+        self.assertEqual(diagnostics["123-EXP.pdf"]["print_sequence"], "3")
+        self.assertEqual(diagnostics["123-EXP.pdf"]["sl_no_values"], ["17", "18"])
+        self.assertEqual(diagnostics["IP-ONE.pdf"]["print_sequence"], "Not printed")
+        self.assertEqual(diagnostics["IP-ONE.pdf"]["disposition"], "skipped_duplicate_filename")
+        self.assertIn('"document_number":"EXP-123"', diagnostics["123-EXP.pdf"]["raw_extracted_values"])
+        self.assertIn("ud_duplicate_document_same_mail", diagnostics["IP-ONE.pdf"]["discrepancies"])
+        self.assertIn("Processed UD/IP/EXP PDF Documents", result.html)
+        self.assertLess(
+            result.html.index("</table>"),
+            result.html.index("Processed UD/IP/EXP PDF Documents"),
+        )
 
     def test_validate_print_annotation_checklist_accepts_ud_only_subset_of_printed_documents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
