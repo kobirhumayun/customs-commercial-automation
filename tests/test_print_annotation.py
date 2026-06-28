@@ -1496,6 +1496,86 @@ class PrintAnnotationChecklistTests(unittest.TestCase):
             result.html.index("Processed UD/IP/EXP PDF Documents"),
         )
 
+    def test_build_print_annotation_checklist_lists_failed_ud_pdf_from_discrepancy_evidence(self) -> None:
+        mail_outcomes = [
+            MailOutcomeRecord(
+                run_id="run-1",
+                mail_id="mail-blocked",
+                workflow_id=WorkflowId.UD_IP_EXP,
+                snapshot_index=0,
+                processing_status=MailProcessingStatus.BLOCKED,
+                final_decision=FinalDecision.HARD_BLOCK,
+                decision_reasons=[],
+                eligible_for_write=False,
+                eligible_for_print=False,
+                eligible_for_mail_move=False,
+                source_entry_id="entry-blocked",
+                subject_raw="UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02",
+                sender_address="ud@example.com",
+                saved_documents=[],
+                discrepancies=[
+                    {
+                        "code": "ud_filename_lc_suffix_mismatch",
+                        "message": "UD/IP/EXP attachment filename LC/SC suffix contradicts the ERP-derived LC/SC family for the mail.",
+                        "details": {
+                            "document_evidence": [
+                                {
+                                    "attachment_name": "PDL-26-2184.pdf",
+                                    "normalized_filename": "PDL-26-2184.pdf",
+                                    "document_kind": None,
+                                    "document_number": "",
+                                    "document_date": "",
+                                    "lc_sc_number": "",
+                                    "quantity": "",
+                                    "saved_document_id": "supporting-doc",
+                                },
+                                {
+                                    "attachment_name": "UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf",
+                                    "normalized_filename": "UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf",
+                                    "document_kind": "UD",
+                                    "document_number": "BGMEA/DHK/AM/2026/4477/035-024",
+                                    "document_date": "2026-05-10",
+                                    "lc_sc_number": "411012584351-L",
+                                    "quantity": "4574 YDS",
+                                    "saved_document_id": "failed-ud-doc",
+                                },
+                            ],
+                        },
+                    }
+                ],
+            )
+        ]
+        workbook_snapshot = WorkbookSnapshot(
+            sheet_name="Sheet1",
+            headers=[
+                WorkbookHeader(column_index=1, text="SL.No."),
+                WorkbookHeader(column_index=2, text="L/C & S/C No."),
+                WorkbookHeader(column_index=3, text="Bangladesh Bank Ref."),
+            ],
+            rows=[],
+        )
+
+        result = build_print_annotation_checklist(
+            run_report=_build_run_report(),
+            mail_outcomes=mail_outcomes,
+            print_batches=[],
+            workbook_snapshot=workbook_snapshot,
+        )
+
+        self.assertEqual(result.payload["checklist_row_count"], 0)
+        self.assertEqual(result.payload["processed_document_row_count"], 1)
+        row = result.payload["processed_document_rows"][0]
+        self.assertEqual(row["print_sequence"], "Not printed")
+        self.assertEqual(row["document_filename"], "UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf")
+        self.assertEqual(row["document_type"], "ud_document")
+        self.assertEqual(row["decision"], "hard_block")
+        self.assertEqual(row["disposition"], "hard_block")
+        self.assertEqual(row["document_number"], "BGMEA/DHK/AM/2026/4477/035-024")
+        self.assertEqual(row["lc_sc"], "411012584351-L")
+        self.assertEqual(row["quantity"], "4574 YDS")
+        self.assertIn("ud_filename_lc_suffix_mismatch", row["discrepancies"])
+        self.assertIn("UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf", result.html)
+
     def test_validate_print_annotation_checklist_accepts_ud_only_subset_of_printed_documents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

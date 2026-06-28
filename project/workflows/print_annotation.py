@@ -1316,10 +1316,13 @@ def _build_processed_ud_ip_exp_document_rows(
         selection_by_saved_document_id = _selection_by_saved_document_id(outcome)
         staged_row_indexes = _row_indexes_from_staged_write_operations(outcome.staged_write_operations)
         staged_column_keys = _staged_column_keys(outcome.staged_write_operations)
+        reported_saved_document_ids: set[str] = set()
         for saved_document in outcome.saved_documents:
             if not _is_processed_ud_ip_exp_document(saved_document):
                 continue
             saved_document_id = str(saved_document.get("saved_document_id", "")).strip()
+            if saved_document_id:
+                reported_saved_document_ids.add(saved_document_id)
             document_path = str(saved_document.get("destination_path", "")).strip()
             selection_item = selection_by_saved_document_id.get(saved_document_id)
             annotation_document = annotation_by_saved_document_id.get(saved_document_id)
@@ -1386,6 +1389,12 @@ def _build_processed_ud_ip_exp_document_rows(
                     "save_decision": str(saved_document.get("save_decision", "") or ""),
                 }
             )
+        rows.extend(
+            _processed_discrepancy_document_rows(
+                outcome=outcome,
+                reported_saved_document_ids=reported_saved_document_ids,
+            )
+        )
     return rows
 
 
@@ -1443,6 +1452,86 @@ def _is_processed_ud_ip_exp_document(saved_document: dict[str, Any]) -> bool:
         return True
     document_number = str(saved_document.get("extracted_document_number", "") or "").strip().upper()
     return document_number.startswith(("BGMEA/", "UD-", "IP-", "EXP-"))
+
+
+def _processed_discrepancy_document_rows(
+    *,
+    outcome: MailOutcomeRecord,
+    reported_saved_document_ids: set[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_evidence_keys: set[tuple[str, str]] = set()
+    for discrepancy in outcome.discrepancies:
+        if not isinstance(discrepancy, dict):
+            continue
+        details = discrepancy.get("details")
+        if not isinstance(details, dict):
+            continue
+        evidence_items = details.get("document_evidence", [])
+        if not isinstance(evidence_items, list):
+            continue
+        for evidence in evidence_items:
+            if not isinstance(evidence, dict):
+                continue
+            if not _is_processed_discrepancy_document_evidence(evidence):
+                continue
+            saved_document_id = str(evidence.get("saved_document_id", "") or "").strip()
+            if saved_document_id and saved_document_id in reported_saved_document_ids:
+                continue
+            filename = str(
+                evidence.get("normalized_filename")
+                or evidence.get("attachment_name")
+                or ""
+            ).strip()
+            evidence_key = (saved_document_id, filename)
+            if evidence_key in seen_evidence_keys:
+                continue
+            seen_evidence_keys.add(evidence_key)
+            rows.append(
+                {
+                    "print_sequence": "Not printed",
+                    "mail_id": outcome.mail_id,
+                    "mail_subject": outcome.subject_raw,
+                    "document_filename": filename,
+                    "document_type": _document_type_from_discrepancy_evidence(evidence),
+                    "decision": "hard_block",
+                    "disposition": "hard_block",
+                    "document_number": str(evidence.get("document_number", "") or "").strip(),
+                    "document_date": str(evidence.get("document_date", "") or "").strip(),
+                    "lc_sc": str(evidence.get("lc_sc_number", "") or "").strip(),
+                    "bangladesh_bank_ref": "",
+                    "lc_value": str(evidence.get("lc_sc_value", "") or "").strip(),
+                    "quantity": str(evidence.get("quantity", "") or "").strip(),
+                    "sl_no_values": [],
+                    "row_indexes": [],
+                    "raw_extracted_values": _raw_discrepancy_evidence_summary(evidence),
+                    "candidate_evidence": "n/a",
+                    "discrepancies": _discrepancy_summary([discrepancy]),
+                    "saved_document_id": saved_document_id,
+                    "document_path": "",
+                    "save_decision": "",
+                }
+            )
+    return rows
+
+
+def _is_processed_discrepancy_document_evidence(evidence: dict[str, Any]) -> bool:
+    document_kind = str(evidence.get("document_kind", "") or "").strip().upper()
+    if document_kind in {"UD", "IP", "EXP"}:
+        return True
+    document_number = str(evidence.get("document_number", "") or "").strip().upper()
+    return document_number.startswith(("BGMEA/", "UD-", "IP-", "EXP-"))
+
+
+def _document_type_from_discrepancy_evidence(evidence: dict[str, Any]) -> str:
+    document_kind = str(evidence.get("document_kind", "") or "").strip().upper()
+    if document_kind == "UD":
+        return "ud_document"
+    if document_kind == "IP":
+        return "ip_document"
+    if document_kind == "EXP":
+        return "exp_document"
+    return ""
 
 
 def _is_ip_exp_saved_document(saved_document: dict[str, Any]) -> bool:
@@ -1579,6 +1668,19 @@ def _raw_extracted_values_summary(saved_document: dict[str, Any]) -> str:
         "quantity": saved_document.get("extracted_quantity"),
         "quantity_unit": saved_document.get("extracted_quantity_unit"),
         "quantity_by_unit": saved_document.get("extracted_quantity_by_unit"),
+    }
+    return _compact_json({key: value for key, value in fields.items() if _has_report_value(value)})
+
+
+def _raw_discrepancy_evidence_summary(evidence: dict[str, Any]) -> str:
+    fields = {
+        "attachment_name": evidence.get("attachment_name"),
+        "normalized_filename": evidence.get("normalized_filename"),
+        "document_kind": evidence.get("document_kind"),
+        "document_number": evidence.get("document_number"),
+        "document_date": evidence.get("document_date"),
+        "lc_sc_number": evidence.get("lc_sc_number"),
+        "quantity": evidence.get("quantity"),
     }
     return _compact_json({key: value for key, value in fields.items() if _has_report_value(value)})
 
