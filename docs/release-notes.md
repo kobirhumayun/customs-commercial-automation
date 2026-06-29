@@ -57,10 +57,14 @@
 - for `export_lc_sc`, the print-annotation checklist is also a mandatory pre-print artifact gate, generated from committed staged export workbook rows
 - for `ud_ip_exp`, all newly saved PDF attachments from successful mails are now included in print batches, even when a PDF is only supporting evidence and not a UD/IP/EXP extraction source
 - for `ud_ip_exp`, the print-annotation checklist remains UD/Amendment-only; supporting PDFs can print without checklist rows
+- for `ud_ip_exp`, the checklist HTML now includes a `Processed UD/IP/EXP PDF Documents` diagnostic section below the unchanged Print Annotation Checklist
+- the diagnostic section lists successful printed PDFs, successful duplicate/no-print PDFs, and hard-blocked UD/IP/EXP PDFs with decision, disposition, raw extracted values, candidate evidence, and discrepancies
+- duplicate/no-print `ud_ip_exp` diagnostic rows render workbook `SL.No.` as workbook display text, so existing-file successes do not show floating-point artifacts
 - for `export_lc_sc`, the print-annotation checklist is workbook-row-oriented and may span mail-level subject/filename cells across multiple related workbook rows
 - if checklist generation fails, print and post-run mail moves stay hard-blocked
 - if a no-write live run leaves `eligible_mail_count = 0`, the launcher now skips `execute-mail-moves` instead of generating a misleading downstream mail-move gate discrepancy
 - the checklist HTML is opened automatically only after successful post-run mail moves complete for workflows that generated the checklist artifact, including `ud_ip_exp` and `export_lc_sc`
+- if every processed `ud_ip_exp` mail hard-blocks before workbook write/print planning, the live launcher still generates and opens the HTML diagnostic report so failed PDF evidence is visible
 - when Acrobat times out after physical output, operators must use:
   `acknowledge-partial-print`
 - when printer-specific JSObject submission is unavailable, the adapter may:
