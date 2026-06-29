@@ -29,6 +29,10 @@ from project.workflows.ud_ip_exp.structured_extraction import (
     StructuredUDSavedDocumentAnalysisProvider,
 )
 
+_FILENAME_LC_SC_PREFIX_PATTERN = re.compile(
+    r"(?:^|[^A-Z0-9])UD[-_\s]*(?:LC|SC)[-_\s]*",
+    re.IGNORECASE,
+)
 _FILENAME_LC_SC_SUFFIX_PATTERN = re.compile(
     r"(?:^|[^A-Z0-9])UD[-_\s]*(?:LC|SC)[-_\s]*(?P<suffix>[A-Z0-9]+)",
     re.IGNORECASE,
@@ -173,6 +177,7 @@ def _validate_documents_against_verified_family(
         )
     filename_suffix_mismatches = _filename_suffix_mismatches_verified_family(
         expected_lc_sc_number=verified_family.lc_sc_number,
+        expected_buyer_names=_verified_family_buyer_names(verified_family),
         document_evidence=document_evidence,
     )
     if filename_suffix_mismatches:
@@ -232,6 +237,7 @@ def _comparison_lc_sc_number(value: str) -> str:
 def _filename_suffix_mismatches_verified_family(
     *,
     expected_lc_sc_number: str,
+    expected_buyer_names: list[str],
     document_evidence: list[dict[str, object]],
 ) -> list[dict[str, str]]:
     expected_suffix_target = _alnum_upper(expected_lc_sc_number)
@@ -240,7 +246,10 @@ def _filename_suffix_mismatches_verified_family(
     mismatches: list[dict[str, str]] = []
     for evidence in document_evidence:
         normalized_filename = str(evidence.get("normalized_filename") or "").strip()
-        filename_suffix = _extract_filename_lc_sc_suffix(normalized_filename)
+        filename_suffix = _extract_filename_lc_sc_suffix(
+            normalized_filename,
+            expected_buyer_names=expected_buyer_names,
+        )
         if filename_suffix is None:
             continue
         suffix_target = _alnum_upper(filename_suffix)
@@ -256,12 +265,68 @@ def _filename_suffix_mismatches_verified_family(
     return mismatches
 
 
-def _extract_filename_lc_sc_suffix(normalized_filename: str) -> str | None:
+def _verified_family_buyer_names(verified_family: ERPFamily) -> list[str]:
+    candidates = [
+        verified_family.attachment_buyer_name,
+        verified_family.buyer_name,
+        verified_family.folder_buyer_name or "",
+    ]
+    buyer_names: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = normalize_buyer_name_for_paths(candidate)
+        if normalized is None or normalized in seen:
+            continue
+        buyer_names.append(normalized)
+        seen.add(normalized)
+    return buyer_names
+
+
+def _extract_filename_lc_sc_suffix(
+    normalized_filename: str,
+    *,
+    expected_buyer_names: list[str],
+) -> str | None:
+    stem = Path(normalized_filename).stem
+    prefix_match = _FILENAME_LC_SC_PREFIX_PATTERN.search(stem)
+    if prefix_match is not None:
+        suffix_and_buyer = stem[prefix_match.end() :].strip()
+        buyer_boundary = _buyer_boundary_index(suffix_and_buyer, expected_buyer_names)
+        if buyer_boundary is not None:
+            suffix = suffix_and_buyer[:buyer_boundary].strip(" -_")
+            return suffix or None
+
     match = _FILENAME_LC_SC_SUFFIX_PATTERN.search(normalized_filename)
     if match is None:
         return None
     suffix = match.group("suffix").strip()
     return suffix or None
+
+
+def _buyer_boundary_index(value: str, buyer_names: list[str]) -> int | None:
+    search_value = value.upper()
+    for tokens in _buyer_token_candidates(buyer_names):
+        token_pattern = r"[^A-Z0-9]*".join(re.escape(token) for token in tokens)
+        pattern = re.compile(r"(?:^|[^A-Z0-9])(?P<buyer>" + token_pattern + r")(?:[^A-Z0-9]|$)")
+        match = pattern.search(search_value)
+        if match is not None:
+            return match.start("buyer")
+    return None
+
+
+def _buyer_token_candidates(buyer_names: list[str]) -> list[tuple[str, ...]]:
+    candidates: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for buyer_name in buyer_names:
+        tokens = tuple(re.findall(r"[A-Z0-9]+", buyer_name.upper()))
+        for candidate in (tokens, tokens[:1]):
+            if not candidate or candidate in seen:
+                continue
+            if len(candidate) == 1 and len(candidate[0]) < 3:
+                continue
+            candidates.append(candidate)
+            seen.add(candidate)
+    return sorted(candidates, key=lambda item: (-len(item), -sum(len(token) for token in item)))
 
 
 def _alnum_upper(value: str) -> str:
