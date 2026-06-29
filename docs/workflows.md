@@ -678,6 +678,11 @@ During the initial live-deployment phase, any mismatch, unknown exception, or in
 - print batches are built from successful `ud_ip_exp` mails in the active run snapshot, using all newly saved PDFs after the workbook write commit
 - the `ud_ip_exp` operator print-annotation checklist remains UD/Amendment-only; supporting PDFs may still print but do not require workbook row-selection evidence
 - duplicate-only/no-write movement behavior for `ud_ip_exp` follows the shared staged mail-move gates once validation succeeds and no print obligation exists
+- the `ud_ip_exp` HTML print-annotation report includes a separate `Processed UD/IP/EXP PDF Documents` diagnostic section below the unchanged Print Annotation Checklist
+- that diagnostic section lists successful printed PDFs, successful duplicate/no-print PDFs, and hard-blocked UD/IP/EXP PDFs captured from discrepancy document evidence
+- diagnostic rows include document filename/type, mail subject, decision, disposition, raw extracted values, candidate evidence, discrepancies, workbook row indexes, resolved workbook `SL.No.`, and actual `Print Sequence` or `Not printed`
+- diagnostic `SL.No.` values must be rendered as workbook display text; a duplicate/no-print PDF that already exists in the destination folder must not display `SL.No.` as a floating-point conversion artifact
+- if every processed mail hard-blocks before any print plan exists, `ud_ip_exp` may still generate and open the HTML report with an empty Print Annotation Checklist and populated diagnostic evidence
 
 ### Shared-column behavior
 - Column `UD No. & IP No.` uses plain UD values, `EXP: ` prefixes for EXP, and `IP: ` prefixes for IP.
@@ -1067,8 +1072,14 @@ Rows where:
 - when one export mail produces multiple workbook rows, the HTML checklist should render one table row per workbook row while spanning the `Mail Subject` and `Document Filename` cells across that mail's related rows; multiple document filenames should appear in one cell separated by line breaks
 - checklist output for `export_lc_sc` remains workbook-row-oriented even though the persisted annotation evidence is document-oriented; the system must aggregate the planned document records by workbook row when rendering JSON/HTML checklist rows
 - because `export_lc_sc` now persists exact per-document row bindings, checklist validation should hard-block whenever saved-document lineage cannot be reconciled, workbook-row membership becomes uncertain, or the persisted/fallback checklist-source evidence does not deterministically match the current print plan
+- for `ud_ip_exp`, the HTML checklist view must keep the existing UD/Amendment Print Annotation Checklist unchanged and append a report-only `Processed UD/IP/EXP PDF Documents` diagnostic section
+- the `ud_ip_exp` diagnostic table must list all processed/evidenced UD/IP/EXP PDFs, including hard-blocked PDFs that never reached print planning and duplicate/no-print PDFs that already existed in the destination folder
+- the `ud_ip_exp` diagnostic columns should include `Print Sequence`, `Mail Subject`, `Document Filename`, `Document Type`, `Decision`, `Disposition`, `UD/IP/EXP No.`, `Document Date`, `LC/SC`, `Bangladesh Bank Ref.`, `LC Value`, `Quantity`, `SL.No.`, `Workbook Row Indexes`, `Raw Extracted Values`, `Candidate Evidence`, and `Discrepancies`
+- in the `ud_ip_exp` diagnostic table, `Print Sequence` must reflect the actual physical print order when a PDF was planned for printing and must show `Not printed` when the PDF was skipped because it already existed or hard-blocked
+- in the `ud_ip_exp` diagnostic table, `SL.No.` must be resolved from workbook display text and treated as text, including duplicate/no-print successful documents
 - generate the JSON and HTML checklist artifacts before print execution using the persisted planned print order
 - after the full run reaches terminal mail-move success, automatically open the generated HTML checklist in the system default browser
+- when a `ud_ip_exp` run has hard-blocked evidence but no staged writes and no print plan, `generate-print-annotation-html` may generate/open the HTML diagnostic report without requiring `print_plan.json`; the absence of a print plan in this path must not hide hard-blocked processed PDFs
 - live submission uses hidden Acrobat OLE automation plus the `JSObject` bridge for silent printing
 - when the COM `JSObject` bridge cannot provide print parameters, the adapter must fall back to hidden `AVDoc.PrintPagesSilent` submission
 - if `print_printer_name` is configured, that fallback must temporarily switch the Windows default printer to the configured printer, submit the silent job, and then restore the original default printer in `finally`

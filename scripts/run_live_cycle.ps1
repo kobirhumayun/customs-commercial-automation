@@ -272,6 +272,18 @@ try {
             )
         }
 
+        if (($Workflow -in @("ud_ip_exp", "export_lc_sc")) -and ($hardBlockCount -gt 0)) {
+            Write-Section "Generate Diagnostic HTML Report"
+            $printAnnotation = Invoke-ProjectJsonCommand -Arguments @(
+                "run", "python", "-m", "project",
+                "generate-print-annotation-html", $Workflow,
+                "--config", $Config,
+                "--run-id", $runId,
+                "--live-workbook",
+                "--open-browser"
+            )
+        }
+
         Write-Host ""
         Write-Host "Live cycle completed without workbook writes." -ForegroundColor Green
         Write-Host "Run ID: $runId" -ForegroundColor Green

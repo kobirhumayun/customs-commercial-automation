@@ -606,6 +606,9 @@ The dashboard column is verification-only and should not be used to drive other 
 - Blocked emails remain in `working`.
 - Successfully processed export-team emails move to `UD and LC` only after batch workbook writes and printing complete.
 - Successfully processed `ud_ip_exp` emails use the same staged post-write/post-print movement model as `export_lc_sc`.
+- The `ud_ip_exp` HTML print-annotation report is also the operator diagnostic report for processed UD/IP/EXP PDFs. It must include successful printed, successful duplicate/no-print, and hard-blocked evidenced UD/IP/EXP PDFs without changing the UD/Amendment-only annotation checklist.
+- If all `ud_ip_exp` processed mails hard-block before workbook write/print planning, the run should still produce/open the HTML diagnostic report so the operator can see the failed PDF evidence.
+- `ud_ip_exp` report `SL.No.` values are text business values resolved from the workbook display value, not row indexes or raw numeric conversions.
 - In `import_btb_lc` Current Full Path, successfully processed import-team emails move to `Import` only after batch workbook writes complete and the import workflow's JSON/HTML report artifacts are persisted; duplicate-only/no-write import BTB LC PDFs inside an otherwise successful mail do not block that move, mails containing only duplicate-only/no-write import BTB LC PDFs are still move-eligible after report generation, and the generated HTML report opens automatically after terminal mail-move success.
 - In `import_btb_lc` File Picker Path, no Outlook post-processing occurs; the same workbook/report decisions apply, but the generated HTML report opens automatically after report generation completes.
 

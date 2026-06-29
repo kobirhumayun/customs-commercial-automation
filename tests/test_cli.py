@@ -3967,6 +3967,124 @@ class CLITests(unittest.TestCase):
             self.assertIn("Commercial File No.", html_artifact.read_text(encoding="utf-8"))
             self.assertIn('rowspan="2"', html_artifact.read_text(encoding="utf-8"))
 
+    def test_generate_print_annotation_html_command_opens_unplanned_hard_block_ud_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("reports", "runs", "backups", "workbooks"):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            workflow_year = __import__("datetime").datetime.now().year
+            (root / "workbooks" / f"{workflow_year}-master.xlsx").write_bytes(b"fake workbook")
+            config_path = _write_cli_config(root, workflow_year=workflow_year)
+            workbook_json = root / "workbook.json"
+            workbook_json.write_text(
+                json.dumps(
+                    {
+                        "sheet_name": "Sheet1",
+                        "headers": [
+                            {"column_index": 1, "text": "SL.No."},
+                            {"column_index": 2, "text": "L/C & S/C No."},
+                            {"column_index": 3, "text": "Bangladesh Bank Ref."},
+                        ],
+                        "rows": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_report = RunReport(
+                run_id="run-123",
+                workflow_id=WorkflowId.UD_IP_EXP,
+                tool_version="0.1.0",
+                rule_pack_id="ud_ip_exp.default",
+                rule_pack_version="1.0.0",
+                started_at_utc="2026-03-28T00:00:00Z",
+                completed_at_utc=None,
+                state_timezone="Asia/Dhaka",
+                mail_iteration_order=["mail-blocked"],
+                print_group_order=[],
+                write_phase_status=WritePhaseStatus.NOT_STARTED,
+                print_phase_status=PrintPhaseStatus.NOT_STARTED,
+                mail_move_phase_status=MailMovePhaseStatus.NOT_STARTED,
+                hash_algorithm="sha256",
+                run_start_backup_hash="a" * 64,
+                current_workbook_hash="b" * 64,
+                staged_write_plan_hash="c" * 64,
+                summary={"pass": 0, "warning": 0, "hard_block": 1},
+            )
+            mail_outcomes = [
+                MailOutcomeRecord(
+                    run_id="run-123",
+                    mail_id="mail-blocked",
+                    workflow_id=WorkflowId.UD_IP_EXP,
+                    snapshot_index=0,
+                    processing_status=MailProcessingStatus.BLOCKED,
+                    final_decision=FinalDecision.HARD_BLOCK,
+                    decision_reasons=[],
+                    eligible_for_write=False,
+                    eligible_for_print=False,
+                    eligible_for_mail_move=False,
+                    source_entry_id="entry-blocked",
+                    subject_raw="UD hard block subject",
+                    sender_address="a@example.com",
+                    discrepancies=[
+                        {
+                            "code": "ud_filename_lc_suffix_mismatch",
+                            "message": "UD filename mismatch.",
+                            "details": {
+                                "document_evidence": [
+                                    {
+                                        "normalized_filename": "UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf",
+                                        "document_kind": "UD",
+                                        "document_number": "BGMEA/DHK/AM/2026/4477/035-024",
+                                        "document_date": "2026-05-10",
+                                        "lc_sc_number": "411012584351-L",
+                                        "quantity": "4574 YDS",
+                                        "saved_document_id": "failed-ud-doc",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                )
+            ]
+
+            buffer = io.StringIO()
+            with patch(
+                "project.cli.load_print_planning_bundle",
+                return_value=(run_report, mail_outcomes, []),
+            ):
+                with patch("project.cli.load_print_batches", side_effect=AssertionError("print plan should not load")):
+                    with patch("project.cli.open_print_annotation_checklist_in_browser") as open_mock:
+                        with redirect_stdout(buffer):
+                            exit_code = main(
+                                [
+                                    "generate-print-annotation-html",
+                                    "ud_ip_exp",
+                                    "--config",
+                                    str(config_path),
+                                    "--run-id",
+                                    "run-123",
+                                    "--workbook-json",
+                                    str(workbook_json),
+                                    "--open-browser",
+                                ]
+                            )
+
+            payload = json.loads(buffer.getvalue())
+            artifact_root = root / "runs" / "ud_ip_exp" / "run-123"
+            html_artifact = artifact_root / "print_annotation_checklist.html"
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["print_phase_status"], "not_started")
+            self.assertEqual(payload["checklist_row_count"], 0)
+            self.assertEqual(payload["processed_document_row_count"], 1)
+            self.assertTrue(payload["print_annotation_html_opened"])
+            self.assertTrue(html_artifact.exists())
+            self.assertIn(
+                "UD-LC-4351-L-CUTTING EDGE INDUSTRIES LTD_AMD_02.pdf",
+                html_artifact.read_text(encoding="utf-8"),
+            )
+            open_mock.assert_called_once()
+
     def test_generate_print_annotation_html_command_allows_completed_export_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
