@@ -136,6 +136,89 @@ class UDIPEXPLiveDocumentTests(unittest.TestCase):
         )
         self.assertEqual(issue.details["document_evidence"][0]["lc_sc_number"], "LC-9999")
 
+    def test_prepare_live_ud_ip_exp_documents_allows_hyphenated_filename_suffix_before_buyer(self) -> None:
+        mail = _mail(
+            "entry-live-hyphenated-filename-suffix",
+            "Subject ignored for UD/IP/EXP",
+            attachments=[{"attachment_name": "UD-LC-1329-L-REFAT GARMENTS LTD.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-001329-L",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-hyphenated-filename-suffix",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud hyphenated suffix\n"}
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-001329-L",
+                    buyer_name="REFAT GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                    folder_buyer_name="REFAT GARMENTS LTD",
+                ),
+            )
+
+        self.assertEqual(result.document_save_result.issues, [])
+        self.assertEqual(len(result.document_save_result.saved_documents), 1)
+
+    def test_prepare_live_ud_ip_exp_documents_hard_blocks_hyphenated_filename_suffix_mismatch(self) -> None:
+        mail = _mail(
+            "entry-live-hyphenated-filename-suffix-mismatch",
+            "Subject ignored for UD/IP/EXP",
+            attachments=[{"attachment_name": "UD-LC-1329-L-REFAT GARMENTS LTD.pdf"}],
+        )
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="BGMEA/DHK/UD/2026/5483/999",
+                    extracted_document_date="2026-04-01",
+                    extracted_lc_sc_number="LC-9999",
+                    extracted_quantity="1000",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-live-hyphenated-filename-suffix-mismatch",
+                mail=mail,
+                workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nud hyphenated suffix mismatch\n"}
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="LC-9999",
+                    buyer_name="REFAT GARMENTS LTD",
+                    lc_sc_date="2026-01-10",
+                    folder_buyer_name="REFAT GARMENTS LTD",
+                ),
+            )
+
+        self.assertEqual(len(result.document_save_result.issues), 1)
+        issue = result.document_save_result.issues[0]
+        self.assertEqual(issue.code, "ud_filename_lc_suffix_mismatch")
+        self.assertEqual(
+            issue.details["mismatched_filename_suffixes"][0]["filename_suffix"],
+            "1329-L",
+        )
+
     def test_prepare_live_ud_ip_exp_documents_does_not_require_filename_suffix_when_absent(self) -> None:
         mail = _mail(
             "entry-live-no-filename-suffix",
