@@ -144,6 +144,8 @@ For `bb_dashboard_verification`, the launcher performs:
 - `validate-run --live-dashboard --apply-live-writes`
 - `report-run-status`
 
+`bb_dashboard_verification` attempts dashboard login only while establishing the initial live dashboard session. If login fails, the browser is closed, the authenticated search page becomes unavailable, or the dashboard later redirects to login, the run records a dashboard fetch failure and does not try another dashboard login for later LC families. The post-submit login wait is controlled by `bb_dashboard_login_failure_timeout_seconds` in the local config; the example default is `15`.
+
 It stops safely if write or print does not complete cleanly and prints the next recovery command instead of blindly continuing.
 For `ud_ip_exp` and `export_lc_sc`, the launcher includes `generate-print-annotation-html` because the checklist artifact is a mandatory pre-print gate.
 It also writes a timestamped launcher log under `D:\customs-automation\reports\launcher_logs` so wrapper-level failures can be inspected after the window closes.

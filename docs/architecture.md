@@ -302,6 +302,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Aggregates ERP amendments for `Current LC Value`, `LC Qty`, and `Net Weight`, and uses the same ERP buyer split logic as `export_lc_sc`.
 - Uses Playwright login to inspect dashboard values through a captured authenticated redirected URL.
 - Establishes one authenticated dashboard page for the run and reuses it across LC-family fetches only through the deterministic reset flow that returns the page to a fresh search state before each lookup.
+- Treats dashboard login/session failure as run-terminal for dashboard fetching: after one failed initial login, closed browser/page, unavailable authenticated search page, or redirect back to login, later LC families reuse the same fetch failure and the workflow does not attempt another dashboard login in that run.
 - Uses ERP `Ship. Remarks` as the primary dashboard search key when available; otherwise uses workbook `L/C & S/C No.`.
 - For each search key path, retries once with `0` inserted immediately before the last 4 characters of the normalized key if the initial fetch returns no data.
 - Treats workbook `Master L/C No.` as one or more line-break-separated values and treats dashboard `Foreign LC No.` as one or more rows; foreign-LC comparison passes when at least one normalized value is common between the two sides, with `and` and `&` treated as equivalent anywhere in those values.
@@ -731,6 +732,7 @@ For `import_btb_lc`, this workflow-specific key set must distinguish between the
 - live import PI-register retrieval uses the separate raw-material/yarn import ERP keys `import_erp_base_url`, `import_erp_pi_register_relative_url`, import ERP login selector/credential keys, and `import_erp_pi_register_*` report parameter/selector keys; it must not reuse export-ERP `erp_base_url` or export `erp_report_*` fill values
 - `File Picker Path` requires selected files to resolve beneath `import_document_root`; Outlook, ERP, Playwright, keyword-module, and print settings are not active launcher preconditions even if shared compatibility configuration still contains them
 - Launcher-specific validation must be implemented in an `import_btb_lc` configuration/launcher adapter. Do not remove existing shared required keys or relax finalized workflow descriptors to support File Picker Path.
+For `bb_dashboard_verification`, live dashboard session establishment also uses the optional key `bb_dashboard_login_failure_timeout_seconds` (default `15`) to bound the post-submit credential wait before a login/session failure is latched for the run.
 
 ### Secrets handling (Windows-first)
 - Credentials must not be hard-coded in source files.

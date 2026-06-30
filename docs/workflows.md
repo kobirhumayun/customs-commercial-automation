@@ -997,6 +997,8 @@ Rows where:
 ### Dashboard fetch contract
 - Login starts at `https://exp.bb.org.bd/ords/oims/r/import/75` using configured credentials.
 - After successful login, the workflow must capture the redirected authenticated URL and establish one authenticated dashboard page for the run.
+- Dashboard login is attempted only for initial run session establishment. If initial login fails, the browser/page is closed, the authenticated page becomes unavailable, or an established session later redirects to the login page, the workflow must latch one terminal dashboard fetch failure for the run and must not attempt another dashboard login for later LC families.
+- The post-submit login wait is bounded by `bb_dashboard_login_failure_timeout_seconds` (default `15` seconds) before the workflow records a terminal dashboard fetch failure for the run.
 - Each LC-family fetch must begin only after the workflow deterministically resets that authenticated page back to the fresh dashboard search state and confirms the search input is visible.
 - The workflow may reuse the authenticated page across family lookups only through that reset flow; submitting a new lookup on a dirty page is forbidden because uncleared fields may produce incorrect results.
 - Search uses the dashboard `Search Local LC` field plus the `Search` button.

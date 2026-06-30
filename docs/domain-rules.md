@@ -403,6 +403,9 @@ Candidate-row and family rules:
 - successful LC family means final dashboard status is `OK` or `OK (KGS)`
 
 Dashboard fetch rules:
+- dashboard login is a run-level session-establishment step, not a per-family retry loop
+- if dashboard login fails, the browser/page is closed, the authenticated search page becomes unavailable, or an established session redirects to the login page, later LC families must reuse the same latched dashboard fetch failure without another login attempt
+- `bb_dashboard_login_failure_timeout_seconds` bounds the post-submit credential wait before login is treated as failed for the run
 - the dashboard search key is ERP `Ship. Remarks` when available; otherwise workbook `L/C & S/C No.`
 - search-key normalization before submission is limited to trim + whitespace collapse
 - if a search using ERP `Ship. Remarks` returns no data, retry once using the same value with `0` inserted immediately before the last 4 characters, then stop with no workbook-LC fallback
