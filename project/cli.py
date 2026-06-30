@@ -4519,6 +4519,13 @@ def _load_dashboard_provider(
         storage_state_path=Path(storage_state_value) if storage_state_value else None,
         timeout_ms=max(1, int(str(config.values.get("bb_dashboard_timeout_seconds", 0)))) * 1000,
         headless=bool(config.values.get("playwright_headless", False)),
+        login_failure_timeout_ms=(
+            max(
+                1,
+                int(str(config.values.get("bb_dashboard_login_failure_timeout_seconds", 15))),
+            )
+            * 1000
+        ),
         snapshot_settle_timeout_ms=max(
             1,
             int(str(config.values.get("bb_dashboard_snapshot_settle_timeout_ms", 0))),

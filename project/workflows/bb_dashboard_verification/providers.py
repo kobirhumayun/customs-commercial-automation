@@ -168,6 +168,7 @@ class PlaywrightDashboardLookupProvider:
     storage_state_path: Path | None = None
     timeout_ms: int = 120_000
     headless: bool = True
+    login_failure_timeout_ms: int = 15_000
     snapshot_settle_timeout_ms: int = 2_000
     snapshot_stability_window_ms: int = 200
     snapshot_poll_interval_ms: int = 100
@@ -184,12 +185,32 @@ class PlaywrightDashboardLookupProvider:
                 search_keys=search_keys,
                 message=self._session_failure_message,
             )
-        self._ensure_authenticated_page()
+        if self._dashboard_session_is_closed():
+            message = self._mark_terminal_session_failure(
+                fallback_error_message=(
+                    "Bangladesh Bank dashboard browser/session was closed during lookup; "
+                    "stopping further dashboard login attempts for this run."
+                )
+            )
+            return _build_terminal_fetch_error_result(search_keys=search_keys, message=message)
+
+        try:
+            self._ensure_authenticated_page()
+        except Exception as exc:
+            message = self._mark_terminal_session_failure(fallback_error_message=str(exc))
+            return _build_terminal_fetch_error_result(search_keys=search_keys, message=message)
         if self._page is None:
             raise ValueError("Dashboard page could not be initialized.")
 
         if self._page_dirty:
-            self._reset_to_fresh_search_page()
+            try:
+                self._reset_to_fresh_search_page()
+            except Exception as exc:
+                message = self._mark_terminal_session_failure(
+                    page=self._page,
+                    fallback_error_message=str(exc),
+                )
+                return _build_terminal_fetch_error_result(search_keys=search_keys, message=message)
 
         attempts: list[DashboardLookupAttempt] = []
         for raw_key in search_keys:
@@ -200,21 +221,75 @@ class PlaywrightDashboardLookupProvider:
                     if page is None:
                         raise ValueError("Dashboard page could not be initialized.")
                     if self._page_is_login_page(page):
-                        self._recover_dashboard_session(page=page, retry_index=retry_index)
-                        continue
+                        error_message = self._mark_terminal_session_failure(page=page)
+                        attempts.append(
+                            DashboardLookupAttempt(
+                                search_key=search_key,
+                                outcome="fetch_error",
+                                message=error_message,
+                            )
+                        )
+                        return DashboardLookupResult(
+                            outcome="fetch_error",
+                            attempts=attempts,
+                            matched_search_key=search_key,
+                            message=error_message,
+                        )
 
-                    input_locator = page.locator(self.search_input_selector)
-                    input_locator.wait_for(state="visible", timeout=self.timeout_ms)
-                    input_locator.click()
-                    input_locator.fill("")
-                    input_locator.fill(search_key)
-                    page.locator(self.search_button_selector).click()
+                    try:
+                        input_locator = page.locator(self.search_input_selector)
+                        input_locator.wait_for(state="visible", timeout=self.timeout_ms)
+                        input_locator.click()
+                        input_locator.fill("")
+                        input_locator.fill(search_key)
+                        page.locator(self.search_button_selector).click()
+                    except Exception as exc:
+                        if self._dashboard_session_is_closed():
+                            error_message = self._mark_terminal_session_failure(
+                                fallback_error_message=(
+                                    "Bangladesh Bank dashboard browser/session was closed during lookup; "
+                                    "stopping further dashboard login attempts for this run."
+                                )
+                            )
+                        else:
+                            error_message = self._mark_terminal_session_failure(
+                                page=page,
+                                fallback_error_message=(
+                                    "Bangladesh Bank dashboard searchable page was unavailable during lookup: "
+                                    f"{exc}"
+                                ),
+                            )
+                        attempts.append(
+                            DashboardLookupAttempt(
+                                search_key=search_key,
+                                outcome="fetch_error",
+                                message=error_message,
+                            )
+                        )
+                        return DashboardLookupResult(
+                            outcome="fetch_error",
+                            attempts=attempts,
+                            matched_search_key=search_key,
+                            message=error_message,
+                        )
                     self._page_dirty = True
                     _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
 
                     if self._page_is_login_page(page):
-                        self._recover_dashboard_session(page=page, retry_index=retry_index)
-                        continue
+                        error_message = self._mark_terminal_session_failure(page=page)
+                        attempts.append(
+                            DashboardLookupAttempt(
+                                search_key=search_key,
+                                outcome="fetch_error",
+                                message=error_message,
+                            )
+                        )
+                        return DashboardLookupResult(
+                            outcome="fetch_error",
+                            attempts=attempts,
+                            matched_search_key=search_key,
+                            message=error_message,
+                        )
 
                     if self.no_result_selector and _selector_visible(
                         page,
@@ -272,24 +347,18 @@ class PlaywrightDashboardLookupProvider:
                     )
                 except Exception as exc:
                     error_message = str(exc)
-                    if self._page is not None and self._page_is_login_page(self._page):
-                        try:
-                            self._recover_dashboard_session(
-                                page=self._page,
-                                retry_index=retry_index,
-                                fallback_error_message=error_message,
+                    if self._dashboard_session_is_closed():
+                        error_message = self._mark_terminal_session_failure(
+                            fallback_error_message=(
+                                "Bangladesh Bank dashboard browser/session was closed during lookup; "
+                                "stopping further dashboard login attempts for this run."
                             )
-                        except Exception as recovery_exc:
-                            recovery_message = str(recovery_exc)
-                            if self._session_failure_message is None:
-                                error_message = self._mark_terminal_session_failure(
-                                    page=self._page,
-                                    fallback_error_message=recovery_message,
-                                )
-                            else:
-                                error_message = self._session_failure_message
-                        else:
-                            continue
+                        )
+                    elif self._page is not None and self._page_is_login_page(self._page):
+                        error_message = self._mark_terminal_session_failure(
+                            page=self._page,
+                            fallback_error_message=error_message,
+                        )
                     attempts.append(
                         DashboardLookupAttempt(
                             search_key=search_key,
@@ -393,8 +462,15 @@ class PlaywrightDashboardLookupProvider:
             raise ValueError("Dashboard page could not be initialized.")
         page = self._page
         if self._page_is_login_page(page):
-            self._recover_dashboard_session(page=page, retry_index=0)
-            return
+            raise ValueError(
+                self._mark_terminal_session_failure(
+                    page=page,
+                    fallback_error_message=(
+                        "Bangladesh Bank dashboard session expired before the next lookup; "
+                        "stopping further dashboard login attempts for this run."
+                    ),
+                )
+            )
         page.get_by_text(self.back_link_text, exact=True).click()
         page.wait_for_url(self.reset_intermediate_url_pattern, timeout=self.timeout_ms)
         _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
@@ -464,11 +540,37 @@ class PlaywrightDashboardLookupProvider:
     ) -> str:
         terminal_message = message or _extract_terminal_auth_failure_message(page, fallback_text=fallback_error_message)
         if terminal_message is None:
-            terminal_message = (
-                "Bangladesh Bank dashboard session was redirected to login during lookup and could not be recovered."
+            terminal_message = fallback_error_message or (
+                "Bangladesh Bank dashboard session was redirected to login during lookup; "
+                "stopping further dashboard login attempts for this run."
             )
         self._session_failure_message = terminal_message
         return terminal_message
+
+    def _dashboard_session_is_closed(self) -> bool:
+        page = self._page
+        if page is not None:
+            is_closed = getattr(page, "is_closed", None)
+            if callable(is_closed):
+                try:
+                    if bool(is_closed()):
+                        return True
+                except Exception:
+                    return True
+            elif bool(getattr(page, "closed", False)):
+                return True
+
+        browser = self._browser
+        if browser is not None:
+            is_connected = getattr(browser, "is_connected", None)
+            if callable(is_connected):
+                try:
+                    if not bool(is_connected()):
+                        return True
+                except Exception:
+                    return True
+
+        return False
 
     def _page_is_login_page(self, page) -> bool:
         return self.login_path_fragment in _optional_string(getattr(page, "url", ""))
@@ -528,7 +630,34 @@ class PlaywrightDashboardLookupProvider:
         page.locator(self.username_selector).fill(self.username or "")
         page.locator(self.password_selector).fill(self.password or "")
         page.locator(self.submit_selector).click()
-        _best_effort_wait_for_network_idle(page, timeout_ms=self.timeout_ms)
+        self._wait_for_login_submission_result(page)
+
+    def _wait_for_login_submission_result(self, page) -> None:
+        deadline = time.monotonic() + (max(1, self.login_failure_timeout_ms) / 1000)
+        poll_timeout_ms = min(max(1, self.login_failure_timeout_ms), 1_000)
+
+        while time.monotonic() < deadline:
+            _best_effort_wait_for_timeout(page, timeout_ms=250)
+            self._raise_if_terminal_auth_failure(page)
+            if self.post_login_wait_selector and _selector_visible(
+                page,
+                self.post_login_wait_selector,
+                timeout_ms=poll_timeout_ms,
+            ):
+                return
+            if _selector_visible(page, self.search_input_selector, timeout_ms=poll_timeout_ms):
+                return
+
+        raise ValueError(
+            self._mark_terminal_session_failure(
+                page=page,
+                fallback_error_message=(
+                    "Bangladesh Bank dashboard login did not reach a searchable authenticated page "
+                    f"within {max(1, self.login_failure_timeout_ms) // 1000} seconds; "
+                    "stopping further dashboard login attempts for this run."
+                ),
+            )
+        )
 
 
 def _build_snapshot_from_manifest_record(record: dict[str, object]) -> DashboardFamilySnapshot:
