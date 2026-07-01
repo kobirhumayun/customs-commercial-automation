@@ -43,8 +43,6 @@ from project.workflows.import_btb_lc.extraction import (
 IMPORT_BTB_LC_WORKFLOW_SCHEMA_ID = "import_btb_lc_workflow"
 IMPORT_BTB_LC_WORKFLOW_SCHEMA_VERSION = "1.1.0"
 IMPORT_BTB_LC_DATE_NUMBER_FORMAT = "dd/mm/yyyy"
-IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT = "#,##0.00"
-IMPORT_BTB_LC_QUANTITY_NUMBER_FORMAT = "#,##0.00"
 
 
 @dataclass(slots=True, frozen=True)
@@ -1217,8 +1215,8 @@ def _stage_import_write_operations(
     values = (
         ("btb_lc_no", document.btb_lc_number, None),
         ("btb_lc_issue_date", document.btb_lc_date, IMPORT_BTB_LC_DATE_NUMBER_FORMAT),
-        ("import_amount", document.btb_lc_value_text, IMPORT_BTB_LC_AMOUNT_NUMBER_FORMAT),
-        ("quantity_kgs", quantity_kgs, IMPORT_BTB_LC_QUANTITY_NUMBER_FORMAT),
+        ("import_amount", document.btb_lc_value_text, None),
+        ("quantity_kgs", quantity_kgs, None),
     )
     operations: list[WriteOperation] = []
     for operation_index, (column_key, value, number_format) in enumerate(values):

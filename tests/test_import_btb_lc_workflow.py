@@ -18,11 +18,14 @@ from project.workflows.import_btb_lc.workflow import (
     _document_from_artifact,
     allocate_import_btb_lc_documents,
     evaluate_import_mail_relevance,
+    execute_import_btb_lc_writes,
     load_import_relevance_keywords,
     render_import_btb_lc_html_report,
     run_import_btb_lc_current_full,
     resolve_import_btb_lc_header_mapping,
 )
+from project.models import WorkbookSessionPreflight
+from project.workbook import WorkbookMutationOpenResult
 
 
 class ImportBTBLCWorkflowTests(unittest.TestCase):
@@ -68,7 +71,35 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             [operation.column_key for operation in result.staged_write_plan],
             ["btb_lc_no", "btb_lc_issue_date", "import_amount", "quantity_kgs"],
         )
+        self.assertEqual(
+            [operation.number_format for operation in result.staged_write_plan],
+            [None, "dd/mm/yyyy", None, None],
+        )
         self.assertEqual(outcome["selected_quantity_kgs"], "1709")
+
+    def test_live_import_write_preserves_amount_and_quantity_cell_formats(self) -> None:
+        snapshot = _workbook_snapshot()
+        allocation = allocate_import_btb_lc_documents(
+            documents=[_document(_artifact(value="50000"))],
+            workbook_snapshot=snapshot,
+            run_id="run-import-format-test",
+            pi_register_provider=_StaticPIRegisterProvider(quantity_kg="1709"),
+        )
+        session = _FakeImportWorkbookMutationSession(snapshot)
+
+        result = execute_import_btb_lc_writes(
+            run_id="run-import-format-test",
+            workbook_snapshot=snapshot,
+            staged_write_plan=allocation.staged_write_plan,
+            workbook_path=Path("master.xlsx"),
+            mutation_session_provider=_FakeImportWorkbookMutationProvider(session),
+        )
+
+        self.assertEqual(result["status"], "committed")
+        writes_by_column = {call["column_index"]: call for call in session.write_calls}
+        self.assertEqual(writes_by_column[20]["number_format"], "dd/mm/yyyy")
+        self.assertIsNone(writes_by_column[22]["number_format"])
+        self.assertIsNone(writes_by_column[23]["number_format"])
 
     def test_allocation_hard_blocks_when_no_qualified_row(self) -> None:
         snapshot = _workbook_snapshot(
@@ -1142,6 +1173,73 @@ class _StaticPIRegisterProvider:
 
     def load_rows(self):
         return [row for rows in self.lookup_pi_numbers(pi_numbers=["BTL/26/3183"]).values() for row in rows]
+
+
+class _FakeImportWorkbookMutationProvider:
+    def __init__(self, session):
+        self._session = session
+
+    def open_write_session(self, *, operator_context, max_attempts=3):
+        del operator_context, max_attempts
+        return WorkbookMutationOpenResult(
+            preflight=WorkbookSessionPreflight(
+                workbook_path="master.xlsx",
+                adapter_name="fake-xlwings",
+                status="ready",
+                attempt_count=1,
+                host_name="host",
+                process_id=1,
+                session_id="excel-session-import-format",
+                read_only=False,
+                save_capable=True,
+            ),
+            session=self._session,
+        )
+
+
+class _FakeImportWorkbookMutationSession:
+    def __init__(self, workbook_snapshot):
+        self._snapshot = workbook_snapshot
+        self._cell_values = {
+            (row.row_index, column_index): value
+            for row in workbook_snapshot.rows
+            for column_index, value in row.values.items()
+        }
+        self.write_calls: list[dict[str, object]] = []
+        self.closed = False
+
+    def capture_snapshot(self):
+        return self._snapshot
+
+    def write_cell(
+        self,
+        *,
+        sheet_name: str,
+        row_index: int,
+        column_index: int,
+        value: object,
+        number_format: str | None = None,
+    ) -> None:
+        self.write_calls.append(
+            {
+                "sheet_name": sheet_name,
+                "row_index": row_index,
+                "column_index": column_index,
+                "value": value,
+                "number_format": number_format,
+            }
+        )
+        self._cell_values[(row_index, column_index)] = value
+
+    def read_cell(self, *, sheet_name: str, row_index: int, column_index: int):
+        del sheet_name
+        return self._cell_values.get((row_index, column_index), "")
+
+    def save(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _mail_snapshot(*, subject: str = "Fabric BTB LC"):
