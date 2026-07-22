@@ -12,6 +12,7 @@ from project.erp.providers import (
     EmptyERPRowProvider,
     ERPRowProvider,
     inspect_playwright_report_download,
+    inspect_playwright_report_page,
     JsonManifestERPRowProvider,
     PlaywrightERPRowProvider,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "EmptyERPRowProvider",
     "ERPRowProvider",
     "inspect_playwright_report_download",
+    "inspect_playwright_report_page",
     "JsonManifestERPRowProvider",
     "PlaywrightERPRowProvider",
 ]

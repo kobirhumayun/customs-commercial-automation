@@ -4,13 +4,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import project.erp.import_pi as import_pi_module
 from project.erp import (
     DelimitedERPExportRowProvider,
     DelimitedImportPIRegisterProvider,
     inspect_playwright_report_download,
+    inspect_playwright_report_page,
     ImportPIRegisterRow,
     JsonManifestERPRowProvider,
     PlaywrightImportPIRegisterProvider,
@@ -175,6 +176,43 @@ class ERPProviderTests(unittest.TestCase):
             self.assertEqual(payload["download_receipt"]["saved_filename"], "report.csv")
             self.assertGreater(payload["download_receipt"]["size_bytes"], 0)
             self.assertEqual(payload["download_receipt"]["content_kind"], "delimited_text")
+
+    def test_inspect_playwright_report_page_only_waits_for_report_selector(self) -> None:
+        page = MagicMock()
+        page.url = "https://erp.local/report"
+        page.title.return_value = "ERP Report"
+        browser = MagicMock()
+        context = MagicMock()
+        browser.new_context.return_value = context
+        context.new_page.return_value = page
+        playwright = MagicMock()
+        playwright.chromium.launch.return_value = browser
+        sync_context = MagicMock()
+        sync_context.__enter__.return_value = playwright
+
+        with patch("project.erp.providers._load_playwright_sync_api", return_value=lambda: sync_context):
+            payload = inspect_playwright_report_page(
+                base_url="https://erp.local",
+                report_relative_url="/report",
+                browser_channel="msedge",
+                storage_state_path=None,
+                timeout_ms=30_000,
+                headless=True,
+                readiness_selector='role=button[name="Submit"]',
+            )
+
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["probe_mode"], "page_access")
+        page.goto.assert_called_once_with(
+            "https://erp.local/report",
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
+        page.locator.return_value.first.wait_for.assert_called_once_with(
+            state="visible",
+            timeout=30_000,
+        )
+        page.expect_download.assert_not_called()
 
     def test_import_pi_download_receipt_uses_import_register_headers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
