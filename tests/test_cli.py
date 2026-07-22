@@ -5237,7 +5237,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["sections"]["print"]["status"], "ready")
         self.assertEqual(payload["sections"]["erp"]["match_count"], 1)
 
-    def test_report_live_readiness_command_uses_download_probe_without_file_numbers(self) -> None:
+    def test_report_live_readiness_command_uses_page_probe_without_file_numbers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             for name in ("reports", "runs", "backups", "workbooks"):
@@ -5284,15 +5284,13 @@ class CLITests(unittest.TestCase):
                     },
                 ):
                     with patch(
-                        "project.cli.inspect_playwright_report_download",
+                        "project.cli.inspect_playwright_report_page",
                         return_value={
                             "status": "ready",
-                            "download_receipt": {
-                                "exists": True,
-                                "is_empty": False,
-                                "looks_like_html": False,
-                                "has_required_erp_headers": True,
-                            },
+                            "probe_mode": "page_access",
+                            "target_url": "https://erp.local/report",
+                            "final_url": "https://erp.local/report",
+                            "page_title": "ERP Report",
                         },
                     ) as inspect_mock:
                         with patch(
@@ -5335,6 +5333,8 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["sections"]["erp"]["status"], "ready")
         self.assertEqual(payload["sections"]["erp"]["lookup_scope"], "connectivity_only")
+        self.assertEqual(payload["sections"]["erp"]["probe_mode"], "page_access")
+        self.assertEqual(payload["sections"]["erp"]["page_title"], "ERP Report")
         inspect_mock.assert_called_once()
 
     def test_report_live_readiness_command_keeps_section_errors_in_payload(self) -> None:
@@ -5372,7 +5372,7 @@ class CLITests(unittest.TestCase):
                 side_effect=RuntimeError("Outlook unavailable"),
             ):
                 with patch(
-                    "project.cli.inspect_playwright_report_download",
+                    "project.cli.inspect_playwright_report_page",
                     side_effect=RuntimeError("ERP unavailable"),
                 ):
                     with patch("project.cli.XLWingsWorkbookWriteSessionProvider") as workbook_provider_mock:
@@ -5458,15 +5458,10 @@ class CLITests(unittest.TestCase):
                     },
                 ):
                     with patch(
-                        "project.cli.inspect_playwright_report_download",
+                        "project.cli.inspect_playwright_report_page",
                         return_value={
                             "status": "ready",
-                            "download_receipt": {
-                                "exists": True,
-                                "is_empty": False,
-                                "looks_like_html": False,
-                                "has_required_erp_headers": True,
-                            },
+                            "probe_mode": "page_access",
                         },
                     ):
                         with patch(

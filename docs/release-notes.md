@@ -82,7 +82,8 @@
 ### Release readiness checklist
 - `report-live-readiness` returns `overall_status = "ready"`
 - Outlook source/destination `EntryID` values are configured correctly
-- ERP form/download flow is validated on the live page
+- Default ERP readiness confirms authenticated report-page access without submitting or downloading the report
+- ERP form/download selectors are validated separately with `inspect-erp-download` or an explicit readiness `--erp-file-number` lookup
 - workbook year, sheet, and header mapping are confirmed
 - named-printer silent print path is tested if `print_printer_name` is configured
 - at least one full live cycle reaches:

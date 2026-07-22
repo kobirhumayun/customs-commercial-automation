@@ -48,11 +48,16 @@ def build_erp_readiness_section(
     *,
     requested_file_numbers: list[str],
     erp_payload: dict[str, Any] | None = None,
+    probe_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if erp_payload is None:
         return {
             "status": "ready",
             "lookup_scope": "connectivity_only",
+            "probe_mode": str((probe_payload or {}).get("probe_mode") or "page_access"),
+            "target_url": (probe_payload or {}).get("target_url"),
+            "final_url": (probe_payload or {}).get("final_url"),
+            "page_title": (probe_payload or {}).get("page_title"),
             "requested_file_numbers": list(requested_file_numbers),
             "canonical_file_numbers": [],
             "match_count": 0,

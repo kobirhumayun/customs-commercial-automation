@@ -1104,7 +1104,8 @@ uv run python -m project acknowledge-partial-print <workflow_id> --config "<conf
 ### Release readiness checklist
 - `report-live-readiness` must return `overall_status = "ready"` before first live use on a workstation/profile
 - Outlook folder `EntryID` values must be copied from `inspect-outlook-folders` into the active TOML
-- ERP download selectors/settings must be validated against the live report form
+- The default ERP readiness check must open the configured report page and verify that its report-specific submit control is visible. It must not submit the report or download the full export.
+- ERP download selectors/settings must be validated separately with `inspect-erp-download` during deployment, selector changes, or troubleshooting. Supplying `--erp-file-number` to readiness remains an explicit end-to-end lookup test and may download the report.
 - the workbook year, sheet, and header mapping must be confirmed for the active filing cycle
 - if `print_printer_name` is configured, the operator must validate one real silent print cycle on that named printer
 - operators must know that named-printer fallback may temporarily switch the Windows default printer and then restore it automatically

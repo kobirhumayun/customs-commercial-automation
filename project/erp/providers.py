@@ -338,6 +338,80 @@ def inspect_playwright_report_download(
                 pass
 
 
+def inspect_playwright_report_page(
+    *,
+    base_url: str,
+    report_relative_url: str,
+    browser_channel: str | None,
+    storage_state_path: Path | None,
+    timeout_ms: int,
+    headless: bool,
+    readiness_selector: str,
+) -> dict[str, object]:
+    """Verify authenticated access to an ERP report page without submitting it."""
+    payload: dict[str, object] = {
+        "status": "issue",
+        "probe_mode": "page_access",
+        "target_url": None,
+        "final_url": None,
+        "page_title": None,
+        "readiness_selector": readiness_selector,
+        "error": None,
+    }
+    if not base_url.strip():
+        payload["error"] = "Live ERP provider requires a non-empty erp_base_url"
+        return payload
+    if not readiness_selector.strip():
+        payload["error"] = "Live ERP page readiness requires a report-specific readiness selector."
+        return payload
+    if storage_state_path is not None and not storage_state_path.exists():
+        payload["error"] = f"Playwright storage state path does not exist: {storage_state_path}"
+        return payload
+
+    target_url = urljoin(base_url.rstrip("/") + "/", report_relative_url.lstrip("/"))
+    payload["target_url"] = target_url
+    browser = None
+    context = None
+    page = None
+    try:
+        sync_playwright = _load_playwright_sync_api()
+        with sync_playwright() as playwright:
+            launch_kwargs: dict[str, object] = {"headless": headless}
+            if browser_channel:
+                launch_kwargs["channel"] = browser_channel
+            browser = playwright.chromium.launch(**launch_kwargs)
+            context_kwargs: dict[str, object] = {}
+            if storage_state_path is not None:
+                context_kwargs["storage_state"] = str(storage_state_path)
+            context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.locator(readiness_selector).first.wait_for(state="visible", timeout=timeout_ms)
+            payload["final_url"] = page.url
+            payload["page_title"] = page.title()
+            payload["status"] = "ready"
+            return payload
+    except Exception as exc:
+        payload["error"] = str(exc)
+        if page is not None:
+            try:
+                payload["final_url"] = page.url
+            except Exception:
+                pass
+        return payload
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
 def _maybe_perform_login(
     page,
     *,
