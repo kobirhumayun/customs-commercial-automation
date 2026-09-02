@@ -382,6 +382,82 @@ class ERPProviderTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].pi_number, "BTL/26/3920")
 
+    def test_live_import_pi_provider_accepts_equivalent_september_date_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {
+                            "selector": 'input[aria-label="To Date :"]',
+                            "expected_value": "02-Sep-2026",
+                            "observed_value": "02-Sept-2026",
+                            "selected_display_values": [],
+                            "matched": False,
+                        },
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                rows = provider.load_rows()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].pi_number, "BTL/26/3920")
+
+    def test_live_import_pi_provider_rejects_different_date_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "SL.,Unit,PI Number,Qty.Kg,Total Amount",
+                        "1,BADSHA TEXTILES LTD.,BTL/26/3920,1709,5127",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "project.erp.import_pi.inspect_playwright_report_download",
+                return_value={
+                    "status": "ready",
+                    "downloaded_file_path": str(report_path),
+                    "field_readbacks": [
+                        {
+                            "selector": 'input[aria-label="To Date :"]',
+                            "expected_value": "02-Sep-2026",
+                            "observed_value": "03-Sept-2026",
+                            "selected_display_values": [],
+                            "matched": False,
+                        },
+                    ],
+                },
+            ):
+                provider = PlaywrightImportPIRegisterProvider(
+                    base_url="https://import-erp.local",
+                    download_format_selector="text=CSV",
+                )
+
+                with self.assertRaisesRegex(ValueError, "did not retain"):
+                    provider.load_rows()
+
     def test_live_import_pi_provider_rejects_multiple_tagbox_selections(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             report_path = Path(temp_dir) / "rptPIRegisterCustomsPDL.csv"

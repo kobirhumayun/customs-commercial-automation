@@ -6,6 +6,7 @@ import json
 import re
 import tempfile
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
@@ -298,6 +299,7 @@ def _load_import_pi_rows_from_playwright_download(
                 if isinstance(item, dict)
                 and item.get("matched") is False
                 and not _readback_has_exact_tagbox_selection(item)
+                and not _readback_has_equivalent_report_date(item)
             ]
             if mismatched_selectors:
                 raise ValueError(
@@ -316,6 +318,25 @@ def _readback_has_exact_tagbox_selection(item: dict[str, object]) -> bool:
     if not expected_value or not isinstance(selected_values, list):
         return False
     return [str(value) for value in selected_values] == [expected_value]
+
+
+def _readback_has_equivalent_report_date(item: dict[str, object]) -> bool:
+    expected_date = _parse_report_date_readback(item.get("expected_value"))
+    observed_date = _parse_report_date_readback(item.get("observed_value"))
+    return expected_date is not None and observed_date == expected_date
+
+
+def _parse_report_date_readback(value: object) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = re.sub(r"(?i)(?<=-)sept(?=-)", "Sep", text)
+    for pattern in ("%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(normalized, pattern).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _load_import_pi_rows_from_matrix(matrix: list[list[str]], *, source_name: str) -> list[ImportPIRegisterRow]:

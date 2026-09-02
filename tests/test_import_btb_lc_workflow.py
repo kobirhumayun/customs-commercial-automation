@@ -174,13 +174,16 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
             pi_register_provider=_StaticPIRegisterProvider(total_amount="49999.99"),
         )
         outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(result.workflow_report)
 
         self.assertEqual(outcome["decision"], "hard_block")
+        self.assertEqual(outcome["pi_register_validation"]["quantity_kgs"], "1709")
         self.assertEqual(
             outcome["hard_block_discrepancies"][0]["code"],
             "import_pi_register_amount_mismatch",
         )
         self.assertEqual(result.staged_write_plan, [])
+        self.assertIn("<td>50000</td><td></td><td>1883260400042</td>", html)
 
     def test_workbook_duplicate_exact_match_is_warning_noop(self) -> None:
         snapshot = _workbook_snapshot(
@@ -565,6 +568,100 @@ class ImportBTBLCWorkflowTests(unittest.TestCase):
         self.assertIn("<td>8297</td>", html)
         self.assertIn("ratio 39.0000%", html)
         self.assertIn("import_no_qualified_workbook_row", html)
+
+    def test_export_lc_extraction_failure_still_reports_validated_pi_quantity(self) -> None:
+        artifact = _artifact(value="39000", related="", decision="hard_block")
+        _mark_pi_report_prerequisites_as_passed(artifact)
+        artifact["hard_block_discrepancies"] = [
+            {
+                "code": "import_related_export_lc_invalid",
+                "severity": "hard_block",
+                "message": "Related export LC was not extracted.",
+                "field": "related_export_lc_number",
+                "details": {},
+            }
+        ]
+        result = allocate_import_btb_lc_documents(
+            documents=[_document(artifact)],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-export-lc-failure-quantity-test",
+            pi_register_provider=_StaticPIRegisterProvider(
+                total_amount="39000",
+                quantity_kg="8297",
+            ),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(result.workflow_report)
+
+        self.assertEqual(outcome["decision"], "hard_block")
+        self.assertEqual(outcome["write_disposition"], "not_staged")
+        self.assertEqual(outcome["staged_write_operations"], [])
+        self.assertEqual(outcome["pi_register_validation"]["status"], "pass")
+        self.assertEqual(outcome["pi_register_validation"]["quantity_kgs"], "8297")
+        self.assertIn("<td>39000</td><td>8297</td><td></td>", html)
+
+    def test_export_lc_extraction_failure_hides_quantity_when_pi_amount_mismatches(self) -> None:
+        artifact = _artifact(value="39000", related="", decision="hard_block")
+        _mark_pi_report_prerequisites_as_passed(artifact)
+        artifact["hard_block_discrepancies"] = [
+            {
+                "code": "import_related_export_lc_invalid",
+                "severity": "hard_block",
+                "message": "Related export LC was not extracted.",
+                "field": "related_export_lc_number",
+                "details": {},
+            }
+        ]
+        result = allocate_import_btb_lc_documents(
+            documents=[_document(artifact)],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-export-lc-failure-amount-mismatch-test",
+            pi_register_provider=_StaticPIRegisterProvider(
+                total_amount="38000",
+                quantity_kg="8297",
+            ),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(result.workflow_report)
+
+        self.assertEqual(outcome["decision"], "hard_block")
+        self.assertEqual(outcome["pi_register_validation"]["status"], "hard_block")
+        self.assertEqual(outcome["pi_register_validation"]["quantity_kgs"], "8297")
+        self.assertEqual(
+            [item["code"] for item in outcome["hard_block_discrepancies"]],
+            ["import_related_export_lc_invalid", "import_pi_register_amount_mismatch"],
+        )
+        self.assertIn("<td>39000</td><td></td><td></td>", html)
+
+    def test_export_lc_extraction_failure_hides_quantity_when_pi_row_is_missing(self) -> None:
+        artifact = _artifact(value="39000", related="", decision="hard_block")
+        _mark_pi_report_prerequisites_as_passed(artifact)
+        artifact["hard_block_discrepancies"] = [
+            {
+                "code": "import_related_export_lc_invalid",
+                "severity": "hard_block",
+                "message": "Related export LC was not extracted.",
+                "field": "related_export_lc_number",
+                "details": {},
+            }
+        ]
+        result = allocate_import_btb_lc_documents(
+            documents=[_document(artifact)],
+            workbook_snapshot=_workbook_snapshot(),
+            run_id="run-import-export-lc-failure-missing-pi-test",
+            pi_register_provider=_StaticPIRegisterProvider(pi_number="BTL/26/9999"),
+        )
+        outcome = result.workflow_report["document_outcomes"][0]
+        html = render_import_btb_lc_html_report(result.workflow_report)
+
+        self.assertEqual(outcome["decision"], "hard_block")
+        self.assertEqual(outcome["pi_register_validation"]["status"], "hard_block")
+        self.assertIsNone(outcome["pi_register_validation"]["quantity_kgs"])
+        self.assertEqual(
+            [item["code"] for item in outcome["hard_block_discrepancies"]],
+            ["import_related_export_lc_invalid", "import_pi_register_row_missing"],
+        )
+        self.assertIn("<td>39000</td><td></td><td></td>", html)
 
     def test_mixed_result_mail_retains_writable_document_disposition(self) -> None:
         passing_document = _document(_artifact(), snapshot_index=0)
@@ -1046,6 +1143,11 @@ def _artifact(
         "hard_block_discrepancies": [],
         "overall_extraction_decision": decision,
     }
+
+
+def _mark_pi_report_prerequisites_as_passed(artifact: dict) -> None:
+    artifact["fields"]["btb_lc_value"]["validation"] = {"status": "pass"}
+    artifact["fields"]["seller_pi_numbers"]["validation"] = {"status": "pass"}
 
 
 def _workbook_snapshot(*, rows: list[WorkbookRow] | None = None) -> WorkbookSnapshot:

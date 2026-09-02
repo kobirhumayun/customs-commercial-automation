@@ -816,10 +816,9 @@ def render_import_btb_lc_html_report(report: dict[str, object]) -> str:
             pi_numbers_display = ", ".join(
                 str(value) for value in pi_numbers
             ) if isinstance(pi_numbers, list) else str(pi_numbers or "")
-            calculated_quantity = (
-                pi_validation.get("quantity_kgs")
-                or outcome.get("selected_quantity_kgs")
-                or ""
+            calculated_quantity = _reportable_import_quantity(
+                outcome=outcome,
+                pi_validation=pi_validation,
             )
             rows.append(
                 "<tr>"
@@ -1075,6 +1074,14 @@ def _allocate_one_document(
         base["hard_block_discrepancies"] = list(
             document.extraction_artifact.get("hard_block_discrepancies", [])
         )
+        if _extraction_fields_allow_pi_report_validation(document):
+            pi_validation = _validate_document_pi_register(
+                document=document,
+                pi_register_provider=pi_register_provider,
+            )
+            base["pi_register_validation"] = pi_validation
+            if pi_validation["status"] != "pass":
+                base["hard_block_discrepancies"].append(pi_validation["discrepancy"])
         base["decision_reasons"] = ["Extraction produced hard-block discrepancies."]
         return base, []
 
@@ -1380,6 +1387,35 @@ def _validate_document_pi_register(
         "pi_rows": pi_evidence,
         "discrepancy": None,
     }
+
+
+def _extraction_fields_allow_pi_report_validation(document: ImportBTBLCDocument) -> bool:
+    fields = document.extraction_artifact.get("fields")
+    if not isinstance(fields, dict):
+        return False
+    return (
+        bool(document.seller_pi_numbers)
+        and document.btb_lc_value is not None
+        and _extraction_field_validation_passed(fields.get("seller_pi_numbers"))
+        and _extraction_field_validation_passed(fields.get("btb_lc_value"))
+    )
+
+
+def _extraction_field_validation_passed(field: object) -> bool:
+    if not isinstance(field, dict):
+        return False
+    validation = field.get("validation")
+    return isinstance(validation, dict) and validation.get("status") == "pass"
+
+
+def _reportable_import_quantity(
+    *,
+    outcome: dict[str, object],
+    pi_validation: dict[str, object],
+) -> object:
+    if pi_validation.get("status") == "pass":
+        return pi_validation.get("quantity_kgs") or ""
+    return outcome.get("selected_quantity_kgs") or ""
 
 
 def _select_candidate_row(
