@@ -9,6 +9,92 @@ from project.workflows.ud_ip_exp.structured_extraction import (
 
 
 class UDIPEXPStructuredExtractionTests(unittest.TestCase):
+    def test_merged_page_tables_preserve_all_base_and_amendment_values(self) -> None:
+        for amendment, lc in ((False, "1345260400434"), (True, "201260400935")):
+            with self.subTest(amendment=amendment):
+                old_report = _amendment_report() if amendment else _base_report()
+                context = StructuredUDExtractionContext(erp_lc_sc_number=lc)
+                old = extract_structured_ud_analysis(report=old_report, context=context)
+                new = extract_structured_ud_analysis(report=_merged_report(amendment), context=context)
+                for field in (
+                    "extracted_document_subtype", "extracted_document_number",
+                    "extracted_document_date", "extracted_lc_sc_number",
+                    "extracted_lc_sc_date", "extracted_lc_sc_value",
+                    "extracted_lc_sc_value_currency", "extracted_quantity_by_unit",
+                ):
+                    self.assertEqual(getattr(new, field), getattr(old, field), field)
+                self.assertEqual(new.extracted_lc_sc_provenance["row_index"], 4)
+                self.assertEqual(new.extracted_lc_sc_provenance["value_column_index"], 10 if amendment else 5)
+
+    def test_merged_amendment_zero_uses_original_value_column(self) -> None:
+        report = _merged_report(True)
+        report["pages"][0]["tables"][0]["rows"][4][10] = "USD 0.00"
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("201260400935"),
+        )
+        self.assertEqual(analysis.extracted_lc_sc_value, "89675")
+        self.assertEqual(analysis.extracted_lc_sc_value_provenance["value_column_index"], 7)
+
+    def test_merged_base_ud_repeated_foreign_and_local_lc_sections(self) -> None:
+        report = _merged_report(False)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        header, local_row = list(rows[3]), list(rows[4])
+        rows[4][2] = "FOREIGN-LC"
+        foreign_label = [""] * len(header)
+        foreign_label[0] = "Foreign"
+        local_label = [""] * len(header)
+        local_label[0] = "31. Local"
+        rows.insert(4, foreign_label)
+        rows[6:6] = [local_label, header, local_row]
+        for lc, expected_row in (("FOREIGN-LC", 5), ("1345260400434", 8)):
+            with self.subTest(lc=lc):
+                analysis = extract_structured_ud_analysis(
+                    report=report, context=StructuredUDExtractionContext(lc),
+                )
+                self.assertEqual(analysis.extracted_lc_sc_value, "17375.8")
+                self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], expected_row)
+
+    def test_merged_blank_increase_does_not_shift_total_into_value(self) -> None:
+        report = _merged_report(True)
+        report["pages"][0]["tables"][0]["rows"][4][10] = ""
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("201260400935"),
+        )
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
+    def test_merged_missing_office_number_does_not_use_date_or_other_row(self) -> None:
+        report = _merged_report(True)
+        report["pages"][0]["tables"][0]["rows"][1][2] = ""
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("201260400935"),
+        )
+        self.assertIsNone(analysis.extracted_document_number)
+        self.assertEqual(analysis.extracted_document_date, "2026-04-12")
+
+    def test_merged_table_stops_at_next_section(self) -> None:
+        report = _merged_report(True)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        rows[4][1] = "OTHER-LC"
+        rows[6] = list(rows[4])
+        rows[6][1] = "201260400935"
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("201260400935"),
+        )
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
+    def test_merged_quantity_headers_repeat_without_double_counting(self) -> None:
+        report = _merged_report(True)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        header = list(rows[7])
+        second_supplier_row = rows.pop(9)
+        report["pages"].append({"page_number": 2, "tables": [{
+            "table_index": 1, "rows": [header, second_supplier_row],
+        }]})
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("201260400935"),
+        )
+        self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "21390"})
+
     def test_extracts_base_ud_properties_from_layered_tables(self) -> None:
         analysis = extract_structured_ud_analysis(
             report=_base_report(),
@@ -327,6 +413,36 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "78255.5")
         self.assertEqual(analysis.extracted_lc_sc_provenance["table_index"], 31)
         self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 0)
+
+
+def _merged_report(amendment: bool) -> dict:
+    # Reproduce the September PDFs' page-wide grids, embedded section headers,
+    # and spacer-column positions. Data stays aligned to header columns even
+    # when a real value is missing (removing empty data cells would be unsafe).
+    report = _amendment_report() if amendment else _base_report()
+    tables = report["pages"][0]["tables"]
+    width = 21
+
+    def spread(row, columns):
+        result = [""] * width
+        for column, value in zip(columns, row):
+            result[column] = value
+        return result
+
+    office_columns = [0, 2, 7, 8] if amendment else [0, 5, 14, 17]
+    lc_columns = [0, 1, 6, 7, 10, 13] if amendment else [0, 2, 3, 5, 7, 9]
+    quantity_columns = [0, 3, 4, 6, 8, 9, 10] if amendment else [0, 5, 7, 10, 12, 13, 16]
+    rows = [
+        spread(["Application details"], [0]),
+        spread(tables[1]["rows"][1], office_columns),
+        spread(["Back to Back L/C"], [0]),
+        *[spread(row, lc_columns) for row in tables[2]["rows"]],
+        spread(["Other section"], [0]),
+        spread(["unrelated", "999999"], [0, 1]),
+        *[spread(row, quantity_columns) for row in tables[3]["rows"]],
+    ]
+    report["pages"][0]["tables"] = [{"table_index": 1, "rows": rows}]
+    return report
 
 
 def _base_report() -> dict:

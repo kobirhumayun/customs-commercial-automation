@@ -131,6 +131,16 @@ def _extract_document_number_and_date(
             if label_index is None:
                 continue
             document_number = _row_value(row, cell_index=label_index + 1)
+            if document_number is None:
+                # Merged page tables insert empty columns inside the label/value spans.
+                # Stay on the office-use-only row and stop at its Date label.
+                for cell in row[label_index + 1:]:
+                    value = _clean_cell(cell)
+                    if value.casefold() == "date":
+                        break
+                    if value:
+                        document_number = value
+                        break
             document_date = _row_date_after_index(row, start_index=label_index + 1)
             return (
                 document_number,
@@ -190,7 +200,7 @@ def _collect_lc_section_tables(
     collected: list[dict[str, Any]] = []
     in_section = False
 
-    for table in _iter_tables(report):
+    for table in _iter_section_tables(report, header_needle=header_needle):
         rows = table["rows"]
         if not rows:
             continue
@@ -253,12 +263,14 @@ def _find_lc_table_row_for_identifier(
                 "provenance": {
                     "page_number": table["page_number"],
                     "table_index": table["table_index"],
-                    "row_index": row_index,
+                    "row_index": row_index + table.get("row_offset", 0),
                     "matched_identifier": exact_identifier,
                     "table_identifier": identifier,
                     "identifier_source": identifier_source,
                     "match_strategy": match_strategy,
-                    "value_column_index": effective_value_column,
+                    "value_column_index": table.get("column_indexes", {}).get(
+                        effective_value_column, effective_value_column
+                    ),
                     "value_strategy": value_strategy,
                     "extraction_method": "structured_table",
                 },
@@ -309,7 +321,7 @@ def _extract_supplier_quantities(
     started = False
     provenance_tables: list[dict[str, int]] = []
 
-    for table in _iter_tables(report):
+    for table in _iter_section_tables(report, header_needle=header_needle):
         rows = table["rows"]
         if not rows:
             continue
@@ -351,6 +363,56 @@ def _extract_supplier_quantities(
         {unit: _format_decimal(amount) for unit, amount in sorted(totals.items())},
         {"extraction_method": "structured_table", "tables": provenance_tables},
     )
+
+
+def _iter_section_tables(
+    report: dict[str, Any], *, header_needle: str
+) -> list[dict[str, Any]]:
+    """Project merged UD sections using header columns, never data-cell emptiness.
+
+    Old standalone tables pass through unchanged. New page-wide tables can contain
+    several sections with different column spans. Keep physical source coordinates
+    so LC provenance still refers to the original extraction report.
+    """
+    result: list[dict[str, Any]] = []
+    for table in _iter_tables(report):
+        rows = table["rows"]
+        headers = []
+        for index, row in enumerate(rows):
+            columns = [i for i, cell in enumerate(row) if _clean_cell(cell)]
+            cells = [_clean_cell(row[i]).upper() for i in columns]
+            is_lc = (
+                len(cells) >= 6
+                and cells[0] == "SL NO"
+                and header_needle in cells[1]
+            )
+            is_quantity = (
+                len(cells) == 7
+                and header_needle in cells[0]
+                and cells[1:5] == ["QTY", "UNIT", "NET WEIGHT", "UNIT"]
+            )
+            if is_lc or is_quantity:
+                headers.append((index, columns))
+        if not headers or (len(headers) == 1 and headers[0] == (0, list(range(len(rows[0]))))):
+            result.append(table)
+            continue
+        for header_index, (start, columns) in enumerate(headers):
+            end = headers[header_index + 1][0] if header_index + 1 < len(headers) else len(rows)
+            for index in range(start + 1, end):
+                populated = [_clean_cell(cell) for cell in rows[index] if _clean_cell(cell)]
+                if len(populated) == 1 and populated[0].upper() != "FOREIGN":
+                    end = index
+                    break
+            result.append({
+                **table,
+                "rows": [
+                    [row[column] if column < len(row) else "" for column in columns]
+                    for row in rows[start:end]
+                ],
+                "row_offset": start,
+                "column_indexes": dict(enumerate(columns)),
+            })
+    return result
 
 
 def _iter_tables(report: dict[str, Any]) -> list[dict[str, Any]]:
