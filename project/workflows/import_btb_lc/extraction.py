@@ -627,6 +627,12 @@ def _collect_brac_primary_related_export_lc_candidate(
     patterns = (
         re.compile(
             r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
+            r"EXPORT\s+LC\s*:\s*"
+            + identifier
+            + date_boundary
+        ),
+        re.compile(
+            r"(?is)\bALL\s+SHIPPING\s+DOCUMENTS\s+MUST\s+BEAR\s+THE\s+"
             r"L\s*/\s*C\s+NUMBER\s+WITH\s+DATE(?:\s+AND)?\s+"
             r"EXPORT\s+(?:L\s*/\s*C|LC)\s+(?:NO|NUMBER)\s*[.:#-]*\s*"
             + identifier

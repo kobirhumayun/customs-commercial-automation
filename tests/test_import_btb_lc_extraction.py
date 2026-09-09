@@ -167,6 +167,68 @@ class ReportedImportBTBLCRegressionTests(unittest.TestCase):
 
 
 class ImportBTBLCExtractionTests(unittest.TestCase):
+    def test_brac_export_lc_colon_reported_clauses(self) -> None:
+        cases = (
+            ("3085260408180", "0000223260401619", "LC-223260401619",
+             "ALL SHIPPING DOCUMENTS MUST BEAR THE EXPORT LC:\n"
+             "0000223260401619 DATED 31-08-2026 AND\nSALES CONTRACT NO.\n"
+             "DFL/ZARA TRF/20/2026 DATED 10-05-2026."),
+            ("3085260408016", "1558260400466", "LC-1558260400466",
+             "ALL SHIPPING DOCUMENTS MUST BEAR THE\n"
+             "EXPORT LC: 1558260400466 DATE 18-08-2026\n"
+             "AND SALES CONTRACT NO: ZARA/TISWL/L-13/2026\nDATED 02-07-2026."),
+            ("3085260408017", "0000223260401608", "LC-223260401608",
+             "ALL SHIPPING DOCUMENTS MUST BEAR THE\n"
+             "EXPORT LC: 0000223260401608 DATE 27-08-2026\n"
+             "AND SALES CONTRACT NO: KDS/4551/601/602/2026\nDATED 09-08-2026."),
+        )
+        for number, raw, canonical, clause in cases:
+            with self.subTest(number=number):
+                artifact = _extract_synthetic(
+                    _sample_text(btb_number=number, related_text=clause),
+                    filename=f"{number}.pdf",
+                )
+                field = artifact["fields"]["related_export_lc_number"]
+                self.assertEqual(artifact["overall_extraction_decision"], "pass")
+                self.assertEqual(field["raw"], raw)
+                self.assertEqual(field["canonical"], canonical)
+                self.assertEqual(len(field["matches"]), 1)
+                self.assertEqual(field["page_number"], 1)
+
+    def test_brac_export_lc_colon_keeps_first_clause_precedence(self) -> None:
+        clauses = (
+            ("EXPORT LC: 0000223260401619", "LC-223260401619"),
+            ("EXPORT NO. 1558260400466", "LC-1558260400466"),
+        )
+        for ordered in (clauses, clauses[::-1]):
+            with self.subTest(first=ordered[0][0]):
+                text = " ".join(
+                    f"ALL SHIPPING DOCUMENTS MUST BEAR THE {label} DATED 31-08-2026."
+                    for label, _ in ordered
+                )
+                artifact = _extract_synthetic(
+                    _sample_text(btb_number="3085260408180", related_text=text)
+                )
+                field = artifact["fields"]["related_export_lc_number"]
+                self.assertEqual(field["canonical"], ordered[0][1])
+                self.assertEqual(len(field["matches"]), 1)
+
+    def test_brac_export_lc_colon_requires_bank_clause_and_date_boundary(self) -> None:
+        clause = "ALL SHIPPING DOCUMENTS MUST BEAR THE EXPORT LC: 1558260400466"
+        cases = (
+            ("0742260401049", clause + " DATE 18-08-2026"),
+            ("3085260408180", clause),
+            ("3085260408180", "EXPORT LC: 1558260400466 DATE 18-08-2026"),
+        )
+        for number, text in cases:
+            with self.subTest(number=number, text=text):
+                artifact = _extract_synthetic(
+                    _sample_text(btb_number=number, related_text=text)
+                )
+                field = artifact["fields"]["related_export_lc_number"]
+                self.assertIsNone(field["canonical"])
+                self.assertEqual(field["validation"]["status"], "hard_block")
+
     def test_all_bank_number_patterns_and_invalid_variants(self) -> None:
         valid_numbers = [
             "0742260401049",
