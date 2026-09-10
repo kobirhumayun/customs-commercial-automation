@@ -400,7 +400,15 @@ def _iter_section_tables(
             end = headers[header_index + 1][0] if header_index + 1 < len(headers) else len(rows)
             for index in range(start + 1, end):
                 populated = [_clean_cell(cell) for cell in rows[index] if _clean_cell(cell)]
-                if len(populated) == 1 and populated[0].upper() != "FOREIGN":
+                # Local/Foreign are in-table LC group labels, not section ends.
+                # Keep the exception scoped to LC tables; supplier boundaries
+                # and all other single-cell section markers retain their meaning.
+                is_local_lc_label = (
+                    header_needle == "IMPORT L/C NO"
+                    and len(populated) == 1
+                    and populated[0].upper() == "LOCAL"
+                )
+                if len(populated) == 1 and populated[0].upper() != "FOREIGN" and not is_local_lc_label:
                     end = index
                     break
             result.append({

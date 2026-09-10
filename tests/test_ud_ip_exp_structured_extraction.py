@@ -9,6 +9,38 @@ from project.workflows.ud_ip_exp.structured_extraction import (
 
 
 class UDIPEXPStructuredExtractionTests(unittest.TestCase):
+    def test_merged_base_ud_local_label_keeps_lc_rows_and_source_coordinates(self) -> None:
+        report = _merged_report(False)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        local_label = [""] * len(rows[3])
+        local_label[0] = "Local"
+        rows.insert(4, local_label)
+
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("1345260400434"),
+        )
+
+        self.assertEqual(analysis.extracted_lc_sc_value, "17375.8")
+        self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-16")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 5)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["value_column_index"], 5)
+
+    def test_merged_local_lc_section_still_stops_at_unrelated_section(self) -> None:
+        report = _merged_report(False)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        target_row = list(rows[4])
+        rows[4][2] = "OTHER-LC"
+        local_label = [""] * len(rows[3])
+        local_label[0] = "Local"
+        rows.insert(4, local_label)
+        rows[7] = target_row  # After the existing section boundary, outside LC data.
+
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("1345260400434"),
+        )
+
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
     def test_merged_page_tables_preserve_all_base_and_amendment_values(self) -> None:
         for amendment, lc in ((False, "1345260400434"), (True, "201260400935")):
             with self.subTest(amendment=amendment):
