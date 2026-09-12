@@ -189,7 +189,98 @@ def _extract_lc_table_row(
         )
         if match is not None:
             return match
+    if document_subtype == "ud_amendment":
+        # Preserve successful legacy extraction; recover only unresolved rows in
+        # the observed headerless continuation layout.
+        continuation_tables = _amendment_continuation_tables(report)
+        for identifier_source, exact_identifier in priority_identifiers:
+            match = _find_lc_table_row_for_identifier(
+                tables=continuation_tables,
+                exact_identifier=exact_identifier,
+                identifier_source=identifier_source,
+                document_subtype=document_subtype,
+                context=context,
+                value_column=value_column,
+            )
+            if match is not None:
+                return match
     return None
+
+
+def _amendment_continuation_tables(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recover the observed 12-column page grid without collapsing empty values.
+
+    A recognized LC header and consecutive serials on the preceding page establish
+    section ownership. Only the leading continuation rows are projected; a new
+    section, subtotal, or unexpected row ends the continuation.
+    """
+    columns = [0, 1, 4, 5, 7, 9, 11]
+    spacers = [2, 3, 6, 8, 10]
+    result: list[dict[str, Any]] = []
+    previous_page = 0
+    last_serial: int | None = None
+    for table in _iter_tables(report):
+        rows = table["rows"]
+        continuation_rows = []
+        if table["page_number"] == previous_page + 1 and last_serial is not None:
+            for row in rows:
+                if len(row) != 12 or any(_clean_cell(row[i]) for i in spacers):
+                    break
+                projected = [row[i] for i in columns]
+                if not _amendment_lc_data_row(projected, last_serial + 1):
+                    break
+                continuation_rows.append(projected)
+                last_serial += 1
+        if continuation_rows:
+            result.append({
+                **table,
+                "rows": continuation_rows,
+                "column_indexes": dict(enumerate(columns)),
+            })
+
+        active_columns = columns if continuation_rows else None
+        if not continuation_rows:
+            last_serial = None
+        for row in rows[len(continuation_rows):]:
+            populated = [i for i, cell in enumerate(row) if _clean_cell(cell)]
+            cells = [_clean_cell(row[i]) for i in populated]
+            if (
+                len(cells) == 7
+                and cells[0].upper() == "SL NO"
+                and "BACK-TO-BACK" in cells[1].upper()
+                and cells[2].upper() == "DATE"
+                and cells[3].upper() == "VALUE"
+                and re.sub(r"\s+", "", cells[4]).upper() == "INCREASED/DECREASED"
+                and cells[5].upper() == "TOTAL VALUE"
+                and cells[6].upper() == "TOLERANCE"
+            ):
+                active_columns = populated
+                last_serial = None
+                continue
+            if not cells or (len(cells) == 1 and "SIGNATURE OF BONDER" in cells[0].upper()):
+                continue
+            if active_columns is not None:
+                projected = [row[i] if i < len(row) else "" for i in active_columns]
+                if _amendment_lc_data_row(projected, 1 if last_serial is None else last_serial + 1):
+                    last_serial = int(_clean_cell(projected[0]))
+                    continue
+            active_columns = None
+            last_serial = None
+        previous_page = table["page_number"]
+    return result
+
+
+def _amendment_lc_data_row(row: list[str], expected_serial: int) -> bool:
+    if _clean_cell(row[0]) != str(expected_serial) or not _clean_cell(row[1]):
+        return False
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalize_lc_sc_date(_clean_cell(row[2])) or ""):
+        return False
+    # Empty monetary cells remain empty so the normal required-field gate blocks
+    # missing values. They must never shift Total Value into Increased/Decreased.
+    return all(
+        not _clean_cell(value) or re.fullmatch(r"[A-Z]{3}\s+-?[\d,]+(?:\.\d+)?", _clean_cell(value))
+        for value in row[3:6]
+    ) and bool(re.fullmatch(r"\d+(?:\.\d+)?", _clean_cell(row[6])))
 
 
 def _collect_lc_section_tables(
@@ -400,7 +491,15 @@ def _iter_section_tables(
             end = headers[header_index + 1][0] if header_index + 1 < len(headers) else len(rows)
             for index in range(start + 1, end):
                 populated = [_clean_cell(cell) for cell in rows[index] if _clean_cell(cell)]
-                if len(populated) == 1 and populated[0].upper() != "FOREIGN":
+                # Local/Foreign are in-table LC group labels, not section ends.
+                # Keep the exception scoped to LC tables; supplier boundaries
+                # and all other single-cell section markers retain their meaning.
+                is_local_lc_label = (
+                    header_needle == "IMPORT L/C NO"
+                    and len(populated) == 1
+                    and populated[0].upper() == "LOCAL"
+                )
+                if len(populated) == 1 and populated[0].upper() != "FOREIGN" and not is_local_lc_label:
                     end = index
                     break
             result.append({

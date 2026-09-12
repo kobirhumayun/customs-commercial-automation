@@ -9,6 +9,88 @@ from project.workflows.ud_ip_exp.structured_extraction import (
 
 
 class UDIPEXPStructuredExtractionTests(unittest.TestCase):
+    def test_amendment_headerless_continuation_with_changed_grid(self) -> None:
+        for repeated_header in (False, True):
+            with self.subTest(repeated_header=repeated_header):
+                report = _headerless_amendment_report(repeated_header)
+                analysis = extract_structured_ud_analysis(
+                    report=report, context=StructuredUDExtractionContext("ERP-LC", "201260400935"),
+                )
+                self.assertEqual(analysis.extracted_lc_sc_number, "ERP-LC")
+                self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-09")
+                self.assertEqual(analysis.extracted_lc_sc_value, "89675")
+                self.assertEqual(analysis.extracted_lc_sc_value_currency, "USD")
+                self.assertEqual(analysis.extracted_lc_sc_provenance["page_number"], 2)
+                self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 0)
+                self.assertEqual(analysis.extracted_lc_sc_provenance["value_column_index"], 5)
+                self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "21390"})
+
+    def test_headerless_amendment_preserves_increase_and_missing_value_rules(self) -> None:
+        for increase, expected, column in (("USD 100.00", "100", 7), ("", None, None)):
+            with self.subTest(increase=increase):
+                report = _headerless_amendment_report(False)
+                report["pages"][1]["tables"][0]["rows"][0][7] = increase
+                analysis = extract_structured_ud_analysis(
+                    report=report, context=StructuredUDExtractionContext("201260400935"),
+                )
+                self.assertEqual(analysis.extracted_lc_sc_value, expected)
+                if column is not None:
+                    self.assertEqual(analysis.extracted_lc_sc_provenance["value_column_index"], column)
+
+    def test_headerless_amendment_requires_section_and_continuation_evidence(self) -> None:
+        for defect in ("no_header", "serial_gap", "page_gap", "spacer_value", "after_subtotal"):
+            with self.subTest(defect=defect):
+                report = _headerless_amendment_report(False)
+                previous = report["pages"][0]["tables"][2]["rows"]
+                page = report["pages"][1]
+                rows = page["tables"][0]["rows"]
+                if defect == "no_header":
+                    previous[0][1] = "Other table"
+                elif defect == "serial_gap":
+                    rows[0][0] = "9"
+                elif defect == "page_gap":
+                    page["page_number"] = 3
+                elif defect == "spacer_value":
+                    rows[0][2] = "Unexpected value"
+                else:
+                    rows.insert(0, ["Total Value: USD 100"] + [""] * 11)
+                analysis = extract_structured_ud_analysis(
+                    report=report, context=StructuredUDExtractionContext("201260400935"),
+                )
+                self.assertIsNone(analysis.extracted_lc_sc_value)
+
+    def test_merged_base_ud_local_label_keeps_lc_rows_and_source_coordinates(self) -> None:
+        report = _merged_report(False)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        local_label = [""] * len(rows[3])
+        local_label[0] = "Local"
+        rows.insert(4, local_label)
+
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("1345260400434"),
+        )
+
+        self.assertEqual(analysis.extracted_lc_sc_value, "17375.8")
+        self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-16")
+        self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 5)
+        self.assertEqual(analysis.extracted_lc_sc_provenance["value_column_index"], 5)
+
+    def test_merged_local_lc_section_still_stops_at_unrelated_section(self) -> None:
+        report = _merged_report(False)
+        rows = report["pages"][0]["tables"][0]["rows"]
+        target_row = list(rows[4])
+        rows[4][2] = "OTHER-LC"
+        local_label = [""] * len(rows[3])
+        local_label[0] = "Local"
+        rows.insert(4, local_label)
+        rows[7] = target_row  # After the existing section boundary, outside LC data.
+
+        analysis = extract_structured_ud_analysis(
+            report=report, context=StructuredUDExtractionContext("1345260400434"),
+        )
+
+        self.assertIsNone(analysis.extracted_lc_sc_value)
+
     def test_merged_page_tables_preserve_all_base_and_amendment_values(self) -> None:
         for amendment, lc in ((False, "1345260400434"), (True, "201260400935")):
             with self.subTest(amendment=amendment):
@@ -413,6 +495,44 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "78255.5")
         self.assertEqual(analysis.extracted_lc_sc_provenance["table_index"], 31)
         self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 0)
+
+
+def _headerless_amendment_report(repeated_header: bool) -> dict:
+    report = _amendment_report()
+    tables = report["pages"][0]["tables"]
+    supplier_table = tables.pop()
+    header = ["SL No", "Back-to-Back LC/Sight/Usance", "Date", "Value",
+              "Increased/Decreased", "Total Value", "Tolerance"]
+
+    def spread(row, columns, width):
+        result = [""] * width
+        for column, value in zip(columns, row):
+            result[column] = value
+        return result
+
+    # The two observed PDFs change from 15/19-column page grids to 12 columns.
+    columns = [0, 1, 6, 8, 12, 16, 18] if repeated_header else [0, 1, 5, 7, 10, 13, 14]
+    width = 19 if repeated_header else 15
+    tables[2]["rows"] = [
+        spread(header, columns, width),
+        spread(["1", "OTHER-LC", "2026-03-01", "USD 100", "USD 0", "USD 100", "5"], columns, width),
+        spread(["Signature of Bonder/Authorized Person"], [0], width),
+    ]
+    columns = [0, 1, 4, 5, 7, 9, 11]
+    rows = [spread(["2", "201260400935", "2026-03-09", "USD 89,675.00", "USD 0.00", "USD 89,675.00", "5"], columns, 12)]
+    if repeated_header:
+        rows.extend([
+            ["(2) FTT"] + [""] * 11,
+            spread(header, columns, 12),
+            spread(["1", "FTT-LC", "2026-03-09", "USD 999", "USD 0", "USD 999", "5"], columns, 12),
+        ])
+    rows.extend([
+        ["Total Value: USD 999 Note: (j) Change of quantity of garments"] + [""] * 11,
+        ["SL No", "Style No", "HS Code", "Description of garments"] + [""] * 8,
+    ])
+    report["pages"].append({"page_number": 2, "tables": [{"table_index": 1, "rows": rows}]})
+    report["pages"].append({"page_number": 3, "tables": [supplier_table]})
+    return report
 
 
 def _merged_report(amendment: bool) -> dict:
