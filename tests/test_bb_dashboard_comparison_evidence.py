@@ -72,3 +72,82 @@ class ComparisonEvidenceTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "OK")
         with self.assertRaises(InvalidOperation):
             _compare_value_and_quantity(dashboard_lc_value=_parse_decimal("NaN"), quantity_sum=Decimal("100"), aggregate=self.erp)
+
+    def rules(self, snapshot=None, aggregate=None, family=None):
+        evidence = _build_comparison_evidence(
+            family=family or self.family, aggregate=aggregate or self.erp, snapshot=snapshot or self.snapshot,
+        )
+        return {rule["rule_id"]: rule for rule in evidence["rule_results"]}
+
+    def test_mixed_numeric_failures_explain_both_relations(self):
+        for value, quantity, value_status, quantity_status in (
+            ("1100", "90", "pass", "fail"), ("900", "120", "fail", "fail"),
+            ("1100", "100", "pass", "pass"),
+        ):
+            with self.subTest(value=value, quantity=quantity):
+                rules = self.rules(replace(self.snapshot, lc_value=value, commodity_quantities=[quantity]))
+                self.assertEqual(rules["value_floor"]["status"], value_status)
+                self.assertEqual(rules["lc_quantity_match"]["status"], quantity_status)
+                self.assertEqual(rules["excess_alternative"]["status"], "fail")
+                self.assertIn("Both must be higher", rules["excess_alternative"]["reason"])
+
+    def test_bad_value_does_not_hide_independent_quantity_failure(self):
+        rules = self.rules(replace(self.snapshot, lc_value="invalid", commodity_quantities=["90"]))
+        self.assertEqual(rules["value_floor"]["status"], "unavailable")
+        self.assertEqual(rules["lc_quantity_match"]["status"], "fail")
+        self.assertEqual(rules["excess_alternative"]["status"], "unavailable")
+
+    def test_alternative_paths_and_single_buyer_section(self):
+        rules = self.rules()
+        self.assertEqual(rules["exact_value_quantity"]["status"], "pass")
+        self.assertEqual(rules["kgs_alternative"]["status"], "not_applicable")
+        self.assertEqual(rules["erc_buyer"]["status"], "not_applicable")
+        self.assertEqual(rules["irc_buyer"]["status"], "pass")
+        rules = self.rules(replace(self.snapshot, commodity_quantities=["80.79"]))
+        self.assertEqual(rules["kgs_alternative"]["status"], "pass")
+        self.assertEqual(rules["lc_quantity_match"]["status"], "not_applicable")
+        self.assertEqual(rules["excess_alternative"]["status"], "not_applicable")
+        rules = self.rules(replace(self.snapshot, commodity_quantities=["80.81"]))
+        self.assertEqual(rules["kgs_alternative"]["status"], "fail")
+        rules = self.rules(replace(self.snapshot, commodity_quantities=["90"]), aggregate=replace(self.erp, net_weight=None))
+        self.assertEqual(rules["kgs_alternative"]["status"], "unavailable")
+        self.assertIn("net weight is missing", rules["kgs_alternative"]["reason"])
+
+    def test_excess_reports_minimum_and_ratio_even_when_both_fail(self):
+        for value, quantity, minimum, ratio in (("1050", "190", "fail", "fail"), ("1100", "120", "pass", "pass"), ("1100", "180", "pass", "pass")):
+            with self.subTest(value=value, quantity=quantity):
+                rules = self.rules(replace(self.snapshot, lc_value=value, commodity_quantities=[quantity]))
+                self.assertEqual(rules["excess_minimum"]["status"], minimum)
+                self.assertEqual(rules["excess_quantity_range"]["status"], ratio)
+                if minimum == ratio == "pass":
+                    self.assertEqual(rules["lc_quantity_match"]["status"], "not_applicable")
+
+    def test_expiry_checks_have_independent_outcomes_and_offsets(self):
+        rules = self.rules(replace(self.snapshot, lc_expiry_date="2026-02-04"))
+        self.assertEqual(rules["expiry_order"]["status"], "fail")
+        self.assertEqual(rules["dashboard_expiry_window"]["status"], "fail")
+        self.assertIn("3 days", rules["dashboard_expiry_window"]["reason"])
+        self.assertEqual(rules["erp_expiry_window"]["status"], "pass")
+
+    def test_missing_malformed_and_nonoverlapping_inputs_are_distinct(self):
+        for raw, expected in (("", "missing"), ("invalid", "malformed")):
+            rules = self.rules(replace(self.snapshot, lc_date=raw))
+            self.assertEqual(rules["lc_date"]["status"], "unavailable")
+            self.assertIn(expected, rules["lc_date"]["reason"])
+        rules = self.rules(replace(self.snapshot, lc_date="invalid"), aggregate=replace(self.erp, lc_date="invalid"))
+        self.assertIn("treats two unparseable dates as equal", rules["lc_date"]["reason"])
+        rules = self.rules(replace(self.snapshot, foreign_lc_numbers=[]), family=replace(self.family, master_lc_values=[]))
+        self.assertIn("Workbook Master", rules["foreign_lc_overlap"]["reason"])
+        self.assertIn("Dashboard Foreign", rules["foreign_lc_overlap"]["reason"])
+        rules = self.rules(replace(self.snapshot, foreign_lc_numbers=["different"]))
+        self.assertIn("Both reference lists are populated", rules["foreign_lc_overlap"]["reason"])
+        rules = self.rules(replace(self.snapshot, commodity_quantities=["100", "oops"]))
+        self.assertIn("invalid", rules["dashboard_quantity_row_2"]["reason"])
+        self.assertEqual(rules["lc_quantity_match"]["status"], "unavailable")
+
+    def test_rule_explanations_render_and_legacy_evidence_still_renders(self):
+        html = _render_comparison_evidence([{"comparison_evidence": self.evidence()}])
+        self.assertIn("<th>Prerequisites</th>", html)
+        self.assertIn("dashboard_expiry_window", html)
+        self.assertIn("not_applicable", html)
+        self.assertIn("Comparison Evidence", _render_comparison_evidence([{"comparison_evidence": {"fields": []}}]))

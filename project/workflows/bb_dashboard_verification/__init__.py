@@ -1305,7 +1305,10 @@ def _build_comparison_evidence(
 ) -> dict[str, object]:
     """Report-only observations; never used to select decisions or workbook writes."""
     if aggregate is None or snapshot is None:
-        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None}
+        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None,
+                "rule_results": [{"rule_id": "comparison_inputs", "status": "unavailable",
+                                  "prerequisites": "ERP aggregate and dashboard snapshot",
+                                  "reason": "ERP aggregate or dashboard snapshot is missing; see family decision and search attempts."}]}
 
     fields: list[dict[str, object]] = []
 
@@ -1364,10 +1367,132 @@ def _build_comparison_evidence(
     return {
         "availability": "available", "fields": fields,
         "numeric_rule_status": numeric_status, "numeric_rule_reasons": numeric_reasons,
+        "rule_results": _build_rule_results(family=family, aggregate=aggregate, snapshot=snapshot,
+                                            numeric_status=numeric_status),
         "numeric_rule": "OK: value/quantity match, or value excess >= 100 and quantity excess 20%-80% of value excess. OK (KGS): value matches and quantity matches net weight within 0.8. Other checks must also pass.",
         "input_observations": ["Blank commodity quantity entries are omitted by the existing summation rule."]
         if any(not str(value).strip() for value in snapshot.commodity_quantities) else [],
     }
+
+
+def _build_rule_results(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate,
+    snapshot: DashboardFamilySnapshot, numeric_status: str | None,
+) -> list[dict[str, str]]:
+    """Explain independent checks and alternative paths without changing decisions."""
+    results: list[dict[str, str]] = []
+
+    def add(rule_id: str, status: str, reason: str, prerequisites: str = "None") -> None:
+        results.append(dict(rule_id=rule_id, status=status, reason=reason, prerequisites=prerequisites))
+
+    beneficiary = _normalize_special_text(snapshot.beneficiary_name)
+    add("beneficiary", "pass" if beneficiary == _normalize_special_text(_PIONEER_BENEFICIARY) else "fail",
+        "Beneficiary is missing/empty after normalization." if not beneficiary else
+        f"Normalized beneficiary '{beneficiary}'; expected '{_PIONEER_BENEFICIARY}'.")
+    buyer = _normalize_buyer_comparison_text(aggregate.buyer_name)
+    sections = {"irc": _normalize_buyer_comparison_text(snapshot.irc_details),
+                "erc": _normalize_buyer_comparison_text(snapshot.erc_details)}
+    add("buyer_section_present", "pass" if any(sections.values()) else "fail",
+        "At least one populated buyer section is required; " +
+        ("a section is populated." if any(sections.values()) else "both IRC and ERC are empty after normalization."))
+    for name, value in sections.items():
+        if not value:
+            add(name + "_buyer", "not_applicable", "Section is empty; the populated-section rule determines whether another section is required.")
+        elif not buyer:
+            add(name + "_buyer", "unavailable", "ERP buyer is empty after normalization; existing containment behavior is unchanged.", "Nonempty normalized ERP buyer")
+        else:
+            add(name + "_buyer", "pass" if buyer in value else "fail",
+                f"Normalized section '{value}' {'contains' if buyer in value else 'does not contain'} ERP buyer '{buyer}'.")
+
+    def date_check(rule_id: str, start: str, end: str, minimum: int, maximum: int | None, labels: str) -> None:
+        left, right = _normalize_date(start), _normalize_date(end)
+        invalid = [f"{label} is {'missing' if not str(raw).strip() else 'malformed'} ({raw!r})"
+                   for label, raw, parsed in (("start date", start, left), ("end date", end, right)) if parsed is None]
+        if invalid:
+            reason = labels + ": " + "; ".join(invalid) + "."
+            if rule_id == "lc_date" and left is None and right is None:
+                reason += " Existing LC-date equality treats two unparseable dates as equal; family decision is unchanged."
+            add(rule_id, "unavailable", reason, "Two parseable dates")
+            return
+        days = _days_between_dates(start_date=left, end_date=right)
+        passed = days >= minimum and (maximum is None or days <= maximum)
+        bound = f"{minimum} through {maximum} inclusive" if maximum is not None else f"at least {minimum}"
+        add(rule_id, "pass" if passed else "fail", f"{labels}: {days} days; required {bound} days.", "Two parseable dates")
+
+    date_check("lc_date", aggregate.lc_date, snapshot.lc_date, 0, 0, "ERP LC date to dashboard LC date")
+    date_check("shipment_offset", aggregate.ship_date, snapshot.last_date_of_shipment, 0, _MAX_SHIPMENT_DATE_OFFSET_DAYS, "ERP shipment to dashboard shipment")
+    date_check("expiry_order", aggregate.expiry_date, snapshot.lc_expiry_date, 0, None, "ERP expiry to dashboard expiry")
+    date_check("dashboard_expiry_window", snapshot.last_date_of_shipment, snapshot.lc_expiry_date, _EXPIRY_MIN_OFFSET_DAYS, _EXPIRY_MAX_OFFSET_DAYS, "Dashboard shipment to dashboard expiry")
+    date_check("erp_expiry_window", aggregate.ship_date, aggregate.expiry_date, _EXPIRY_MIN_OFFSET_DAYS, _EXPIRY_MAX_OFFSET_DAYS, "ERP shipment to ERP expiry")
+
+    references = {value for raw in family.master_lc_values if (value := _normalize_foreign_lc_reference(raw))}
+    foreign = {value for raw in snapshot.foreign_lc_numbers if (value := _normalize_foreign_lc_reference(raw))}
+    missing = []
+    if not references:
+        missing.append("Workbook Master L/C No. has no usable reference")
+    if not foreign:
+        missing.append("Dashboard Foreign LC No. has no usable reference")
+    overlap = sorted(references & foreign)
+    add("foreign_lc_overlap", "pass" if overlap else "fail",
+        "; ".join(missing) if missing else (f"Common normalized references: {', '.join(overlap)}." if overlap else "Both reference lists are populated, but no normalized reference overlaps."))
+
+    def number(raw: object, label: str) -> Decimal | None:
+        parsed = _parse_decimal(raw)
+        if parsed is None or not parsed.is_finite():
+            add(label, "unavailable", f"{label}: {'missing' if not str(raw).strip() else 'invalid or nonfinite'} value {raw!r}.")
+            return None
+        return parsed
+
+    value = number(snapshot.lc_value, "dashboard_value_input")
+    erp_value = number(aggregate.current_lc_value, "erp_value_input")
+    erp_quantity = number(aggregate.lc_qty, "erp_quantity_input")
+    parsed_quantities = [number(raw, f"dashboard_quantity_row_{index}")
+                         for index, raw in enumerate(snapshot.commodity_quantities, 1) if str(raw).strip()]
+    if not parsed_quantities:
+        add("dashboard_quantity_input", "unavailable", "Dashboard quantity list is empty or contains only blank entries.")
+    quantity = sum(parsed_quantities, Decimal("0")) if parsed_quantities and all(item is not None for item in parsed_quantities) else None
+    blank_count = sum(not str(raw).strip() for raw in snapshot.commodity_quantities)
+    if blank_count:
+        add("quantity_completeness", "unavailable", f"{blank_count} blank quantity entries omitted by existing summation; the total may be partial. Family decision is unchanged.")
+    vr = _decimal_relation(value, erp_value) if value is not None and erp_value is not None else None
+    qr = _decimal_relation(quantity, erp_quantity) if quantity is not None and erp_quantity is not None else None
+    add("value_floor", "unavailable" if vr is None else ("fail" if vr == "lower" else "pass"),
+        "Not evaluated: invalid/missing value input." if vr is None else f"Dashboard LC value is {vr} relative to ERP (tolerance 0.01); lower is rejected.", "Finite ERP and dashboard values")
+    alternate_quantity = qr is not None and qr != "equal" and numeric_status in _COMPLIANT_VALUES
+    add("lc_quantity_match", "unavailable" if qr is None else ("pass" if qr == "equal" else ("not_applicable" if alternate_quantity else "fail")),
+        "Not evaluated: invalid/missing quantity input." if qr is None else
+        f"Dashboard total is {qr} relative to ERP LC quantity (tolerance 0.01). " +
+        (f"Exact quantity equality is not required: the alternative numeric path returned {numeric_status}." if alternate_quantity else
+         "This is the exact-path check; KGS or excess acceptance can override its failure."), "Finite ERP quantity and dashboard total")
+    exact = vr == "equal" and qr == "equal"
+    add("exact_value_quantity", "unavailable" if vr is None or qr is None else ("pass" if exact else "not_applicable"),
+        "Not evaluated: value or quantity input unavailable." if vr is None or qr is None else
+        ("Value and LC quantity match within 0.01." if exact else f"Exact path not satisfied: value is {vr}, quantity is {qr}; alternative paths are evaluated separately."), "Finite values and quantities")
+
+    weight = aggregate.net_weight
+    finite_weight = weight is not None and weight.is_finite()
+    kgs = vr == "equal" and qr is not None and not exact and quantity is not None and finite_weight and _decimal_matches(quantity, weight, tolerance=_NET_WEIGHT_TOLERANCE)
+    if exact or (vr is not None and vr != "equal"):
+        add("kgs_alternative", "not_applicable", "Exact path already passes." if exact else f"KGS requires matching LC value; dashboard value is {vr}.")
+    elif vr is None or qr is None or not finite_weight:
+        add("kgs_alternative", "unavailable", "Not evaluated: matching value, usable quantity and finite ERP net weight are required; " + ("ERP net weight is missing or nonfinite." if not finite_weight else "value/quantity input is unavailable."))
+    else:
+        add("kgs_alternative", "pass" if kgs else "fail", f"Dashboard quantity minus ERP net weight = {_decimal_to_string(quantity - weight)}; absolute tolerance 0.8.")
+
+    if exact or kgs:
+        add("excess_alternative", "not_applicable", "Exact or KGS acceptance path already passes.")
+    elif vr is None or qr is None:
+        add("excess_alternative", "unavailable", "Not evaluated: value or quantity input unavailable.")
+    elif vr != "higher" or qr != "higher":
+        add("excess_alternative", "fail", f"Both must be higher: value is {vr}, quantity is {qr}; excess cannot compensate for a lower or equal field.")
+    else:
+        excess = value - erp_value
+        delta = quantity - erp_quantity
+        low = (excess * _MIN_EXCESS_QUANTITY_RATIO).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        high = (excess * _MAX_EXCESS_QUANTITY_RATIO).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        add("excess_minimum", "pass" if excess >= _MIN_LC_VALUE_EXCESS else "fail", f"Value excess {excess}; minimum {_MIN_LC_VALUE_EXCESS}.")
+        add("excess_quantity_range", "pass" if low <= delta <= high else "fail", f"Quantity excess {delta}; allowed {low} through {high} inclusive (20%-80% of value excess). Both excess checks must pass.")
+    return results
 
 
 def _render_comparison_evidence(families) -> str:
@@ -1376,6 +1501,9 @@ def _render_comparison_evidence(families) -> str:
         if not isinstance(family, dict) or not isinstance(family.get("comparison_evidence"), dict):
             continue
         evidence = family["comparison_evidence"]
+        rule_rows = "".join("<tr>" + "".join(f"<td>{escape(str(rule.get(key, '')))}</td>"
+                            for key in ("rule_id", "status", "prerequisites", "reason")) + "</tr>"
+                            for rule in evidence.get("rule_results", []))
         rows = []
         for field in evidence.get("fields", []):
             rows.append("<tr>" + "".join(
@@ -1390,7 +1518,10 @@ def _render_comparison_evidence(families) -> str:
             f"<p>{escape(str(evidence.get('numeric_rule', '')))}</p>"
             f"<p>{escape('; '.join(evidence.get('numeric_rule_reasons', []) + evidence.get('input_observations', [])))}</p>"
             '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Reference source</th><th>Reference value</th><th>Dashboard value</th><th>Normalized reference</th><th>Normalized dashboard</th><th>Difference (dashboard minus reference; dates in days)</th><th>Rule</th></tr></thead>'
-            f"<tbody>{''.join(rows)}</tbody></table></div></details>"
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
+            "<p>Rule explanations are diagnostic. Alternative paths are not individually required; the family decision above remains authoritative.</p>"
+            '<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Result</th><th>Prerequisites</th><th>Explanation</th></tr></thead>'
+            f"<tbody>{rule_rows}</tbody></table></div></details>"
         )
     return '<section class="section"><h2>Comparison Evidence</h2>' + "".join(sections) + "</section>" if sections else ""
 
