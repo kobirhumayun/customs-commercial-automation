@@ -1038,7 +1038,7 @@ Rows where:
 - within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - `OK (KGS)` when all non-quantity checks above pass, dashboard `LC Value` exactly matches ERP `Current LC Value`, and the summed dashboard quantity does not match ERP `LC Qty` but does match aggregated ERP `Net Weight`
 - if only one of dashboard `LC Value` or dashboard quantity is higher while the other remains equal to ERP, fail the family immediately
-- numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
+- numeric comparisons round each input to 2 decimals with absolute tolerance `0.01`, except the existing ERP Net Weight comparison uses absolute tolerance `0.8` for `OK (KGS)`
 - buyer containment checks for `IRC Details` and `ERC Details` use normalization that may adjust case, whitespace, and special characters
 - within those buyer checks, `ltd` and `limited` are interchangeable equivalents regardless of word position
 - within those buyer checks, the trailing `s` is removed from every normalized word before comparison
@@ -1054,6 +1054,8 @@ Rows where:
 
 ### Reporting
 - This workflow must emit JSON and HTML verification reports even though it has no print phase.
+- Family reports add `comparison_evidence` with source-labeled raw/reference values, normalized comparison values, numeric deltas and date offsets (dashboard minus reference), and applied rules. The numeric rule result identifies accepted excess/KGS differences separately from numeric mismatches; it is not the overall family decision. HTML presents this evidence separately from the unchanged family result table. Missing ERP/dashboard evidence is explicitly unavailable. Existing decisions, status strings, staged writes, and report fields remain authoritative and unchanged.
+- Known edge cases pending approval of any decision changes: blank numeric entries are skipped when summing partially populated lists; two unparseable LC dates compare equal after normalization to `None`; nonfinite decimal inputs may raise during comparison; dashboard settling requires both IRC/ERC although buyer validation permits one populated section. These are investigation findings, not new acceptance rules. Report-only observations do not reclassify these cases.
 - The HTML report must open automatically at the end of the run, regardless of whether families matched or failed.
 - Report rows are family-oriented: one report row per LC family with grouped workbook `SL.No.` values for the filtered rows receiving the family result.
 - Each report row should include the compared workbook, ERP, and dashboard values together with the final workbook value written for that family; the ERP columns shown in the family table include `LC Value`, `LC Qty`, and calculated `Net Weight`.

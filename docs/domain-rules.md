@@ -437,7 +437,7 @@ Comparison rules:
 - if dashboard `LC Value` exceeds ERP by at least `100`, summed dashboard quantity also exceeds ERP `LC Qty`, and quantity excess is between `20%` and `80%` of the value excess inclusive, treat that as compliant and write `OK`
 - if only one of dashboard `LC Value` or summed dashboard quantity is higher while the other remains equal to ERP, fail immediately
 - `OK (KGS)` remains valid only when dashboard `LC Value` exactly matches ERP, summed dashboard quantity fails the ERP `LC Qty` check, and it matches aggregated ERP `Net Weight`
-- numeric comparisons use rounding to 2 decimals with absolute tolerance `0.01`
+- numeric comparisons round each input to 2 decimals with absolute tolerance `0.01`, except the existing ERP Net Weight comparison uses absolute tolerance `0.8` for `OK (KGS)`
 
 Result rules:
 - write `OK` when all required comparisons pass, including either exact LC value/LC qty agreement or the approved excess rule

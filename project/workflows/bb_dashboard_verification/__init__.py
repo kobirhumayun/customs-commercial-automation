@@ -1260,6 +1260,9 @@ def _build_report_family(
         "final_workbook_value": final_workbook_value,
         "decision_reasons": list(decision_reasons),
         "search_attempts": list(search_attempts),
+        "comparison_evidence": _build_comparison_evidence(
+            family=family, aggregate=erp_aggregate, snapshot=dashboard_snapshot,
+        ),
         "erp": (
             {
                 "buyer_name": erp_aggregate.buyer_name,
@@ -1294,6 +1297,102 @@ def _build_report_family(
         "written_shipment_date": written_shipment_date,
         "written_expiry_date": written_expiry_date,
     }
+
+
+def _build_comparison_evidence(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate | None,
+    snapshot: DashboardFamilySnapshot | None,
+) -> dict[str, object]:
+    """Report-only observations; never used to select decisions or workbook writes."""
+    if aggregate is None or snapshot is None:
+        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None}
+
+    fields: list[dict[str, object]] = []
+
+    def add(field, source, expected, observed, normalized_expected, normalized_observed, rule, difference=None):
+        fields.append({
+            "field": field, "reference_source": source,
+            "reference_value": expected, "dashboard_value": observed,
+            "normalized_reference": normalized_expected, "normalized_dashboard": normalized_observed,
+            "dashboard_minus_reference": difference, "rule": rule,
+        })
+
+    dashboard_value = _parse_decimal(snapshot.lc_value)
+    quantity = _sum_decimal_strings(snapshot.commodity_quantities)
+    for label, expected, observed, raw, tolerance in (
+        ("LC Value", aggregate.current_lc_value, dashboard_value, snapshot.lc_value, _DEFAULT_DECIMAL_TOLERANCE),
+        ("LC Qty", aggregate.lc_qty, quantity, snapshot.commodity_quantities, _DEFAULT_DECIMAL_TOLERANCE),
+        ("Net Weight", aggregate.net_weight, quantity, snapshot.commodity_quantities, _NET_WEIGHT_TOLERANCE),
+    ):
+        finite = expected is not None and expected.is_finite() and observed is not None and observed.is_finite()
+        add(label, "ERP", _decimal_to_string(expected), raw,
+            _decimal_to_string(expected), _decimal_to_string(observed),
+            f"Round each input to 2 decimals; absolute tolerance {tolerance}. See combined value/quantity rule.",
+            _decimal_to_string(observed - expected) if finite else None)
+
+    numeric_status = None
+    numeric_reasons = ["Numeric comparison unavailable: missing, invalid, or nonfinite input."]
+    if all(value is not None and value.is_finite() for value in (
+        dashboard_value, quantity, aggregate.current_lc_value, aggregate.lc_qty,
+    )) and (aggregate.net_weight is None or aggregate.net_weight.is_finite()):
+        result = _compare_value_and_quantity(
+            dashboard_lc_value=dashboard_value, quantity_sum=quantity, aggregate=aggregate,
+        )
+        numeric_status = result["status"] or "mismatch"
+        numeric_reasons = result["decision_reasons"]
+
+    for label, expected, observed, rule in (
+        ("LC Date", aggregate.lc_date, snapshot.lc_date, "Same calendar date."),
+        ("Shipment Date", aggregate.ship_date, snapshot.last_date_of_shipment, "Dashboard offset: 0 through 250 days inclusive."),
+        ("Expiry Date", aggregate.expiry_date, snapshot.lc_expiry_date, "Dashboard expiry on/after ERP expiry; each expiry 5 through 90 days after its shipment."),
+    ):
+        left, right = _normalize_date(expected), _normalize_date(observed)
+        add(label, "ERP", expected, observed, left, right, rule,
+            _days_between_dates(start_date=left, end_date=right))
+
+    add("Beneficiary", "Configured beneficiary", _PIONEER_BENEFICIARY, snapshot.beneficiary_name,
+        _normalize_special_text(_PIONEER_BENEFICIARY), _normalize_special_text(snapshot.beneficiary_name),
+        "Normalized equality.")
+    for label, observed in (("IRC Details", snapshot.irc_details), ("ERC Details", snapshot.erc_details)):
+        add(label, "ERP buyer", aggregate.buyer_name, observed,
+            _normalize_buyer_comparison_text(aggregate.buyer_name), _normalize_buyer_comparison_text(observed),
+            "Every populated section must contain the normalized buyer; at least one section required.")
+    add("Foreign LC", "Workbook Master L/C No.", family.master_lc_values, snapshot.foreign_lc_numbers,
+        [_normalize_foreign_lc_reference(value) for value in family.master_lc_values],
+        [_normalize_foreign_lc_reference(value) for value in snapshot.foreign_lc_numbers],
+        "At least one nonempty normalized reference must overlap.")
+    return {
+        "availability": "available", "fields": fields,
+        "numeric_rule_status": numeric_status, "numeric_rule_reasons": numeric_reasons,
+        "numeric_rule": "OK: value/quantity match, or value excess >= 100 and quantity excess 20%-80% of value excess. OK (KGS): value matches and quantity matches net weight within 0.8. Other checks must also pass.",
+        "input_observations": ["Blank commodity quantity entries are omitted by the existing summation rule."]
+        if any(not str(value).strip() for value in snapshot.commodity_quantities) else [],
+    }
+
+
+def _render_comparison_evidence(families) -> str:
+    sections: list[str] = []
+    for family in families if isinstance(families, list) else []:
+        if not isinstance(family, dict) or not isinstance(family.get("comparison_evidence"), dict):
+            continue
+        evidence = family["comparison_evidence"]
+        rows = []
+        for field in evidence.get("fields", []):
+            rows.append("<tr>" + "".join(
+                f"<td>{escape(str(field.get(key) if field.get(key) is not None else 'Unavailable'))}</td>"
+                for key in ("field", "reference_source", "reference_value", "dashboard_value",
+                            "normalized_reference", "normalized_dashboard", "dashboard_minus_reference", "rule")
+            ) + "</tr>")
+        sections.append(
+            f"<details><summary>{escape(str(family.get('lc_sc_no', '')))} — SL.No. {escape(_format_report_sl_no_values(family.get('sl_no_values', [])))}</summary>"
+            f"<p>Numeric rule result: {escape(str(evidence.get('numeric_rule_status') or 'Unavailable'))}. "
+            "This result covers value/quantity only; the family decision includes all checks.</p>"
+            f"<p>{escape(str(evidence.get('numeric_rule', '')))}</p>"
+            f"<p>{escape('; '.join(evidence.get('numeric_rule_reasons', []) + evidence.get('input_observations', [])))}</p>"
+            '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Reference source</th><th>Reference value</th><th>Dashboard value</th><th>Normalized reference</th><th>Normalized dashboard</th><th>Difference (dashboard minus reference; dates in days)</th><th>Rule</th></tr></thead>'
+            f"<tbody>{''.join(rows)}</tbody></table></div></details>"
+        )
+    return '<section class="section"><h2>Comparison Evidence</h2>' + "".join(sections) + "</section>" if sections else ""
 
 
 def _build_report_html(*, report_payload: dict[str, object]) -> str:
@@ -1424,6 +1523,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "      </table>\n"
         "      </div>\n"
         "    </section>\n"
+        f"{_render_comparison_evidence(families)}\n"
         "  </main>\n"
         "</body>\n"
         "</html>\n"
