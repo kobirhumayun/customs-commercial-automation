@@ -1364,7 +1364,7 @@ def _build_comparison_evidence(
         [_normalize_foreign_lc_reference(value) for value in family.master_lc_values],
         [_normalize_foreign_lc_reference(value) for value in snapshot.foreign_lc_numbers],
         "At least one nonempty normalized reference must overlap.")
-    return {
+    evidence = {
         "availability": "available", "fields": fields,
         "numeric_rule_status": numeric_status, "numeric_rule_reasons": numeric_reasons,
         "rule_results": _build_rule_results(family=family, aggregate=aggregate, snapshot=snapshot,
@@ -1373,6 +1373,77 @@ def _build_comparison_evidence(
         "input_observations": ["Blank commodity quantity entries are omitted by the existing summation rule."]
         if any(not str(value).strip() for value in snapshot.commodity_quantities) else [],
     }
+    for label, start, end in (
+        ("Dashboard shipment to expiry", snapshot.last_date_of_shipment, snapshot.lc_expiry_date),
+        ("ERP shipment to expiry", aggregate.ship_date, aggregate.expiry_date),
+    ):
+        left, right = _normalize_date(start), _normalize_date(end)
+        add(label, "Dashboard dates" if label.startswith("Dashboard") else "ERP dates",
+            start, end, left, right,
+            f"Expiry must be {_EXPIRY_MIN_OFFSET_DAYS}-{_EXPIRY_MAX_OFFSET_DAYS} days after shipment, inclusive.",
+            _days_between_dates(start_date=left, end_date=right))
+    return _describe_comparison_evidence(evidence)
+
+
+def _describe_comparison_evidence(evidence: dict[str, object]) -> dict[str, object]:
+    """Add presentation metadata from diagnostic results, preserving legacy fields."""
+    rules = {rule["rule_id"]: rule for rule in evidence["rule_results"]}
+    def passed(name: str) -> bool:
+        return rules.get(name, {}).get("status") == "pass"
+    path = ("Value and LC quantity within tolerance" if passed("exact_value_quantity") else
+            "KGS alternative" if passed("kgs_alternative") else
+            "Approved excess" if passed("excess_minimum") and passed("excess_quantity_range") else
+            "No numeric acceptance path" if evidence.get("numeric_rule_status") == "mismatch" else
+            "Unavailable")
+    for rule_id, rule in rules.items():
+        status = rule["status"]
+        evaluation = {"pass": "Satisfied", "fail": "Evaluated; not satisfied", "unavailable": "Not evaluable"}.get(status)
+        if evaluation is None:
+            if rule_id == "exact_value_quantity":
+                evaluation = "Evaluated; did not qualify"
+            elif rule_id == "kgs_alternative" and not passed("exact_value_quantity"):
+                evaluation = "Not eligible: LC value does not match"
+            elif rule_id == "lc_quantity_match":
+                evaluation = "Difference accepted by alternative path"
+            else:
+                evaluation = "Not required"
+        rule["evaluation"] = evaluation
+
+    evidence["decision_summary"] = {
+        "numeric_path": path,
+        "failed_rule_ids": [name for name, rule in rules.items() if rule["status"] == "fail"],
+        "unavailable_rule_ids": [name for name, rule in rules.items() if rule["status"] == "unavailable"],
+    }
+    evidence["rule_reference"] = [
+        f"Evaluate numeric paths in order: value/LC quantity equality within {_DEFAULT_DECIMAL_TOLERANCE}; then KGS with value equality and net-weight tolerance {_NET_WEIGHT_TOLERANCE}; then approved excess. Inputs are rounded to 2 decimals before summing.",
+        f"Excess requires both value and LC quantity to be higher, value excess at least {_MIN_LC_VALUE_EXCESS}, and quantity excess between {_MIN_EXCESS_QUANTITY_RATIO * 100}% and {_MAX_EXCESS_QUANTITY_RATIO * 100}% of value excess, inclusive. Ratio bounds are rounded to 2 decimals.",
+        f"LC dates must match. Dashboard shipment must be 0-{_MAX_SHIPMENT_DATE_OFFSET_DAYS} days after ERP shipment. Dashboard expiry must be on/after ERP expiry; each shipment-to-expiry interval must be {_EXPIRY_MIN_OFFSET_DAYS}-{_EXPIRY_MAX_OFFSET_DAYS} days inclusive.",
+        f"Beneficiary must normalize to {_PIONEER_BENEFICIARY}. Every populated IRC/ERC section must contain the normalized ERP buyer; at least one section must be populated.",
+        "At least one normalized dashboard foreign LC reference must overlap the workbook master LC references. All nonnumeric checks must also pass for family acceptance.",
+    ]
+    links = {
+        "LC Value": ["value_floor", "exact_value_quantity", "kgs_alternative", "excess_alternative", "excess_minimum", "excess_quantity_range"],
+        "LC Qty": ["lc_quantity_match", "exact_value_quantity", "excess_alternative", "excess_minimum", "excess_quantity_range", "quantity_completeness"],
+        "Net Weight": ["kgs_alternative"], "LC Date": ["lc_date"],
+        "Shipment Date": ["shipment_offset"], "Expiry Date": ["expiry_order"],
+        "Dashboard shipment to expiry": ["dashboard_expiry_window"], "ERP shipment to expiry": ["erp_expiry_window"],
+        "Beneficiary": ["beneficiary"], "IRC Details": ["buyer_section_present", "irc_buyer"],
+        "ERC Details": ["buyer_section_present", "erc_buyer"], "Foreign LC": ["foreign_lc_overlap"],
+    }
+    numeric = {"LC Value", "LC Qty", "Net Weight"}
+    dates = {"LC Date", "Shipment Date", "Expiry Date", "Dashboard shipment to expiry", "ERP shipment to expiry"}
+    for field in evidence["fields"]:
+        name = field["field"]
+        field["rule_ids"] = [rule_id for rule_id in links.get(name, []) if rule_id in rules]
+        field["display_source"] = "ERP aggregate" if name in numeric else field["reference_source"]
+        field["difference_basis"] = ("Compared minus reference, days" if name in dates else
+                                     "Dashboard total minus ERP net weight, KGS comparison basis" if name == "Net Weight" else
+                                     "Dashboard total minus ERP LC quantity; unit not captured" if name == "LC Qty" else
+                                     "Dashboard minus ERP value; currency not captured" if name == "LC Value" else "Not applicable")
+        field["difference_display"] = ("Not applicable" if name not in numeric | dates else
+                                       "Unavailable" if field["dashboard_minus_reference"] is None else
+                                       str(field["dashboard_minus_reference"]))
+    return evidence
 
 
 def _build_rule_results(
@@ -1497,30 +1568,56 @@ def _build_rule_results(
 
 def _render_comparison_evidence(families) -> str:
     sections: list[str] = []
-    for family in families if isinstance(families, list) else []:
+
+    def display(value: object) -> str:
+        if isinstance(value, list):
+            return "<br>".join(escape(str(item)) if str(item).strip() else "(blank)" for item in value) or "(empty list)"
+        return escape(str(value)) if value is not None and str(value).strip() else "Unavailable"
+
+    for index, family in enumerate(families if isinstance(families, list) else []):
         if not isinstance(family, dict) or not isinstance(family.get("comparison_evidence"), dict):
             continue
         evidence = family["comparison_evidence"]
-        rule_rows = "".join("<tr>" + "".join(f"<td>{escape(str(rule.get(key, '')))}</td>"
-                            for key in ("rule_id", "status", "prerequisites", "reason")) + "</tr>"
-                            for rule in evidence.get("rule_results", []))
+        rules = {rule["rule_id"]: rule for rule in evidence.get("rule_results", [])}
+
+        def rule_link(rule_id: str) -> str:
+            rule = rules[rule_id]
+            return f'<a href="#evidence-{index}-{escape(rule_id, quote=True)}">{escape(rule_id)}: {escape(rule.get("evaluation", rule["status"]))}</a>'
+
+        rule_rows = "".join(f'<tr id="evidence-{index}-{escape(rule["rule_id"], quote=True)}">' + "".join(f"<td>{escape(str(rule.get(key, '')))}</td>"
+                            for key in ("rule_id", "status", "evaluation", "prerequisites", "reason")) + "</tr>"
+                            for rule in rules.values())
         rows = []
         for field in evidence.get("fields", []):
-            rows.append("<tr>" + "".join(
-                f"<td>{escape(str(field.get(key) if field.get(key) is not None else 'Unavailable'))}</td>"
-                for key in ("field", "reference_source", "reference_value", "dashboard_value",
-                            "normalized_reference", "normalized_dashboard", "dashboard_minus_reference", "rule")
-            ) + "</tr>")
+            name = field.get("field", "")
+            compared = display(field.get("dashboard_value"))
+            if name in {"LC Qty", "Net Weight"}:
+                compared = "Commodity rows:<br>" + compared + "<br>Total: " + display(field.get("normalized_dashboard"))
+            cells = [display(name), display(field.get("display_source", field.get("reference_source"))),
+                     display(field.get("reference_value")), compared, display(field.get("normalized_reference")),
+                     display(field.get("normalized_dashboard")), display(field.get("difference_display", field.get("dashboard_minus_reference"))),
+                     display(field.get("difference_basis", "Not specified")),
+                     "<br>".join(rule_link(key) for key in field.get("rule_ids", []) if key in rules) or display(field.get("rule"))]
+            rows.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+        summary = evidence.get("decision_summary", {})
+        findings = [rule for rule in rules.values() if rule["status"] in {"fail", "unavailable"}]
+        findings_html = "".join(f"<li>{rule_link(rule['rule_id'])}: {escape(rule['reason'])}</li>" for rule in findings)
+        reference = evidence.get("rule_reference", [])
         sections.append(
             f"<details><summary>{escape(str(family.get('lc_sc_no', '')))} — SL.No. {escape(_format_report_sl_no_values(family.get('sl_no_values', [])))}</summary>"
-            f"<p>Numeric rule result: {escape(str(evidence.get('numeric_rule_status') or 'Unavailable'))}. "
-            "This result covers value/quantity only; the family decision includes all checks.</p>"
-            f"<p>{escape(str(evidence.get('numeric_rule', '')))}</p>"
-            f"<p>{escape('; '.join(evidence.get('numeric_rule_reasons', []) + evidence.get('input_observations', [])))}</p>"
-            '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Reference source</th><th>Reference value</th><th>Dashboard value</th><th>Normalized reference</th><th>Normalized dashboard</th><th>Difference (dashboard minus reference; dates in days)</th><th>Rule</th></tr></thead>'
+            "<h3>Decision summary</h3>"
+            f"<p>Overall decision: {display(family.get('final_decision'))}. Workbook status: {display(family.get('final_workbook_value'))}.</p>"
+            f"<p>Numeric acceptance path: {display(summary.get('numeric_path', 'Unavailable'))}. All other required checks still apply.</p>"
+            f"<p>Recorded family reasons: {display(family.get('decision_reasons', []))}</p>"
+            "<p>Diagnostic findings (do not replace the recorded decision):</p>"
+            + (f"<ul>{findings_html}</ul>" if findings_html else
+               "<p>No failed or unavailable diagnostic checks.</p>" if rules else "<p>No rule diagnostics recorded.</p>") +
+            '<details><summary>Rule reference</summary><ul>' + "".join(f"<li>{escape(str(item))}</li>" for item in reference) + "</ul></details>"
+            "<h3>Comparison evidence</h3>"
+            '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Reference source</th><th>Reference value / interval start</th><th>Compared value / interval end</th><th>Normalized reference</th><th>Normalized compared value</th><th>Difference</th><th>Measurement basis</th><th>Interpretation and rule links</th></tr></thead>'
             f"<tbody>{''.join(rows)}</tbody></table></div>"
             "<p>Rule explanations are diagnostic. Alternative paths are not individually required; the family decision above remains authoritative.</p>"
-            '<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Result</th><th>Prerequisites</th><th>Explanation</th></tr></thead>'
+            '<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Result</th><th>Evaluation</th><th>Prerequisites</th><th>Explanation</th></tr></thead>'
             f"<tbody>{rule_rows}</tbody></table></div></details>"
         )
     return '<section class="section"><h2>Comparison Evidence</h2>' + "".join(sections) + "</section>" if sections else ""

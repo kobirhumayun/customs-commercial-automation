@@ -151,3 +151,56 @@ class ComparisonEvidenceTests(unittest.TestCase):
         self.assertIn("dashboard_expiry_window", html)
         self.assertIn("not_applicable", html)
         self.assertIn("Comparison Evidence", _render_comparison_evidence([{"comparison_evidence": {"fields": []}}]))
+
+    def test_summary_paths_come_from_rule_results(self):
+        for value, quantity, path in (("1000", "100", "Value and LC quantity within tolerance"),
+                                      ("1000", "80.79", "KGS alternative"),
+                                      ("1100", "120", "Approved excess"),
+                                      ("900", "120", "No numeric acceptance path"),
+                                      ("bad", "100", "Unavailable")):
+            with self.subTest(path=path):
+                evidence = self.evidence(replace(self.snapshot, lc_value=value, commodity_quantities=[quantity]))
+                self.assertEqual(evidence["decision_summary"]["numeric_path"], path)
+                self.assertEqual(evidence["decision_summary"]["failed_rule_ids"],
+                                 [rule["rule_id"] for rule in evidence["rule_results"] if rule["status"] == "fail"])
+
+    def test_unused_and_unqualified_alternatives_have_distinct_evaluations(self):
+        self.assertEqual(self.rules()["kgs_alternative"]["evaluation"], "Not required")
+        rules = self.rules(replace(self.snapshot, lc_value="1100", commodity_quantities=["120"]))
+        self.assertEqual(rules["exact_value_quantity"]["evaluation"], "Evaluated; did not qualify")
+        self.assertEqual(rules["kgs_alternative"]["evaluation"], "Not eligible: LC value does not match")
+        self.assertEqual(rules["lc_quantity_match"]["evaluation"], "Difference accepted by alternative path")
+
+    def test_table_labels_units_differences_and_intervals(self):
+        fields = {field["field"]: field for field in self.evidence()["fields"]}
+        self.assertEqual(fields["LC Value"]["display_source"], "ERP aggregate")
+        self.assertIn("currency not captured", fields["LC Value"]["difference_basis"])
+        self.assertEqual(fields["Beneficiary"]["difference_display"], "Not applicable")
+        self.assertEqual(fields["Dashboard shipment to expiry"]["difference_display"], "28")
+        self.assertEqual(fields["ERP shipment to expiry"]["rule_ids"], ["erp_expiry_window"])
+        evidence = self.evidence(replace(self.snapshot, lc_date="invalid"))
+        self.assertEqual(next(field for field in evidence["fields"] if field["field"] == "LC Date")["difference_display"], "Unavailable")
+
+    def test_summary_keeps_numeric_acceptance_distinct_from_family_failure(self):
+        evidence = self.evidence(replace(self.snapshot, beneficiary_name="WRONG"))
+        family = {"final_decision": "warning", "final_workbook_value": "Beneficiary mismatch",
+                  "decision_reasons": ["Beneficiary mismatch"], "comparison_evidence": evidence}
+        html = _render_comparison_evidence([family, family])
+        self.assertIn("Overall decision: warning", html)
+        self.assertIn("Numeric acceptance path: Value and LC quantity within tolerance", html)
+        self.assertNotIn("Numeric rule result: OK", html)
+        self.assertIn('href="#evidence-0-beneficiary"', html)
+        self.assertIn('id="evidence-1-beneficiary"', html)
+        self.assertIn("Commodity rows:<br>100<br>Total: 100", html)
+        self.assertNotIn("[&#x27;100&#x27;]", html)
+        self.assertIn("<summary>Rule reference</summary>", html)
+        self.assertIn("0.01", html)
+        self.assertIn("0.8", html)
+
+    def test_missing_evidence_is_explicit_in_summary(self):
+        evidence = _build_comparison_evidence(family=self.family, aggregate=self.erp, snapshot=None)
+        html = _render_comparison_evidence([{"comparison_evidence": evidence}])
+        self.assertIn("Numeric acceptance path: Unavailable", html)
+        self.assertIn("comparison_inputs", html)
+        legacy_html = _render_comparison_evidence([{"comparison_evidence": {"fields": []}}])
+        self.assertIn("No rule diagnostics recorded", legacy_html)
