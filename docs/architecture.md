@@ -296,6 +296,7 @@ Row-level or workbook-level checksum-only probes are insufficient for recovery s
 - Successfully processed import-team emails move from `working` to the Outlook folder `Import` only during the post-run mail-move phase in the Current Full Path; the File Picker Path performs no mail interactions or mail moves.
 
 ### Bangladesh Bank dashboard verification CLI
+- Blank quantity cells are skipped on both ERP and dashboard sides; populated values are aggregated before comparison. An entirely blank total remains unavailable. Both returned fetch errors and raised dashboard lookup exceptions retain diagnostic status writes and refresh dates from consistent, parseable ERP shipment/expiry values; invalid ERP family dates block upstream without date writes.
 - Reads candidate rows where `UP No.` is blank, `UD No. & IP No.` exists, the first non-empty line does not begin with `EXP` or `IP`, and `Bangladesh Bank Dashboard` is blank or not already compliant.
 - Dedupes candidate work by workbook `L/C & S/C No.` so dashboard fetch/comparison runs once per LC family.
 - Uses workbook `L/C & S/C No.` and workbook `Master L/C No.` plus ERP-derived family aggregates and dates as the verification inputs.

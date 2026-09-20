@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import webbrowser
 from dataclasses import dataclass, replace
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_HALF_UP
 from html import escape
 from pathlib import Path
 import re
@@ -17,6 +17,7 @@ from project.models import (
     RunReport,
     WorkflowId,
     WriteOperation,
+    WritePhaseStatus,
 )
 from project.reporting.schemas import REPORT_SCHEMA_VERSION
 from project.storage import write_json
@@ -159,11 +160,13 @@ def validate_bb_dashboard_verification_run(
         master_lc_column_index=header_mapping["master_lc_no"],
         live_workbook_path=live_workbook_path,
     )
+    skipped_rows: list[dict[str, object]] = []
     candidate_families = _build_candidate_families(
         workbook_snapshot=workbook_snapshot,
         header_mapping=header_mapping,
         sl_no_values_by_row=sl_no_values_by_row,
         master_lc_values_by_row=master_lc_values_by_row,
+        skipped_rows=skipped_rows,
     )
     erp_rows_by_family = _group_erp_rows_by_family(erp_rows)
 
@@ -289,9 +292,9 @@ def validate_bb_dashboard_verification_run(
                 family=family,
                 sheet_name=workbook_snapshot.sheet_name,
                 final_status=discrepancy.message,
-                writes_dates=False,
-                ship_date="",
-                expiry_date="",
+                writes_dates=True,
+                ship_date=aggregate.ship_date,
+                expiry_date=aggregate.expiry_date,
             )
             staged_write_plan.extend(family_operations)
             mail_outcomes.append(
@@ -382,11 +385,26 @@ def validate_bb_dashboard_verification_run(
             )
             continue
 
-        final_decision, final_status, decision_reasons, dashboard_snapshot, writes_dates = _evaluate_lookup_result(
-            family=family,
-            aggregate=aggregate,
-            lookup_result=lookup_result,
-        )
+        numeric_issues = _dashboard_numeric_issues(lookup_result.snapshot)
+        try:
+            if numeric_issues:
+                raise InvalidOperation("Dashboard numeric input is invalid")
+            final_decision, final_status, decision_reasons, dashboard_snapshot, writes_dates = _evaluate_lookup_result(
+                family=family, aggregate=aggregate, lookup_result=lookup_result,
+            )
+        except DecimalException as exc:
+            numeric_issues = numeric_issues or [f"Numeric comparison failed: {type(exc).__name__}: {exc}"]
+            final_decision = FinalDecision.HARD_BLOCK
+            final_status = "Invalid dashboard numeric input"
+            decision_reasons = numeric_issues
+            dashboard_snapshot = lookup_result.snapshot
+            writes_dates = False
+            discrepancy_reports.append(_build_discrepancy(
+                run_report=run_report, code="bb_dashboard_numeric_input_invalid",
+                message=final_status, mail_id=family.family_id,
+                details={"lc_sc_no": family.lc_sc_no, "issues": numeric_issues,
+                         "dashboard": to_jsonable(dashboard_snapshot)},
+            ))
         family_operations = _build_family_write_operations(
             run_report=run_report,
             family=family,
@@ -464,12 +482,53 @@ def validate_bb_dashboard_verification_run(
     report_payload = _build_report_payload(
         run_report=updated_run_report,
         families=report_families,
+        skipped_rows=skipped_rows,
     )
     return BBDashboardVerificationResult(
         validation_result=validation_result,
         report_payload=report_payload,
         report_html=_build_report_html(report_payload=report_payload),
     )
+
+
+def refresh_bb_dashboard_verification_report(
+    *, result: BBDashboardVerificationResult, validation_result: ValidationBatchResult,
+) -> BBDashboardVerificationResult:
+    """Refresh only BB presentation after shared write processing has finished."""
+    run = validation_result.run_report
+    if run.workflow_id != WorkflowId.BB_DASHBOARD_VERIFICATION or run.run_id != result.report_payload["run_id"]:
+        raise ValueError("BB report refresh requires the same BB workflow run")
+    operations = validation_result.staged_write_plan
+    marker = validation_result.commit_marker
+    confirmed = bool(
+        run.write_phase_status == WritePhaseStatus.COMMITTED and marker is not None
+        and marker.run_id == run.run_id and marker.workflow_id == run.workflow_id
+        and marker.operation_count == len(operations)
+        and marker.staged_write_plan_hash == run.staged_write_plan_hash
+    )
+    if confirmed:
+        message = "Workbook writes committed and confirmed by the commit marker."
+    elif run.write_phase_status == WritePhaseStatus.HARD_BLOCKED_NO_WRITE:
+        message = "Workbook writes blocked; no changes committed by this write attempt."
+    elif run.write_phase_status in {WritePhaseStatus.APPLYING, WritePhaseStatus.UNCERTAIN_NOT_COMMITTED}:
+        message = "Workbook state is uncertain; changes may exist. No commit is confirmed. Follow recovery guidance before rerunning."
+    elif run.write_phase_status == WritePhaseStatus.COMMITTED:
+        message = "Committed state lacks matching commit evidence; workbook changes are not confirmed by this report."
+    elif not operations:
+        message = "No workbook writes were planned."
+    else:
+        message = "Workbook writes are planned or prevalidated, but no commit is confirmed."
+    outcome = {
+        "message": message, "commit_confirmed": confirmed,
+        "planned_operation_count": len(operations),
+        "confirmed_operation_count": len(operations) if confirmed else 0,
+        "commit_marker": to_jsonable(marker) if marker is not None else None,
+        "discrepancies": to_jsonable(validation_result.discrepancy_reports),
+    }
+    payload = {**result.report_payload, "write_phase_status": run.write_phase_status.value,
+               "workbook_write": outcome}
+    return replace(result, validation_result=validation_result, report_payload=payload,
+                   report_html=_build_report_html(report_payload=payload))
 
 
 def persist_bb_dashboard_verification_report(
@@ -498,6 +557,7 @@ def _build_candidate_families(
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
     master_lc_values_by_row: dict[int, list[str]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> list[DashboardCandidateFamily]:
     families: dict[str, list[DashboardCandidateRow]] = {}
     ordered_keys: list[str] = []
@@ -507,6 +567,7 @@ def _build_candidate_families(
             header_mapping=header_mapping,
             sl_no_values_by_row=sl_no_values_by_row,
             master_lc_values_by_row=master_lc_values_by_row,
+            skipped_rows=skipped_rows,
         )
         if candidate is None:
             continue
@@ -545,6 +606,7 @@ def _build_candidate_row(
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
     master_lc_values_by_row: dict[int, list[str]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> DashboardCandidateRow | None:
     up_no = row.values.get(header_mapping["up_no"], "").strip()
     if up_no:
@@ -564,6 +626,11 @@ def _build_candidate_row(
     raw_lc_sc_no = row.values.get(header_mapping["lc_sc_no"], "").strip()
     lc_sc_key = _normalize_lc_family_key(raw_lc_sc_no)
     if not lc_sc_key:
+        if skipped_rows is not None:
+            skipped_rows.append({"row_index": row.row_index,
+                                 "sl_no": sl_no_values_by_row.get(row.row_index, ""),
+                                 "lc_sc_no": raw_lc_sc_no,
+                                 "reason": "Otherwise eligible row has no usable LC family identifier; no writes staged."})
         return None
 
     sl_no = sl_no_values_by_row.get(row.row_index, "").strip()
@@ -682,7 +749,7 @@ def _read_live_display_values(*, sheet, column_index: int, row_indexes: list[int
     resolved: dict[int, str] = {}
     for row_index in row_indexes:
         displayed_value = sheet.range((row_index, column_index)).api.Text
-        resolved[row_index] = _stringify_sl_no_text(displayed_value)
+        resolved[row_index] = str(displayed_value).strip() if displayed_value is not None else ""
     return resolved
 
 
@@ -771,6 +838,10 @@ def _build_erp_family_aggregate(
         expiry_dates=expiry_dates,
         ship_remarks=ship_remarks,
     )
+    for field_label, values in (("Shipment Date", ship_dates), ("Expiry Date", expiry_dates)):
+        for value in values:
+            if _normalize_date(value) is None:
+                consistency_issues.append(f"{field_label} could not be parsed ({value!r})")
     if consistency_issues:
         issue_text = "; ".join(consistency_issues)
         return None, _build_discrepancy(
@@ -802,9 +873,14 @@ def _build_erp_family_aggregate(
         return None, _build_discrepancy(
             run_report=run_report,
             code="bb_dashboard_family_input_invalid",
-            message=f"ERP family inputs were missing required numeric fields for workbook family {family.lc_sc_no}.",
+            message=f"ERP family inputs contained missing or invalid required numeric fields for workbook family {family.lc_sc_no}.",
             mail_id=family.family_id,
-            details={"lc_sc_no": family.lc_sc_no},
+            details={"lc_sc_no": family.lc_sc_no, "numeric_rows": [
+                {"source_row_index": getattr(row, "source_row_index", None),
+                 "current_lc_value": getattr(row, "current_lc_value", ""),
+                 "lc_qty": getattr(row, "lc_qty", "")}
+                for row in deduped_rows
+            ]},
         )
 
     return (
@@ -823,6 +899,17 @@ def _build_erp_family_aggregate(
         ),
         None,
     )
+
+
+def _dashboard_numeric_issues(snapshot: DashboardFamilySnapshot | None) -> list[str]:
+    if snapshot is None:
+        return []
+    values = [("LC Value", snapshot.lc_value)] + [
+        (f"Commodity quantity row {index}", value)
+        for index, value in enumerate(snapshot.commodity_quantities, 1)
+    ]
+    return [f"{label} is malformed or nonfinite: {value!r}." for label, value in values
+            if str(value).strip() and _parse_decimal(value) is None]
 
 
 def _evaluate_lookup_result(
@@ -1223,6 +1310,7 @@ def _build_report_payload(
     *,
     run_report: RunReport,
     families: list[dict[str, object]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -1235,6 +1323,7 @@ def _build_report_payload(
         "summary": dict(run_report.summary),
         "family_count": len(families),
         "families": families,
+        "skipped_rows": list(skipped_rows or []),
     }
 
 
@@ -1260,6 +1349,9 @@ def _build_report_family(
         "final_workbook_value": final_workbook_value,
         "decision_reasons": list(decision_reasons),
         "search_attempts": list(search_attempts),
+        "comparison_evidence": _build_comparison_evidence(
+            family=family, aggregate=erp_aggregate, snapshot=dashboard_snapshot,
+        ),
         "erp": (
             {
                 "buyer_name": erp_aggregate.buyer_name,
@@ -1294,6 +1386,344 @@ def _build_report_family(
         "written_shipment_date": written_shipment_date,
         "written_expiry_date": written_expiry_date,
     }
+
+
+def _build_comparison_evidence(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate | None,
+    snapshot: DashboardFamilySnapshot | None,
+) -> dict[str, object]:
+    try:
+        return _build_comparison_evidence_unchecked(family=family, aggregate=aggregate, snapshot=snapshot)
+    except DecimalException as exc:
+        reason = f"Comparison evidence could not be calculated: {type(exc).__name__}: {exc}. Raw ERP/dashboard values remain in the family report."
+        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None,
+                "numeric_rule_reasons": [reason], "evidence_error": reason,
+                "rule_results": [{"rule_id": "comparison_arithmetic", "status": "unavailable",
+                                  "prerequisites": "Representable decimal arithmetic", "reason": reason}]}
+
+
+def _build_comparison_evidence_unchecked(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate | None,
+    snapshot: DashboardFamilySnapshot | None,
+) -> dict[str, object]:
+    """Report-only observations; never used to select decisions or workbook writes."""
+    if aggregate is None or snapshot is None:
+        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None,
+                "rule_results": [{"rule_id": "comparison_inputs", "status": "unavailable",
+                                  "prerequisites": "ERP aggregate and dashboard snapshot",
+                                  "reason": "ERP aggregate or dashboard snapshot is missing; see family decision and search attempts."}]}
+
+    fields: list[dict[str, object]] = []
+
+    def add(field, source, expected, observed, normalized_expected, normalized_observed, rule, difference=None):
+        fields.append({
+            "field": field, "reference_source": source,
+            "reference_value": expected, "dashboard_value": observed,
+            "normalized_reference": normalized_expected, "normalized_dashboard": normalized_observed,
+            "dashboard_minus_reference": difference, "rule": rule,
+        })
+
+    dashboard_value = _parse_decimal(snapshot.lc_value)
+    quantity = _sum_decimal_strings(snapshot.commodity_quantities)
+    for label, expected, observed, raw, tolerance in (
+        ("LC Value", aggregate.current_lc_value, dashboard_value, snapshot.lc_value, _DEFAULT_DECIMAL_TOLERANCE),
+        ("LC Qty", aggregate.lc_qty, quantity, snapshot.commodity_quantities, _DEFAULT_DECIMAL_TOLERANCE),
+        ("Net Weight", aggregate.net_weight, quantity, snapshot.commodity_quantities, _NET_WEIGHT_TOLERANCE),
+    ):
+        finite = expected is not None and expected.is_finite() and observed is not None and observed.is_finite()
+        add(label, "ERP", _decimal_to_string(expected), raw,
+            _decimal_to_string(expected), _decimal_to_string(observed),
+            f"Round each input to 2 decimals; absolute tolerance {tolerance}. See combined value/quantity rule.",
+            _decimal_to_string(observed - expected) if finite else None)
+
+    numeric_status = None
+    numeric_reasons = ["Numeric comparison unavailable: missing, invalid, or nonfinite input."]
+    if all(value is not None and value.is_finite() for value in (
+        dashboard_value, quantity, aggregate.current_lc_value, aggregate.lc_qty,
+    )) and (aggregate.net_weight is None or aggregate.net_weight.is_finite()):
+        result = _compare_value_and_quantity(
+            dashboard_lc_value=dashboard_value, quantity_sum=quantity, aggregate=aggregate,
+        )
+        numeric_status = result["status"] or "mismatch"
+        numeric_reasons = result["decision_reasons"]
+
+    for label, expected, observed, rule in (
+        ("LC Date", aggregate.lc_date, snapshot.lc_date, "Same calendar date."),
+        ("Shipment Date", aggregate.ship_date, snapshot.last_date_of_shipment, "Dashboard offset: 0 through 250 days inclusive."),
+        ("Expiry Date", aggregate.expiry_date, snapshot.lc_expiry_date, "Dashboard expiry on/after ERP expiry; each expiry 5 through 90 days after its shipment."),
+    ):
+        left, right = _normalize_date(expected), _normalize_date(observed)
+        add(label, "ERP", expected, observed, left, right, rule,
+            _days_between_dates(start_date=left, end_date=right))
+
+    add("Beneficiary", "Configured beneficiary", _PIONEER_BENEFICIARY, snapshot.beneficiary_name,
+        _normalize_special_text(_PIONEER_BENEFICIARY), _normalize_special_text(snapshot.beneficiary_name),
+        "Normalized equality.")
+    for label, observed in (("IRC Details", snapshot.irc_details), ("ERC Details", snapshot.erc_details)):
+        add(label, "ERP buyer", aggregate.buyer_name, observed,
+            _normalize_buyer_comparison_text(aggregate.buyer_name), _normalize_buyer_comparison_text(observed),
+            "Every populated section must contain the normalized buyer; at least one section required.")
+    add("Foreign LC", "Workbook Master L/C No.", family.master_lc_values, snapshot.foreign_lc_numbers,
+        [_normalize_foreign_lc_reference(value) for value in family.master_lc_values],
+        [_normalize_foreign_lc_reference(value) for value in snapshot.foreign_lc_numbers],
+        "At least one nonempty normalized reference must overlap.")
+    evidence = {
+        "availability": "available", "fields": fields,
+        "numeric_rule_status": numeric_status, "numeric_rule_reasons": numeric_reasons,
+        "rule_results": _build_rule_results(family=family, aggregate=aggregate, snapshot=snapshot,
+                                            numeric_status=numeric_status),
+        "numeric_rule": "OK: value/quantity match, or value excess >= 100 and quantity excess 20%-80% of value excess. OK (KGS): value matches and quantity matches net weight within 0.8. Other checks must also pass.",
+        "input_observations": ["Blank dashboard quantity entries are skipped as specified; all populated quantity entries are summed before comparison with the ERP aggregate."]
+        if any(not str(value).strip() for value in snapshot.commodity_quantities) else [],
+    }
+    for label, start, end in (
+        ("Dashboard shipment to expiry", snapshot.last_date_of_shipment, snapshot.lc_expiry_date),
+        ("ERP shipment to expiry", aggregate.ship_date, aggregate.expiry_date),
+    ):
+        left, right = _normalize_date(start), _normalize_date(end)
+        add(label, "Dashboard dates" if label.startswith("Dashboard") else "ERP dates",
+            start, end, left, right,
+            f"Expiry must be {_EXPIRY_MIN_OFFSET_DAYS}-{_EXPIRY_MAX_OFFSET_DAYS} days after shipment, inclusive.",
+            _days_between_dates(start_date=left, end_date=right))
+    return _describe_comparison_evidence(evidence)
+
+
+def _describe_comparison_evidence(evidence: dict[str, object]) -> dict[str, object]:
+    """Add presentation metadata from diagnostic results, preserving legacy fields."""
+    rules = {rule["rule_id"]: rule for rule in evidence["rule_results"]}
+    def passed(name: str) -> bool:
+        return rules.get(name, {}).get("status") == "pass"
+    path = ("Value and LC quantity within tolerance" if passed("exact_value_quantity") else
+            "KGS alternative" if passed("kgs_alternative") else
+            "Approved excess" if passed("excess_minimum") and passed("excess_quantity_range") else
+            "No numeric acceptance path" if evidence.get("numeric_rule_status") == "mismatch" else
+            "Unavailable")
+    for rule_id, rule in rules.items():
+        status = rule["status"]
+        evaluation = {"pass": "Satisfied", "fail": "Evaluated; not satisfied", "unavailable": "Not evaluable"}.get(status)
+        if evaluation is None:
+            if rule_id == "exact_value_quantity":
+                evaluation = "Evaluated; did not qualify"
+            elif rule_id == "kgs_alternative" and not passed("exact_value_quantity"):
+                evaluation = "Not eligible: LC value does not match"
+            elif rule_id == "lc_quantity_match":
+                evaluation = "Difference accepted by alternative path"
+            else:
+                evaluation = "Not required"
+        rule["evaluation"] = evaluation
+
+    evidence["decision_summary"] = {
+        "numeric_path": path,
+        "failed_rule_ids": [name for name, rule in rules.items() if rule["status"] == "fail"],
+        "unavailable_rule_ids": [name for name, rule in rules.items() if rule["status"] == "unavailable"],
+    }
+    evidence["rule_reference"] = [
+        f"Evaluate numeric paths in order: value/LC quantity equality within {_DEFAULT_DECIMAL_TOLERANCE}; then KGS with value equality and net-weight tolerance {_NET_WEIGHT_TOLERANCE}; then approved excess. Inputs are rounded to 2 decimals before summing.",
+        f"Excess requires both value and LC quantity to be higher, value excess at least {_MIN_LC_VALUE_EXCESS}, and quantity excess between {_MIN_EXCESS_QUANTITY_RATIO * 100}% and {_MAX_EXCESS_QUANTITY_RATIO * 100}% of value excess, inclusive. Ratio bounds are rounded to 2 decimals.",
+        f"LC dates must match. Dashboard shipment must be 0-{_MAX_SHIPMENT_DATE_OFFSET_DAYS} days after ERP shipment. Dashboard expiry must be on/after ERP expiry; each shipment-to-expiry interval must be {_EXPIRY_MIN_OFFSET_DAYS}-{_EXPIRY_MAX_OFFSET_DAYS} days inclusive.",
+        f"Beneficiary must normalize to {_PIONEER_BENEFICIARY}. Every populated IRC/ERC section must contain the normalized ERP buyer; at least one section must be populated.",
+        "At least one normalized dashboard foreign LC reference must overlap the workbook master LC references. All nonnumeric checks must also pass for family acceptance.",
+    ]
+    links = {
+        "LC Value": ["value_floor", "exact_value_quantity", "kgs_alternative", "excess_alternative", "excess_minimum", "excess_quantity_range"],
+        "LC Qty": ["lc_quantity_match", "exact_value_quantity", "excess_alternative", "excess_minimum", "excess_quantity_range", "quantity_completeness"],
+        "Net Weight": ["kgs_alternative"], "LC Date": ["lc_date"],
+        "Shipment Date": ["shipment_offset"], "Expiry Date": ["expiry_order"],
+        "Dashboard shipment to expiry": ["dashboard_expiry_window"], "ERP shipment to expiry": ["erp_expiry_window"],
+        "Beneficiary": ["beneficiary"], "IRC Details": ["buyer_section_present", "irc_buyer"],
+        "ERC Details": ["buyer_section_present", "erc_buyer"], "Foreign LC": ["foreign_lc_overlap"],
+    }
+    numeric = {"LC Value", "LC Qty", "Net Weight"}
+    dates = {"LC Date", "Shipment Date", "Expiry Date", "Dashboard shipment to expiry", "ERP shipment to expiry"}
+    for field in evidence["fields"]:
+        name = field["field"]
+        field["rule_ids"] = [rule_id for rule_id in links.get(name, []) if rule_id in rules]
+        field["display_source"] = "ERP aggregate" if name in numeric else field["reference_source"]
+        field["difference_basis"] = ("Compared minus reference, days" if name in dates else
+                                     "Dashboard total minus ERP net weight, KGS comparison basis" if name == "Net Weight" else
+                                     "Dashboard total minus ERP LC quantity; unit not captured" if name == "LC Qty" else
+                                     "Dashboard minus ERP value; currency not captured" if name == "LC Value" else "Not applicable")
+        field["difference_display"] = ("Not applicable" if name not in numeric | dates else
+                                       "Unavailable" if field["dashboard_minus_reference"] is None else
+                                       str(field["dashboard_minus_reference"]))
+    return evidence
+
+
+def _build_rule_results(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate,
+    snapshot: DashboardFamilySnapshot, numeric_status: str | None,
+) -> list[dict[str, str]]:
+    """Explain independent checks and alternative paths without changing decisions."""
+    results: list[dict[str, str]] = []
+
+    def add(rule_id: str, status: str, reason: str, prerequisites: str = "None") -> None:
+        results.append(dict(rule_id=rule_id, status=status, reason=reason, prerequisites=prerequisites))
+
+    beneficiary = _normalize_special_text(snapshot.beneficiary_name)
+    add("beneficiary", "pass" if beneficiary == _normalize_special_text(_PIONEER_BENEFICIARY) else "fail",
+        "Beneficiary is missing/empty after normalization." if not beneficiary else
+        f"Normalized beneficiary '{beneficiary}'; expected '{_PIONEER_BENEFICIARY}'.")
+    buyer = _normalize_buyer_comparison_text(aggregate.buyer_name)
+    sections = {"irc": _normalize_buyer_comparison_text(snapshot.irc_details),
+                "erc": _normalize_buyer_comparison_text(snapshot.erc_details)}
+    add("buyer_section_present", "pass" if any(sections.values()) else "fail",
+        "At least one populated buyer section is required; " +
+        ("a section is populated." if any(sections.values()) else "both IRC and ERC are empty after normalization."))
+    for name, value in sections.items():
+        if not value:
+            add(name + "_buyer", "not_applicable", "Section is empty; the populated-section rule determines whether another section is required.")
+        elif not buyer:
+            add(name + "_buyer", "unavailable", "ERP buyer is empty after normalization; existing containment behavior is unchanged.", "Nonempty normalized ERP buyer")
+        else:
+            add(name + "_buyer", "pass" if buyer in value else "fail",
+                f"Normalized section '{value}' {'contains' if buyer in value else 'does not contain'} ERP buyer '{buyer}'.")
+
+    def date_check(rule_id: str, start: str, end: str, minimum: int, maximum: int | None, labels: str) -> None:
+        left, right = _normalize_date(start), _normalize_date(end)
+        invalid = [f"{label} is {'missing' if not str(raw).strip() else 'malformed'} ({raw!r})"
+                   for label, raw, parsed in (("start date", start, left), ("end date", end, right)) if parsed is None]
+        if invalid:
+            reason = labels + ": " + "; ".join(invalid) + "."
+            if rule_id == "lc_date" and left is None and right is None:
+                reason += " Existing LC-date equality treats two unparseable dates as equal; family decision is unchanged."
+            add(rule_id, "unavailable", reason, "Two parseable dates")
+            return
+        days = _days_between_dates(start_date=left, end_date=right)
+        passed = days >= minimum and (maximum is None or days <= maximum)
+        bound = f"{minimum} through {maximum} inclusive" if maximum is not None else f"at least {minimum}"
+        add(rule_id, "pass" if passed else "fail", f"{labels}: {days} days; required {bound} days.", "Two parseable dates")
+
+    date_check("lc_date", aggregate.lc_date, snapshot.lc_date, 0, 0, "ERP LC date to dashboard LC date")
+    date_check("shipment_offset", aggregate.ship_date, snapshot.last_date_of_shipment, 0, _MAX_SHIPMENT_DATE_OFFSET_DAYS, "ERP shipment to dashboard shipment")
+    date_check("expiry_order", aggregate.expiry_date, snapshot.lc_expiry_date, 0, None, "ERP expiry to dashboard expiry")
+    date_check("dashboard_expiry_window", snapshot.last_date_of_shipment, snapshot.lc_expiry_date, _EXPIRY_MIN_OFFSET_DAYS, _EXPIRY_MAX_OFFSET_DAYS, "Dashboard shipment to dashboard expiry")
+    date_check("erp_expiry_window", aggregate.ship_date, aggregate.expiry_date, _EXPIRY_MIN_OFFSET_DAYS, _EXPIRY_MAX_OFFSET_DAYS, "ERP shipment to ERP expiry")
+
+    references = {value for raw in family.master_lc_values if (value := _normalize_foreign_lc_reference(raw))}
+    foreign = {value for raw in snapshot.foreign_lc_numbers if (value := _normalize_foreign_lc_reference(raw))}
+    missing = []
+    if not references:
+        missing.append("Workbook Master L/C No. has no usable reference")
+    if not foreign:
+        missing.append("Dashboard Foreign LC No. has no usable reference")
+    overlap = sorted(references & foreign)
+    add("foreign_lc_overlap", "pass" if overlap else "fail",
+        "; ".join(missing) if missing else (f"Common normalized references: {', '.join(overlap)}." if overlap else "Both reference lists are populated, but no normalized reference overlaps."))
+
+    def number(raw: object, label: str) -> Decimal | None:
+        parsed = _parse_decimal(raw)
+        if parsed is None or not parsed.is_finite():
+            add(label, "unavailable", f"{label}: {'missing' if not str(raw).strip() else 'invalid or nonfinite'} value {raw!r}.")
+            return None
+        return parsed
+
+    value = number(snapshot.lc_value, "dashboard_value_input")
+    erp_value = number(aggregate.current_lc_value, "erp_value_input")
+    erp_quantity = number(aggregate.lc_qty, "erp_quantity_input")
+    parsed_quantities = [number(raw, f"dashboard_quantity_row_{index}")
+                         for index, raw in enumerate(snapshot.commodity_quantities, 1) if str(raw).strip()]
+    if not parsed_quantities:
+        add("dashboard_quantity_input", "unavailable", "Dashboard quantity list is empty or contains only blank entries.")
+    quantity = sum(parsed_quantities, Decimal("0")) if parsed_quantities and all(item is not None for item in parsed_quantities) else None
+    blank_count = sum(not str(raw).strip() for raw in snapshot.commodity_quantities)
+    if blank_count:
+        add("quantity_completeness", "not_applicable", f"{blank_count} blank dashboard quantity entries skipped as specified. All populated entries contribute to the total; blank rows do not cause a failure.")
+    vr = _decimal_relation(value, erp_value) if value is not None and erp_value is not None else None
+    qr = _decimal_relation(quantity, erp_quantity) if quantity is not None and erp_quantity is not None else None
+    add("value_floor", "unavailable" if vr is None else ("fail" if vr == "lower" else "pass"),
+        "Not evaluated: invalid/missing value input." if vr is None else f"Dashboard LC value is {vr} relative to ERP (tolerance 0.01); lower is rejected.", "Finite ERP and dashboard values")
+    alternate_quantity = qr is not None and qr != "equal" and numeric_status in _COMPLIANT_VALUES
+    add("lc_quantity_match", "unavailable" if qr is None else ("pass" if qr == "equal" else ("not_applicable" if alternate_quantity else "fail")),
+        "Not evaluated: invalid/missing quantity input." if qr is None else
+        f"Dashboard total is {qr} relative to ERP LC quantity (tolerance 0.01). " +
+        (f"Exact quantity equality is not required: the alternative numeric path returned {numeric_status}." if alternate_quantity else
+         "This is the exact-path check; KGS or excess acceptance can override its failure."), "Finite ERP quantity and dashboard total")
+    exact = vr == "equal" and qr == "equal"
+    add("exact_value_quantity", "unavailable" if vr is None or qr is None else ("pass" if exact else "not_applicable"),
+        "Not evaluated: value or quantity input unavailable." if vr is None or qr is None else
+        ("Value and LC quantity match within 0.01." if exact else f"Exact path not satisfied: value is {vr}, quantity is {qr}; alternative paths are evaluated separately."), "Finite values and quantities")
+
+    weight = aggregate.net_weight
+    finite_weight = weight is not None and weight.is_finite()
+    kgs = vr == "equal" and qr is not None and not exact and quantity is not None and finite_weight and _decimal_matches(quantity, weight, tolerance=_NET_WEIGHT_TOLERANCE)
+    if exact or (vr is not None and vr != "equal"):
+        add("kgs_alternative", "not_applicable", "Exact path already passes." if exact else f"KGS requires matching LC value; dashboard value is {vr}.")
+    elif vr is None or qr is None or not finite_weight:
+        add("kgs_alternative", "unavailable", "Not evaluated: matching value, usable quantity and finite ERP net weight are required; " + ("ERP net weight is missing or nonfinite." if not finite_weight else "value/quantity input is unavailable."))
+    else:
+        add("kgs_alternative", "pass" if kgs else "fail", f"Dashboard quantity minus ERP net weight = {_decimal_to_string(quantity - weight)}; absolute tolerance 0.8.")
+
+    if exact or kgs:
+        add("excess_alternative", "not_applicable", "Exact or KGS acceptance path already passes.")
+    elif vr is None or qr is None:
+        add("excess_alternative", "unavailable", "Not evaluated: value or quantity input unavailable.")
+    elif vr != "higher" or qr != "higher":
+        add("excess_alternative", "fail", f"Both must be higher: value is {vr}, quantity is {qr}; excess cannot compensate for a lower or equal field.")
+    else:
+        excess = value - erp_value
+        delta = quantity - erp_quantity
+        low = (excess * _MIN_EXCESS_QUANTITY_RATIO).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        high = (excess * _MAX_EXCESS_QUANTITY_RATIO).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        add("excess_minimum", "pass" if excess >= _MIN_LC_VALUE_EXCESS else "fail", f"Value excess {excess}; minimum {_MIN_LC_VALUE_EXCESS}.")
+        add("excess_quantity_range", "pass" if low <= delta <= high else "fail", f"Quantity excess {delta}; allowed {low} through {high} inclusive (20%-80% of value excess). Both excess checks must pass.")
+    return results
+
+
+def _render_comparison_evidence(families) -> str:
+    sections: list[str] = []
+
+    def display(value: object) -> str:
+        if isinstance(value, list):
+            return "<br>".join(escape(str(item)) if str(item).strip() else "(blank)" for item in value) or "(empty list)"
+        return escape(str(value)) if value is not None and str(value).strip() else "Unavailable"
+
+    for index, family in enumerate(families if isinstance(families, list) else []):
+        if not isinstance(family, dict) or not isinstance(family.get("comparison_evidence"), dict):
+            continue
+        evidence = family["comparison_evidence"]
+        rules = {rule["rule_id"]: rule for rule in evidence.get("rule_results", [])}
+
+        def rule_link(rule_id: str) -> str:
+            rule = rules[rule_id]
+            return f'<a href="#evidence-{index}-{escape(rule_id, quote=True)}">{escape(rule_id)}: {escape(rule.get("evaluation", rule["status"]))}</a>'
+
+        rule_rows = "".join(f'<tr id="evidence-{index}-{escape(rule["rule_id"], quote=True)}">' + "".join(f"<td>{escape(str(rule.get(key, '')))}</td>"
+                            for key in ("rule_id", "status", "evaluation", "prerequisites", "reason")) + "</tr>"
+                            for rule in rules.values())
+        rows = []
+        for field in evidence.get("fields", []):
+            name = field.get("field", "")
+            compared = display(field.get("dashboard_value"))
+            if name in {"LC Qty", "Net Weight"}:
+                compared = "Commodity rows:<br>" + compared + "<br>Total: " + display(field.get("normalized_dashboard"))
+            cells = [display(name), display(field.get("display_source", field.get("reference_source"))),
+                     display(field.get("reference_value")), compared, display(field.get("normalized_reference")),
+                     display(field.get("normalized_dashboard")), display(field.get("difference_display", field.get("dashboard_minus_reference"))),
+                     display(field.get("difference_basis", "Not specified")),
+                     "<br>".join(rule_link(key) for key in field.get("rule_ids", []) if key in rules) or display(field.get("rule"))]
+            rows.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+        summary = evidence.get("decision_summary", {})
+        findings = [rule for rule in rules.values() if rule["status"] in {"fail", "unavailable"}]
+        findings_html = "".join(f"<li>{rule_link(rule['rule_id'])}: {escape(rule['reason'])}</li>" for rule in findings)
+        reference = evidence.get("rule_reference", [])
+        sections.append(
+            f"<details><summary>{escape(str(family.get('lc_sc_no', '')))} — SL.No. {escape(_format_report_sl_no_values(family.get('sl_no_values', [])))}</summary>"
+            "<h3>Decision summary</h3>"
+            f"<p>Overall decision: {display(family.get('final_decision'))}. Workbook status: {display(family.get('final_workbook_value'))}.</p>"
+            f"<p>Numeric acceptance path: {display(summary.get('numeric_path', 'Unavailable'))}. All other required checks still apply.</p>"
+            f"<p>Recorded family reasons: {display(family.get('decision_reasons', []))}</p>"
+            "<p>Diagnostic findings (do not replace the recorded decision):</p>"
+            + (f"<ul>{findings_html}</ul>" if findings_html else
+               "<p>No failed or unavailable diagnostic checks.</p>" if rules else "<p>No rule diagnostics recorded.</p>") +
+            '<details><summary>Rule reference</summary><ul>' + "".join(f"<li>{escape(str(item))}</li>" for item in reference) + "</ul></details>"
+            "<h3>Comparison evidence</h3>"
+            '<div class="table-wrap"><table><thead><tr><th>Field</th><th>Reference source</th><th>Reference value / interval start</th><th>Compared value / interval end</th><th>Normalized reference</th><th>Normalized compared value</th><th>Difference</th><th>Measurement basis</th><th>Interpretation and rule links</th></tr></thead>'
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
+            "<p>Rule explanations are diagnostic. Alternative paths are not individually required; the family decision above remains authoritative.</p>"
+            '<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Result</th><th>Evaluation</th><th>Prerequisites</th><th>Explanation</th></tr></thead>'
+            f"<tbody>{rule_rows}</tbody></table></div></details>"
+        )
+    return '<section class="section"><h2>Comparison Evidence</h2>' + "".join(sections) + "</section>" if sections else ""
 
 
 def _build_report_html(*, report_payload: dict[str, object]) -> str:
@@ -1389,9 +1819,11 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "    <h1>Workflow Dashboard: bb_dashboard_verification</h1>\n"
         f"    <p class=\"meta\">Generated at: {escape(generated_at_display)} ({escape(state_timezone)})</p>\n"
         f"{_render_report_key_value_section('Snapshot', snapshot_rows)}\n"
+        f"{_render_workbook_write_outcome(report_payload)}\n"
         f"{_render_report_key_value_section('Summary', summary_rows)}\n"
         "    <section class=\"section family-results-section\">\n"
         "      <h2 class=\"sticky-section-title\">Family Results</h2>\n"
+        "      <p>Family decisions describe verification. Workbook status and date values below are planned values; consult Workbook Write Outcome for commit confirmation.</p>\n"
         "      <div class=\"table-wrap\">\n"
         "      <table class=\"wide-table\">\n"
         "        <colgroup>\n"
@@ -1424,10 +1856,31 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "      </table>\n"
         "      </div>\n"
         "    </section>\n"
+        f"{_render_comparison_evidence(families)}\n"
+        f"{_render_skipped_rows(report_payload.get('skipped_rows', []))}\n"
         "  </main>\n"
         "</body>\n"
         "</html>\n"
     )
+
+
+def _render_workbook_write_outcome(payload: dict[str, object]) -> str:
+    outcome = payload.get("workbook_write")
+    if not isinstance(outcome, dict):
+        return ""
+    section = _render_report_key_value_section("Workbook Write Outcome", [
+        ("Write phase", payload.get("write_phase_status", "unavailable")),
+        ("Outcome", outcome.get("message", "")),
+        ("Planned cell writes", outcome.get("planned_operation_count", 0)),
+        ("Confirmed cell writes", outcome.get("confirmed_operation_count", 0)),
+    ])
+    discrepancies = outcome.get("discrepancies", [])
+    if discrepancies:
+        section += '<section class="section"><h2>Run discrepancies</h2><ul>' + "".join(
+            f"<li>{escape(str(item.get('code', '')))}: {escape(str(item.get('message', '')))}</li>"
+            for item in discrepancies
+        ) + "</ul></section>"
+    return section
 
 
 def _local_display_timestamp(*, generated_at_utc: object, state_timezone: str) -> str:
@@ -1484,16 +1937,18 @@ def _format_report_sl_no_values(values: object) -> str:
 
 
 def _format_report_sl_no_value(value: object) -> str:
-    candidate = str(value).strip()
-    if not candidate:
+    return value.strip() if isinstance(value, str) else _stringify_sl_no_text(value)
+
+
+def _render_skipped_rows(rows: list[dict[str, object]]) -> str:
+    if not rows:
         return ""
-    try:
-        decimal_value = Decimal(candidate.replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return candidate
-    if decimal_value == decimal_value.to_integral_value():
-        return str(int(decimal_value))
-    return candidate
+    rendered = "".join("<tr>" + "".join(f"<td>{escape(str(row.get(key, '')))}</td>"
+                                         for key in ("sl_no", "row_index", "lc_sc_no", "reason")) + "</tr>"
+                       for row in rows)
+    return ('<section class="section"><h2>Skipped workbook rows</h2><table><thead><tr>'
+            '<th>SL.No.</th><th>Workbook row</th><th>LC/SC</th><th>Reason</th></tr></thead>'
+            f'<tbody>{rendered}</tbody></table></section>')
 
 
 def _build_search_keys(*, ship_remarks: str | None, workbook_lc_sc_no: str) -> list[str]:
@@ -1742,8 +2197,9 @@ def _parse_decimal(value: object) -> Decimal | None:
     if not candidate:
         return None
     try:
-        return Decimal(candidate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except InvalidOperation:
+        parsed = Decimal(candidate)
+        return parsed.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if parsed.is_finite() else None
+    except DecimalException:
         return None
 
 
@@ -1757,10 +2213,16 @@ def _sum_decimal_strings(values) -> Decimal | None:
                 return None
             continue
         saw_value = True
-        total += parsed
+        try:
+            total += parsed
+        except DecimalException:
+            return None
     if not saw_value:
         return None
-    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    try:
+        return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except DecimalException:
+        return None
 
 
 def _decimal_matches(
@@ -1829,6 +2291,8 @@ def _dedupe_erp_rows(rows: list) -> list:
             str(getattr(row, "lc_qty", "")),
             str(getattr(row, "net_weight", "")),
             str(getattr(row, "ship_remarks", "")),
+            str(getattr(row, "amd_no", "")),
+            str(getattr(row, "amd_date", "")),
         )
         if signature in seen:
             continue

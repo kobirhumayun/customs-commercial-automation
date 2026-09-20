@@ -93,6 +93,7 @@ from project.workflows.document_verification import (
 from project.workflows.bb_dashboard_verification import (
     open_bb_dashboard_verification_report_in_browser,
     persist_bb_dashboard_verification_report,
+    refresh_bb_dashboard_verification_report,
     validate_bb_dashboard_verification_run,
 )
 from project.workflows.bb_dashboard_verification.providers import (
@@ -2053,6 +2054,9 @@ def _handle_validate_run(args: argparse.Namespace) -> int:
             to_jsonable(validation_result.commit_marker),
         )
         if descriptor.workflow_id == WorkflowId.BB_DASHBOARD_VERIFICATION:
+            dashboard_result = refresh_bb_dashboard_verification_report(
+                result=dashboard_result, validation_result=validation_result,
+            )
             report_output_json, report_output_html = persist_bb_dashboard_verification_report(
                 run_root=initialized.artifact_paths.run_root,
                 report_payload=dashboard_result.report_payload,
