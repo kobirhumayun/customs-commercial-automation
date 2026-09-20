@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import webbrowser
 from dataclasses import dataclass, replace
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_HALF_UP
 from html import escape
 from pathlib import Path
 import re
@@ -159,11 +159,13 @@ def validate_bb_dashboard_verification_run(
         master_lc_column_index=header_mapping["master_lc_no"],
         live_workbook_path=live_workbook_path,
     )
+    skipped_rows: list[dict[str, object]] = []
     candidate_families = _build_candidate_families(
         workbook_snapshot=workbook_snapshot,
         header_mapping=header_mapping,
         sl_no_values_by_row=sl_no_values_by_row,
         master_lc_values_by_row=master_lc_values_by_row,
+        skipped_rows=skipped_rows,
     )
     erp_rows_by_family = _group_erp_rows_by_family(erp_rows)
 
@@ -289,9 +291,9 @@ def validate_bb_dashboard_verification_run(
                 family=family,
                 sheet_name=workbook_snapshot.sheet_name,
                 final_status=discrepancy.message,
-                writes_dates=False,
-                ship_date="",
-                expiry_date="",
+                writes_dates=True,
+                ship_date=aggregate.ship_date,
+                expiry_date=aggregate.expiry_date,
             )
             staged_write_plan.extend(family_operations)
             mail_outcomes.append(
@@ -382,11 +384,26 @@ def validate_bb_dashboard_verification_run(
             )
             continue
 
-        final_decision, final_status, decision_reasons, dashboard_snapshot, writes_dates = _evaluate_lookup_result(
-            family=family,
-            aggregate=aggregate,
-            lookup_result=lookup_result,
-        )
+        numeric_issues = _dashboard_numeric_issues(lookup_result.snapshot)
+        try:
+            if numeric_issues:
+                raise InvalidOperation("Dashboard numeric input is invalid")
+            final_decision, final_status, decision_reasons, dashboard_snapshot, writes_dates = _evaluate_lookup_result(
+                family=family, aggregate=aggregate, lookup_result=lookup_result,
+            )
+        except DecimalException as exc:
+            numeric_issues = numeric_issues or [f"Numeric comparison failed: {type(exc).__name__}: {exc}"]
+            final_decision = FinalDecision.HARD_BLOCK
+            final_status = "Invalid dashboard numeric input"
+            decision_reasons = numeric_issues
+            dashboard_snapshot = lookup_result.snapshot
+            writes_dates = False
+            discrepancy_reports.append(_build_discrepancy(
+                run_report=run_report, code="bb_dashboard_numeric_input_invalid",
+                message=final_status, mail_id=family.family_id,
+                details={"lc_sc_no": family.lc_sc_no, "issues": numeric_issues,
+                         "dashboard": to_jsonable(dashboard_snapshot)},
+            ))
         family_operations = _build_family_write_operations(
             run_report=run_report,
             family=family,
@@ -464,6 +481,7 @@ def validate_bb_dashboard_verification_run(
     report_payload = _build_report_payload(
         run_report=updated_run_report,
         families=report_families,
+        skipped_rows=skipped_rows,
     )
     return BBDashboardVerificationResult(
         validation_result=validation_result,
@@ -498,6 +516,7 @@ def _build_candidate_families(
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
     master_lc_values_by_row: dict[int, list[str]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> list[DashboardCandidateFamily]:
     families: dict[str, list[DashboardCandidateRow]] = {}
     ordered_keys: list[str] = []
@@ -507,6 +526,7 @@ def _build_candidate_families(
             header_mapping=header_mapping,
             sl_no_values_by_row=sl_no_values_by_row,
             master_lc_values_by_row=master_lc_values_by_row,
+            skipped_rows=skipped_rows,
         )
         if candidate is None:
             continue
@@ -545,6 +565,7 @@ def _build_candidate_row(
     header_mapping: dict[str, int],
     sl_no_values_by_row: dict[int, str],
     master_lc_values_by_row: dict[int, list[str]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> DashboardCandidateRow | None:
     up_no = row.values.get(header_mapping["up_no"], "").strip()
     if up_no:
@@ -564,6 +585,11 @@ def _build_candidate_row(
     raw_lc_sc_no = row.values.get(header_mapping["lc_sc_no"], "").strip()
     lc_sc_key = _normalize_lc_family_key(raw_lc_sc_no)
     if not lc_sc_key:
+        if skipped_rows is not None:
+            skipped_rows.append({"row_index": row.row_index,
+                                 "sl_no": sl_no_values_by_row.get(row.row_index, ""),
+                                 "lc_sc_no": raw_lc_sc_no,
+                                 "reason": "Otherwise eligible row has no usable LC family identifier; no writes staged."})
         return None
 
     sl_no = sl_no_values_by_row.get(row.row_index, "").strip()
@@ -682,7 +708,7 @@ def _read_live_display_values(*, sheet, column_index: int, row_indexes: list[int
     resolved: dict[int, str] = {}
     for row_index in row_indexes:
         displayed_value = sheet.range((row_index, column_index)).api.Text
-        resolved[row_index] = _stringify_sl_no_text(displayed_value)
+        resolved[row_index] = str(displayed_value).strip() if displayed_value is not None else ""
     return resolved
 
 
@@ -771,6 +797,10 @@ def _build_erp_family_aggregate(
         expiry_dates=expiry_dates,
         ship_remarks=ship_remarks,
     )
+    for field_label, values in (("Shipment Date", ship_dates), ("Expiry Date", expiry_dates)):
+        for value in values:
+            if _normalize_date(value) is None:
+                consistency_issues.append(f"{field_label} could not be parsed ({value!r})")
     if consistency_issues:
         issue_text = "; ".join(consistency_issues)
         return None, _build_discrepancy(
@@ -802,9 +832,14 @@ def _build_erp_family_aggregate(
         return None, _build_discrepancy(
             run_report=run_report,
             code="bb_dashboard_family_input_invalid",
-            message=f"ERP family inputs were missing required numeric fields for workbook family {family.lc_sc_no}.",
+            message=f"ERP family inputs contained missing or invalid required numeric fields for workbook family {family.lc_sc_no}.",
             mail_id=family.family_id,
-            details={"lc_sc_no": family.lc_sc_no},
+            details={"lc_sc_no": family.lc_sc_no, "numeric_rows": [
+                {"source_row_index": getattr(row, "source_row_index", None),
+                 "current_lc_value": getattr(row, "current_lc_value", ""),
+                 "lc_qty": getattr(row, "lc_qty", "")}
+                for row in deduped_rows
+            ]},
         )
 
     return (
@@ -823,6 +858,17 @@ def _build_erp_family_aggregate(
         ),
         None,
     )
+
+
+def _dashboard_numeric_issues(snapshot: DashboardFamilySnapshot | None) -> list[str]:
+    if snapshot is None:
+        return []
+    values = [("LC Value", snapshot.lc_value)] + [
+        (f"Commodity quantity row {index}", value)
+        for index, value in enumerate(snapshot.commodity_quantities, 1)
+    ]
+    return [f"{label} is malformed or nonfinite: {value!r}." for label, value in values
+            if str(value).strip() and _parse_decimal(value) is None]
 
 
 def _evaluate_lookup_result(
@@ -1223,6 +1269,7 @@ def _build_report_payload(
     *,
     run_report: RunReport,
     families: list[dict[str, object]],
+    skipped_rows: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -1235,6 +1282,7 @@ def _build_report_payload(
         "summary": dict(run_report.summary),
         "family_count": len(families),
         "families": families,
+        "skipped_rows": list(skipped_rows or []),
     }
 
 
@@ -1370,7 +1418,7 @@ def _build_comparison_evidence(
         "rule_results": _build_rule_results(family=family, aggregate=aggregate, snapshot=snapshot,
                                             numeric_status=numeric_status),
         "numeric_rule": "OK: value/quantity match, or value excess >= 100 and quantity excess 20%-80% of value excess. OK (KGS): value matches and quantity matches net weight within 0.8. Other checks must also pass.",
-        "input_observations": ["Blank commodity quantity entries are omitted by the existing summation rule."]
+        "input_observations": ["Blank dashboard quantity entries are skipped as specified; all populated quantity entries are summed before comparison with the ERP aggregate."]
         if any(not str(value).strip() for value in snapshot.commodity_quantities) else [],
     }
     for label, start, end in (
@@ -1524,7 +1572,7 @@ def _build_rule_results(
     quantity = sum(parsed_quantities, Decimal("0")) if parsed_quantities and all(item is not None for item in parsed_quantities) else None
     blank_count = sum(not str(raw).strip() for raw in snapshot.commodity_quantities)
     if blank_count:
-        add("quantity_completeness", "unavailable", f"{blank_count} blank quantity entries omitted by existing summation; the total may be partial. Family decision is unchanged.")
+        add("quantity_completeness", "not_applicable", f"{blank_count} blank dashboard quantity entries skipped as specified. All populated entries contribute to the total; blank rows do not cause a failure.")
     vr = _decimal_relation(value, erp_value) if value is not None and erp_value is not None else None
     qr = _decimal_relation(quantity, erp_quantity) if quantity is not None and erp_quantity is not None else None
     add("value_floor", "unavailable" if vr is None else ("fail" if vr == "lower" else "pass"),
@@ -1752,6 +1800,7 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "      </div>\n"
         "    </section>\n"
         f"{_render_comparison_evidence(families)}\n"
+        f"{_render_skipped_rows(report_payload.get('skipped_rows', []))}\n"
         "  </main>\n"
         "</body>\n"
         "</html>\n"
@@ -1812,16 +1861,18 @@ def _format_report_sl_no_values(values: object) -> str:
 
 
 def _format_report_sl_no_value(value: object) -> str:
-    candidate = str(value).strip()
-    if not candidate:
+    return value.strip() if isinstance(value, str) else _stringify_sl_no_text(value)
+
+
+def _render_skipped_rows(rows: list[dict[str, object]]) -> str:
+    if not rows:
         return ""
-    try:
-        decimal_value = Decimal(candidate.replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return candidate
-    if decimal_value == decimal_value.to_integral_value():
-        return str(int(decimal_value))
-    return candidate
+    rendered = "".join("<tr>" + "".join(f"<td>{escape(str(row.get(key, '')))}</td>"
+                                         for key in ("sl_no", "row_index", "lc_sc_no", "reason")) + "</tr>"
+                       for row in rows)
+    return ('<section class="section"><h2>Skipped workbook rows</h2><table><thead><tr>'
+            '<th>SL.No.</th><th>Workbook row</th><th>LC/SC</th><th>Reason</th></tr></thead>'
+            f'<tbody>{rendered}</tbody></table></section>')
 
 
 def _build_search_keys(*, ship_remarks: str | None, workbook_lc_sc_no: str) -> list[str]:
@@ -2070,8 +2121,9 @@ def _parse_decimal(value: object) -> Decimal | None:
     if not candidate:
         return None
     try:
-        return Decimal(candidate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except InvalidOperation:
+        parsed = Decimal(candidate)
+        return parsed.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if parsed.is_finite() else None
+    except DecimalException:
         return None
 
 
@@ -2085,10 +2137,16 @@ def _sum_decimal_strings(values) -> Decimal | None:
                 return None
             continue
         saw_value = True
-        total += parsed
+        try:
+            total += parsed
+        except DecimalException:
+            return None
     if not saw_value:
         return None
-    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    try:
+        return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except DecimalException:
+        return None
 
 
 def _decimal_matches(

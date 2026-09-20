@@ -625,8 +625,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
         self.assertIn("Dashboard Quantity Total", report_html)
         self.assertIn("ERP Net Weight", report_html)
         self.assertIn("COG/VDAL/08/2025<br>EXTRA-FLC-002", report_html)
-        self.assertIn(">633<", report_html)
-        self.assertNotIn(">633.0<", report_html)
+        self.assertIn(">633.0<", report_html)  # Report strings preserve workbook display text.
         self.assertIn(">33170<", report_html)
         self.assertIn(">21054.11<", report_html)
         self.assertLess(report_html.index("ERP LC Qty"), report_html.index("ERP Net Weight"))

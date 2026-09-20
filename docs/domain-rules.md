@@ -433,6 +433,7 @@ Comparison rules:
 - within foreign-LC normalization, `and` and `&` are interchangeable equivalents anywhere in the value
 - foreign-LC comparison passes when at least one normalized workbook `Master L/C No.` value is common with at least one normalized dashboard `Foreign LC No` value
 - sum all dashboard `Local LC Commodity Detail -> QUANTITY` rows before quantity comparison
+- Skip blank dashboard quantity cells and blank ERP `LC Qty` cells. Sum all populated numeric cells on each side before comparing the two family totals. Blank rows alone are not a failure; an entirely blank list is unavailable, not zero. Populated malformed/nonfinite cells remain invalid input.
 - if dashboard `LC Value` exactly matches ERP and summed dashboard quantity exactly matches aggregated ERP `LC Qty`, write `OK`
 - if dashboard `LC Value` exceeds ERP by at least `100`, summed dashboard quantity also exceeds ERP `LC Qty`, and quantity excess is between `20%` and `80%` of the value excess inclusive, treat that as compliant and write `OK`
 - if only one of dashboard `LC Value` or summed dashboard quantity is higher while the other remains equal to ERP, fail immediately
@@ -446,6 +447,7 @@ Result rules:
 - if the dashboard search returns no result or incomplete data, write a clear message specific to that occurrence type
 - the current implementation also stages workbook `Shipment Date` and `Expiry Date` updates on warning/failure families produced after dashboard lookup/comparison; upstream ERP/input hard-block families still skip that date writeback
 - ERP is authoritative for those two fields whenever this workflow stages those writes
+- Both returned dashboard fetch errors and raised lookup exceptions stage status plus ERP shipment/expiry date refresh on eligible rows; the family remains hard-blocked for verification. Each ERP date must be a consistent, parseable calendar date. Missing/conflicting/malformed ERP family dates hard-block upstream with no date refresh.
 
 Reporting rules:
 - emit JSON and HTML verification reports for the run

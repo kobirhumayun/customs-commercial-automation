@@ -1,5 +1,5 @@
 from dataclasses import replace
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 import unittest
 
 from project.workflows.bb_dashboard_verification import (
@@ -60,18 +60,18 @@ class ComparisonEvidenceTests(unittest.TestCase):
         html = _render_comparison_evidence([{"lc_sc_no": "LC-1", "sl_no_values": ["002"], "comparison_evidence": evidence}])
         self.assertIn("&lt;script&gt;", html)
         self.assertNotIn("<script>", html)
-        self.assertIn("SL.No. 2", html)  # Keep the existing report display convention.
+        self.assertIn("SL.No. 002", html)
         self.assertEqual(_render_comparison_evidence([{"lc_sc_no": "legacy"}]), "")
 
-    def test_characterize_unparseable_lc_dates_and_nonfinite_numbers(self):
+    def test_characterize_unparseable_lc_dates_and_reject_nonfinite_numbers(self):
         # Existing behavior retained pending explicit approval of decision changes.
         comparison = _compare_dashboard_snapshot(
             family=self.family, aggregate=replace(self.erp, lc_date="invalid"),
             snapshot=replace(self.snapshot, lc_date="also invalid"),
         )
         self.assertEqual(comparison["status"], "OK")
-        with self.assertRaises(InvalidOperation):
-            _compare_value_and_quantity(dashboard_lc_value=_parse_decimal("NaN"), quantity_sum=Decimal("100"), aggregate=self.erp)
+        for raw in ("NaN", "sNaN", "Infinity", "-Infinity"):
+            self.assertIsNone(_parse_decimal(raw))
 
     def rules(self, snapshot=None, aggregate=None, family=None):
         evidence = _build_comparison_evidence(

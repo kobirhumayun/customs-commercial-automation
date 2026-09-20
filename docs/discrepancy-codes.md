@@ -137,6 +137,7 @@ Every discrepancy payload should include:
 |---|---|---|---|
 | `bb_dashboard_family_input_invalid` | `hard_block` | bb_dashboard_verification | Required workbook or ERP inputs for a candidate LC family were missing, unreadable, or not deterministically consistent. |
 | `bb_dashboard_fetch_runtime_error` | `hard_block` | bb_dashboard_verification | The live/dashboard-provider fetch failed before a deterministic family result could be formed. |
+| `bb_dashboard_numeric_input_invalid` | `hard_block` | bb_dashboard_verification | Dashboard numeric input is malformed/nonfinite or numeric evaluation raises a decimal arithmetic error. Required details: `lc_sc_no`, `issues`, and `dashboard` snapshot. New workflow-local code; existing codes remain unchanged. |
 
 ## 5) Change-control checklist for new codes
 A PR introducing new discrepancy code(s) must include:

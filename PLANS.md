@@ -86,6 +86,7 @@ Goal: process fabric-related import emails and map validated BTB LC data to a si
 - One import LC mapped to exactly one row.
 
 ### Phase 5 — Bangladesh Bank dashboard verification
+- Hardening: preserve blank-skipping for ERP/dashboard quantity aggregation; contain malformed numeric input per family; make both provider failure forms refresh consistent, parseable ERP dates; report skipped missing-LC rows and preserve displayed serial numbers.
 Goal: implement dashboard verification with workbook status results plus ERP shipment/expiry date refresh for families reaching dashboard lookup/comparison.
 - Dashboard login via Playwright.
 - Candidate-row filtering from master workbook using first-line `UD No. & IP No.` eligibility and non-`EXP`/non-`IP` exclusion.
