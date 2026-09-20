@@ -1,4 +1,7 @@
 from dataclasses import replace
+from contextlib import ExitStack, redirect_stdout
+import io
+import json
 from decimal import InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,7 +11,8 @@ from unittest.mock import patch
 from tests.test_bb_dashboard_verification import _write_dashboard_fixture_bundle
 from project.config import load_workflow_config
 from project.erp import JsonManifestERPRowProvider
-from project.models import WorkflowId
+from project.models import WorkflowId, WritePhaseStatus, WriteCommitMarker
+from project.cli import main
 from project.rules import load_rule_pack
 from project.workbook import JsonManifestWorkbookSnapshotProvider
 from project.workflows.bootstrap import initialize_workflow_run
@@ -16,6 +20,7 @@ from project.workflows.registry import get_workflow_descriptor
 from project.workflows.bb_dashboard_verification import (
     validate_bb_dashboard_verification_run, _evaluate_lookup_result,
     _format_report_sl_no_value, _read_live_display_values,
+    refresh_bb_dashboard_verification_report, _dedupe_erp_rows,
 )
 from project.workflows.bb_dashboard_verification.providers import (
     JsonManifestDashboardLookupProvider, DashboardLookupResult,
@@ -27,6 +32,7 @@ class DashboardHardeningTests(TestCase):
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         config_path, workbook_path, erp_path, dashboard_path = _write_dashboard_fixture_bundle(Path(temp.name))
+        self.config_path, self.erp_path, self.dashboard_path = config_path, erp_path, dashboard_path
         descriptor = get_workflow_descriptor(WorkflowId.BB_DASHBOARD_VERIFICATION)
         config = load_workflow_config(descriptor=descriptor, config_path=config_path)
         initialized = initialize_workflow_run(descriptor=descriptor, config=config,
@@ -201,3 +207,95 @@ class DashboardHardeningTests(TestCase):
                 resolved = _read_live_display_values(sheet=Sheet(), column_index=1, row_indexes=[11])
                 self.assertEqual(resolved[11], text)
                 self.assertEqual(_format_report_sl_no_value(resolved[11]), text)
+
+    def test_extreme_finite_arithmetic_failure_does_not_abort_report(self):
+        for index in (0, 1):
+            self.args["erp_rows"][index] = replace(self.args["erp_rows"][index],
+                current_lc_value="-45000000000000000000000000", lc_qty="-45000000000000000000000000")
+        result = self.validate_first_snapshot(lc_value="90000000000000000000000000",
+                                              commodity_quantities=["90000000000000000000000000"])
+        first, second = result.report_payload["families"][:2]
+        self.assertEqual(first["final_decision"], "hard_block")
+        self.assertEqual(first["dashboard"]["lc_value"], "90000000000000000000000000")
+        self.assertEqual(first["comparison_evidence"]["availability"], "unavailable")
+        self.assertIn("InvalidOperation", first["comparison_evidence"]["evidence_error"])
+        self.assertEqual(second["final_decision"], "pass")
+        self.assertIn("comparison_arithmetic", result.report_html)
+
+    def test_distinct_amendments_are_aggregated_and_repeated_exports_deduped(self):
+        first = replace(self.args["erp_rows"][0], amd_no="1", amd_date="2026-01-12")
+        second = replace(first, amd_no="2", amd_date="2026-01-13", source_row_index=2)
+        repeated = replace(second, source_row_index=99)
+        self.args["erp_rows"] = [first, second, repeated, self.args["erp_rows"][2]]
+        result = validate_bb_dashboard_verification_run(**self.args, dashboard_provider=self.provider)
+        family = result.report_payload["families"][0]
+        self.assertEqual(family["erp"]["source_row_count"], 2)
+        self.assertEqual(family["erp"]["current_lc_value"], "100")
+        self.assertEqual(family["erp"]["lc_qty"], "40")
+        self.assertEqual(family["erp"]["net_weight"], "36")
+        self.assertEqual(family["final_workbook_value"], "OK")
+
+    def test_amendment_number_or_date_distinguishes_rows_and_blank_identity_still_dedupes(self):
+        first = self.args["erp_rows"][0]
+        for change in ({"amd_no": "1"}, {"amd_date": "2026-01-12"}):
+            self.assertEqual(len(_dedupe_erp_rows([first, replace(first, **change)])), 2)
+        self.assertEqual(len(_dedupe_erp_rows([first, replace(first, source_row_index=99)])), 1)
+
+    def test_write_report_requires_committed_phase_and_matching_marker(self):
+        result = validate_bb_dashboard_verification_run(**self.args, dashboard_provider=self.provider)
+        validation = result.validation_result
+        run = validation.run_report
+        marker = WriteCommitMarker(run_id=run.run_id, workflow_id=run.workflow_id,
+            tool_version=run.tool_version, rule_pack_version=run.rule_pack_version,
+            committed_at_utc="2026-09-20T00:00:00Z", operation_count=len(validation.staged_write_plan),
+            mail_iteration_order_hash="fixture", staged_write_plan_hash=run.staged_write_plan_hash,
+            run_start_backup_hash=run.run_start_backup_hash, post_write_probe_summary={})
+        for phase, commit, confirmed in (
+            (WritePhaseStatus.NOT_STARTED, None, False),
+            (WritePhaseStatus.PREVALIDATED, None, False),
+            (WritePhaseStatus.HARD_BLOCKED_NO_WRITE, None, False),
+            (WritePhaseStatus.UNCERTAIN_NOT_COMMITTED, None, False),
+            (WritePhaseStatus.COMMITTED, None, False),
+            (WritePhaseStatus.COMMITTED, replace(marker, operation_count=999), False),
+            (WritePhaseStatus.COMMITTED, marker, True),
+        ):
+            with self.subTest(phase=phase, confirmed=confirmed, marker=commit):
+                updated = replace(validation, run_report=replace(run, write_phase_status=phase), commit_marker=commit)
+                refreshed = refresh_bb_dashboard_verification_report(result=result, validation_result=updated)
+                self.assertEqual(refreshed.report_payload["write_phase_status"], phase.value)
+                self.assertEqual(refreshed.report_payload["workbook_write"]["commit_confirmed"], confirmed)
+                self.assertEqual(refreshed.report_payload["families"], result.report_payload["families"])
+                self.assertIn("Workbook Write Outcome", refreshed.report_html)
+                self.assertEqual(refreshed.report_payload["workbook_write"]["confirmed_operation_count"],
+                                 len(validation.staged_write_plan) if confirmed else 0)
+
+    def test_cli_refreshes_report_after_blocked_or_uncertain_write(self):
+        for phase in (WritePhaseStatus.HARD_BLOCKED_NO_WRITE, WritePhaseStatus.UNCERTAIN_NOT_COMMITTED):
+            with self.subTest(phase=phase), ExitStack() as stack:
+                def validate(**kwargs):
+                    kwargs["live_workbook_path"] = None
+                    return validate_bb_dashboard_verification_run(**kwargs)
+
+                def write(**kwargs):
+                    result = kwargs["validation_result"]
+                    discrepancy = replace(result.discrepancy_reports[0], mail_id=None,
+                                          code="workbook_lock_conflict", message="Write failed <fixture>")
+                    return replace(result, run_report=replace(result.run_report, write_phase_status=phase),
+                                   discrepancy_reports=[*result.discrepancy_reports, discrepancy])
+
+                stack.enter_context(patch("project.cli._load_workbook_snapshot", return_value=self.args["workbook_snapshot"]))
+                stack.enter_context(patch("project.cli.validate_bb_dashboard_verification_run", side_effect=validate))
+                stack.enter_context(patch("project.cli.execute_live_write_batch", side_effect=write))
+                opened = stack.enter_context(patch("project.cli.open_bb_dashboard_verification_report_in_browser"))
+                stack.enter_context(redirect_stdout(io.StringIO()))
+                main(["validate-run", "bb_dashboard_verification", "--config", str(self.config_path),
+                      "--live-workbook", "--erp-json", str(self.erp_path),
+                      "--dashboard-json", str(self.dashboard_path), "--apply-live-writes"])
+                html_path = opened.call_args.kwargs["html_path"]
+                payload = json.loads((html_path.parent / "bb_dashboard_verification_report.json").read_text(encoding="utf-8"))
+                html = html_path.read_text(encoding="utf-8")
+                self.assertEqual(payload["write_phase_status"], phase.value)
+                self.assertFalse(payload["workbook_write"]["commit_confirmed"])
+                self.assertIn("Write failed &lt;fixture&gt;", html)
+                self.assertEqual(payload["families"][0]["final_workbook_value"], "OK")
+                self.assertIn("planned values", html)

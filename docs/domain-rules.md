@@ -382,6 +382,7 @@ Both groups are valid only because they match the LC value first. Quantity compa
 Verification uses:
 - workbook `L/C & S/C No.` and workbook `Master L/C No.`
 - ERP totals across amendments for `Current LC Value`, `LC Qty`, and `Net Weight`
+- For BB verification only, duplicate ERP rows must match the existing file/LC/buyer/date/value/quantity/weight/remark signature plus `Amd No` and `Amd DT`. Distinct amendment identities are retained even when amounts match; identical repeated exports of the same amendment count once, regardless of source row index. No new normalization or amendment-value interpretation is introduced.
 - ERP `LC DT.`, `Ship. DT.`, and `Expiry DT.` parsed to calendar-date values
 - ERP buyer name split using the same logic as `export_lc_sc`
 

@@ -17,6 +17,7 @@ from project.models import (
     RunReport,
     WorkflowId,
     WriteOperation,
+    WritePhaseStatus,
 )
 from project.reporting.schemas import REPORT_SCHEMA_VERSION
 from project.storage import write_json
@@ -488,6 +489,46 @@ def validate_bb_dashboard_verification_run(
         report_payload=report_payload,
         report_html=_build_report_html(report_payload=report_payload),
     )
+
+
+def refresh_bb_dashboard_verification_report(
+    *, result: BBDashboardVerificationResult, validation_result: ValidationBatchResult,
+) -> BBDashboardVerificationResult:
+    """Refresh only BB presentation after shared write processing has finished."""
+    run = validation_result.run_report
+    if run.workflow_id != WorkflowId.BB_DASHBOARD_VERIFICATION or run.run_id != result.report_payload["run_id"]:
+        raise ValueError("BB report refresh requires the same BB workflow run")
+    operations = validation_result.staged_write_plan
+    marker = validation_result.commit_marker
+    confirmed = bool(
+        run.write_phase_status == WritePhaseStatus.COMMITTED and marker is not None
+        and marker.run_id == run.run_id and marker.workflow_id == run.workflow_id
+        and marker.operation_count == len(operations)
+        and marker.staged_write_plan_hash == run.staged_write_plan_hash
+    )
+    if confirmed:
+        message = "Workbook writes committed and confirmed by the commit marker."
+    elif run.write_phase_status == WritePhaseStatus.HARD_BLOCKED_NO_WRITE:
+        message = "Workbook writes blocked; no changes committed by this write attempt."
+    elif run.write_phase_status in {WritePhaseStatus.APPLYING, WritePhaseStatus.UNCERTAIN_NOT_COMMITTED}:
+        message = "Workbook state is uncertain; changes may exist. No commit is confirmed. Follow recovery guidance before rerunning."
+    elif run.write_phase_status == WritePhaseStatus.COMMITTED:
+        message = "Committed state lacks matching commit evidence; workbook changes are not confirmed by this report."
+    elif not operations:
+        message = "No workbook writes were planned."
+    else:
+        message = "Workbook writes are planned or prevalidated, but no commit is confirmed."
+    outcome = {
+        "message": message, "commit_confirmed": confirmed,
+        "planned_operation_count": len(operations),
+        "confirmed_operation_count": len(operations) if confirmed else 0,
+        "commit_marker": to_jsonable(marker) if marker is not None else None,
+        "discrepancies": to_jsonable(validation_result.discrepancy_reports),
+    }
+    payload = {**result.report_payload, "write_phase_status": run.write_phase_status.value,
+               "workbook_write": outcome}
+    return replace(result, validation_result=validation_result, report_payload=payload,
+                   report_html=_build_report_html(report_payload=payload))
 
 
 def persist_bb_dashboard_verification_report(
@@ -1351,6 +1392,20 @@ def _build_comparison_evidence(
     *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate | None,
     snapshot: DashboardFamilySnapshot | None,
 ) -> dict[str, object]:
+    try:
+        return _build_comparison_evidence_unchecked(family=family, aggregate=aggregate, snapshot=snapshot)
+    except DecimalException as exc:
+        reason = f"Comparison evidence could not be calculated: {type(exc).__name__}: {exc}. Raw ERP/dashboard values remain in the family report."
+        return {"availability": "unavailable", "fields": [], "numeric_rule_status": None,
+                "numeric_rule_reasons": [reason], "evidence_error": reason,
+                "rule_results": [{"rule_id": "comparison_arithmetic", "status": "unavailable",
+                                  "prerequisites": "Representable decimal arithmetic", "reason": reason}]}
+
+
+def _build_comparison_evidence_unchecked(
+    *, family: DashboardCandidateFamily, aggregate: ERPFamilyAggregate | None,
+    snapshot: DashboardFamilySnapshot | None,
+) -> dict[str, object]:
     """Report-only observations; never used to select decisions or workbook writes."""
     if aggregate is None or snapshot is None:
         return {"availability": "unavailable", "fields": [], "numeric_rule_status": None,
@@ -1764,9 +1819,11 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "    <h1>Workflow Dashboard: bb_dashboard_verification</h1>\n"
         f"    <p class=\"meta\">Generated at: {escape(generated_at_display)} ({escape(state_timezone)})</p>\n"
         f"{_render_report_key_value_section('Snapshot', snapshot_rows)}\n"
+        f"{_render_workbook_write_outcome(report_payload)}\n"
         f"{_render_report_key_value_section('Summary', summary_rows)}\n"
         "    <section class=\"section family-results-section\">\n"
         "      <h2 class=\"sticky-section-title\">Family Results</h2>\n"
+        "      <p>Family decisions describe verification. Workbook status and date values below are planned values; consult Workbook Write Outcome for commit confirmation.</p>\n"
         "      <div class=\"table-wrap\">\n"
         "      <table class=\"wide-table\">\n"
         "        <colgroup>\n"
@@ -1805,6 +1862,25 @@ def _build_report_html(*, report_payload: dict[str, object]) -> str:
         "</body>\n"
         "</html>\n"
     )
+
+
+def _render_workbook_write_outcome(payload: dict[str, object]) -> str:
+    outcome = payload.get("workbook_write")
+    if not isinstance(outcome, dict):
+        return ""
+    section = _render_report_key_value_section("Workbook Write Outcome", [
+        ("Write phase", payload.get("write_phase_status", "unavailable")),
+        ("Outcome", outcome.get("message", "")),
+        ("Planned cell writes", outcome.get("planned_operation_count", 0)),
+        ("Confirmed cell writes", outcome.get("confirmed_operation_count", 0)),
+    ])
+    discrepancies = outcome.get("discrepancies", [])
+    if discrepancies:
+        section += '<section class="section"><h2>Run discrepancies</h2><ul>' + "".join(
+            f"<li>{escape(str(item.get('code', '')))}: {escape(str(item.get('message', '')))}</li>"
+            for item in discrepancies
+        ) + "</ul></section>"
+    return section
 
 
 def _local_display_timestamp(*, generated_at_utc: object, state_timezone: str) -> str:
@@ -2215,6 +2291,8 @@ def _dedupe_erp_rows(rows: list) -> list:
             str(getattr(row, "lc_qty", "")),
             str(getattr(row, "net_weight", "")),
             str(getattr(row, "ship_remarks", "")),
+            str(getattr(row, "amd_no", "")),
+            str(getattr(row, "amd_date", "")),
         )
         if signature in seen:
             continue
