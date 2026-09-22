@@ -5,9 +5,10 @@ import unittest
 from project.workflows.bb_dashboard_verification import (
     DashboardCandidateFamily, ERPFamilyAggregate, _build_comparison_evidence,
     _compare_dashboard_snapshot, _compare_value_and_quantity, _parse_decimal,
-    _render_comparison_evidence, _sum_decimal_strings,
+    _render_comparison_evidence, _sum_decimal_strings, _evaluate_lookup_result,
 )
-from project.workflows.bb_dashboard_verification.providers import DashboardFamilySnapshot
+from project.models import FinalDecision
+from project.workflows.bb_dashboard_verification.providers import DashboardFamilySnapshot, DashboardLookupResult
 
 
 class ComparisonEvidenceTests(unittest.TestCase):
@@ -25,6 +26,92 @@ class ComparisonEvidenceTests(unittest.TestCase):
 
     def evidence(self, snapshot=None):
         return _build_comparison_evidence(family=self.family, aggregate=self.erp, snapshot=snapshot or self.snapshot)
+
+    def test_live_quantity_only_excess_keeps_warning_without_value_label(self):
+        family = replace(self.family, lc_sc_no="DPCBD1196342", master_lc_values=["TAL/SRS/H&M646/2026"])
+        aggregate = replace(
+            self.erp, current_lc_value=Decimal("31638.25"), lc_qty=Decimal("8645"),
+            net_weight=Decimal("5208.04"),
+        )
+        snapshot = replace(
+            self.snapshot, lc_value="31638.25", commodity_quantities=["8646"],
+            foreign_lc_numbers=["TAL/SRS/H&M/646/2026"],
+        )
+        result = _evaluate_lookup_result(
+            family=family, aggregate=aggregate,
+            lookup_result=DashboardLookupResult(outcome="resolved", attempts=[], snapshot=snapshot),
+        )
+        decision, status, reasons, returned_snapshot, writes_dates = result
+        self.assertEqual(decision, FinalDecision.WARNING)
+        self.assertEqual(status, "Foreign LC No, Quantity mismatch")
+        self.assertEqual(reasons, [
+            "Related Foreign LC/Contract Information did not overlap workbook Master L/C No. values.",
+            "Excess mismatch: dashboard quantity exceeded ERP LC Qty while dashboard LC Value matched ERP; single-field excess is not allowed.",
+        ])
+        self.assertIs(returned_snapshot, snapshot)
+        self.assertTrue(writes_dates)
+
+    def test_lower_value_with_matching_quantity_retains_only_value_failure(self):
+        for quantity, reference in (("100", "ERP LC quantity"), ("100.01", "ERP LC quantity"),
+                                    ("80", "ERP net weight"), ("80.8", "ERP net weight")):
+            for foreign_mismatch in (False, True):
+                with self.subTest(quantity=quantity, foreign_mismatch=foreign_mismatch):
+                    snapshot = replace(
+                        self.snapshot, lc_value="900", commodity_quantities=[quantity],
+                        foreign_lc_numbers=["OTHER" if foreign_mismatch else "MLC-1"],
+                    )
+                    decision, status, reasons, returned_snapshot, writes_dates = _evaluate_lookup_result(
+                        family=self.family, aggregate=self.erp,
+                        lookup_result=DashboardLookupResult(outcome="resolved", attempts=[], snapshot=snapshot),
+                    )
+                    self.assertEqual(decision, FinalDecision.WARNING)
+                    self.assertEqual(status, "Foreign LC No, Value mismatch" if foreign_mismatch else "Value mismatch")
+                    self.assertIn("LC Value mismatch: dashboard '900' was lower than ERP '1000'.", reasons)
+                    self.assertIn(f"Dashboard quantity matched {reference}.", reasons)
+                    self.assertFalse(any(reason.startswith("Quantity mismatch:") for reason in reasons))
+                    self.assertIs(returned_snapshot, snapshot)
+                    self.assertTrue(writes_dates)
+
+    def test_lower_value_still_reports_unmatched_quantity(self):
+        for quantity, net_weight in (("80.81", Decimal("80")), ("80", None), ("90", Decimal("80"))):
+            with self.subTest(quantity=quantity, net_weight=net_weight):
+                comparison = _compare_dashboard_snapshot(
+                    family=self.family, aggregate=replace(self.erp, net_weight=net_weight),
+                    snapshot=replace(self.snapshot, lc_value="900", commodity_quantities=[quantity]),
+                )
+                self.assertEqual(comparison["status"], "Value, Quantity mismatch")
+                self.assertTrue(any(reason.startswith("Quantity mismatch:") for reason in comparison["decision_reasons"]))
+
+    def test_lower_value_report_explains_quantity_match_without_accepting_kgs(self):
+        from project.workflows.bb_dashboard_verification import _build_report_html
+
+        for quantity, reference in (("80", "ERP net weight"), ("100", "ERP LC quantity")):
+            with self.subTest(quantity=quantity):
+                snapshot = replace(self.snapshot, lc_value="900", commodity_quantities=[quantity])
+                before = _compare_dashboard_snapshot(family=self.family, aggregate=self.erp, snapshot=snapshot)
+                evidence = self.evidence(snapshot)
+                rules = {rule["rule_id"]: rule for rule in evidence["rule_results"]}
+                self.assertEqual(rules["value_floor"]["status"], "fail")
+                self.assertEqual(rules["kgs_alternative"]["status"], "not_applicable")
+                self.assertEqual(evidence["decision_summary"]["numeric_path"], "No numeric acceptance path")
+                if quantity == "80":
+                    self.assertEqual(rules["lc_quantity_match"]["status"], "fail")
+                    self.assertIn("matches ERP Net Weight", rules["lc_quantity_match"]["reason"])
+                    self.assertIn("does not add Quantity to the mismatch label", rules["lc_quantity_match"]["reason"])
+                    self.assertIn("Quantity matches ERP Net Weight independently", rules["kgs_alternative"]["reason"])
+                family = {
+                    "lc_sc_no": "LC-1", "sl_no_values": ["002"], "final_decision": "warning",
+                    "final_workbook_value": before["status"], "decision_reasons": before["decision_reasons"],
+                    "comparison_evidence": evidence,
+                }
+                html = _build_report_html(report_payload={"families": [family], "family_count": 1})
+                self.assertIn("Workbook status: Value mismatch", html)
+                self.assertIn(f"Dashboard quantity matched {reference}.", html)
+                self.assertIn("Numeric acceptance path: No numeric acceptance path", html)
+                self.assertIn("Individual rule failures do not necessarily identify mismatched fields", html)
+                if quantity == "80":
+                    self.assertIn("Quantity matches ERP Net Weight independently", html)
+                self.assertEqual(before, _compare_dashboard_snapshot(family=self.family, aggregate=self.erp, snapshot=snapshot))
 
     def test_accepted_differences_retain_rule_result_and_delta(self):
         for value, quantity, expected in (("1000", "80.79", "OK (KGS)"), ("1100", "120", "OK"), ("900", "90", "mismatch")):

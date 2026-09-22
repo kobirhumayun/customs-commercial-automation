@@ -445,6 +445,8 @@ Result rules:
 - write `OK` when all required comparisons pass, including either exact LC value/LC qty agreement or the approved excess rule
 - write `OK (KGS)` when all non-quantity comparisons pass, dashboard `LC Value` exactly matches ERP, and quantity fails ERP `LC Qty` but matches ERP `Net Weight`
 - otherwise keep verbose mismatch evidence in report `decision_reasons`, but write a compact comma-separated topic label ending in `mismatch` into workbook `Bangladesh Bank Dashboard` and report `final_workbook_value`; example: `Value, Quantity mismatch`
+- If LC Value matches ERP and only quantity is excessive after exact/KGS acceptance checks, the existing single-field excess failure contributes `Quantity` only to the mismatch label. An independent foreign-LC failure yields `Foreign LC No, Quantity mismatch`.
+- If LC Value is lower but dashboard quantity matches ERP LC Qty within `0.01` or ERP Net Weight within `0.8` (after the existing two-decimal rounding), retain the warning and use `Value mismatch`, adding independent mismatch topics as applicable. Detailed reasons identify the matching quantity reference. A net-weight match alone does not permit `OK (KGS)` with a lower value. All other numeric acceptance, excess, and date-write rules remain unchanged.
 - if the dashboard search returns no result or incomplete data, write a clear message specific to that occurrence type
 - the current implementation also stages workbook `Shipment Date` and `Expiry Date` updates on warning/failure families produced after dashboard lookup/comparison; upstream ERP/input hard-block families still skip that date writeback
 - ERP is authoritative for those two fields whenever this workflow stages those writes

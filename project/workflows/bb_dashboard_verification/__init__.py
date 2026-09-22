@@ -1082,6 +1082,13 @@ def _compare_value_and_quantity(
             f"'{_decimal_to_string(dashboard_lc_value)}' was lower than ERP "
             f"'{_decimal_to_string(aggregate.current_lc_value)}'."
         )
+        if quantity_matches_lc_qty or quantity_matches_net_weight:
+            # A lower value still fails, but either quantity reference can match.
+            matched_reference = "ERP LC quantity" if quantity_matches_lc_qty else "ERP net weight"
+            return {
+                "status": "",
+                "decision_reasons": lower_reasons + [f"Dashboard quantity matched {matched_reference}."],
+            }
     if quantity_relation == "lower":
         lower_reasons.append(
             "Quantity mismatch: dashboard total "
@@ -1653,6 +1660,15 @@ def _build_rule_results(
     else:
         add("kgs_alternative", "pass" if kgs else "fail", f"Dashboard quantity minus ERP net weight = {_decimal_to_string(quantity - weight)}; absolute tolerance 0.8.")
 
+    if vr == "lower" and quantity is not None and finite_weight and _decimal_matches(
+        quantity, weight, tolerance=_NET_WEIGHT_TOLERANCE
+    ):
+        for rule in results:
+            if rule["rule_id"] == "lc_quantity_match" and qr != "equal":
+                rule["reason"] += " Dashboard quantity matches ERP Net Weight; this ERP LC Qty-specific failure does not add Quantity to the mismatch label."
+            elif rule["rule_id"] == "kgs_alternative":
+                rule["reason"] += " Quantity matches ERP Net Weight independently, but the lower LC value still prevents KGS acceptance."
+
     if exact or kgs:
         add("excess_alternative", "not_applicable", "Exact or KGS acceptance path already passes.")
     elif vr is None or qr is None:
@@ -1712,6 +1728,9 @@ def _render_comparison_evidence(families) -> str:
             f"<p>Overall decision: {display(family.get('final_decision'))}. Workbook status: {display(family.get('final_workbook_value'))}.</p>"
             f"<p>Numeric acceptance path: {display(summary.get('numeric_path', 'Unavailable'))}. All other required checks still apply.</p>"
             f"<p>Recorded family reasons: {display(family.get('decision_reasons', []))}</p>"
+            "<p>Individual rule failures do not necessarily identify mismatched fields. "
+            "A quantity match and eligibility for KGS acceptance are separate checks. "
+            "Use the workbook status and recorded family reasons above for the final mismatch labels.</p>"
             "<p>Diagnostic findings (do not replace the recorded decision):</p>"
             + (f"<ul>{findings_html}</ul>" if findings_html else
                "<p>No failed or unavailable diagnostic checks.</p>" if rules else "<p>No rule diagnostics recorded.</p>") +
@@ -2134,6 +2153,11 @@ def _decision_reason_to_topics(reason: str) -> list[str]:
     if normalized.startswith("Dashboard quantity rows could not be parsed.") or normalized.startswith("Quantity mismatch:"):
         return ["Quantity"]
     if normalized.startswith("Excess mismatch:"):
+        # Quantity-only excess fails the combined rule even though value matches.
+        if normalized.startswith(
+            "Excess mismatch: dashboard quantity exceeded ERP LC Qty while dashboard LC Value matched ERP;"
+        ):
+            return ["Quantity"]
         return ["Value", "Quantity"]
     return []
 

@@ -2401,7 +2401,7 @@ class BBDashboardVerificationTests(unittest.TestCase):
             snapshot=snapshot,
         )
 
-        self.assertEqual(comparison["status"], "Value, Quantity mismatch")
+        self.assertEqual(comparison["status"], "Quantity mismatch")
         self.assertIn("single-field excess is not allowed", " ".join(comparison["decision_reasons"]))
 
     def test_compare_dashboard_snapshot_accepts_net_weight_with_point_eight_tolerance(self) -> None:
