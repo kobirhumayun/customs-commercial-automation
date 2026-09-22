@@ -1082,6 +1082,13 @@ def _compare_value_and_quantity(
             f"'{_decimal_to_string(dashboard_lc_value)}' was lower than ERP "
             f"'{_decimal_to_string(aggregate.current_lc_value)}'."
         )
+        if quantity_matches_lc_qty or quantity_matches_net_weight:
+            # A lower value still fails, but either quantity reference can match.
+            matched_reference = "ERP LC quantity" if quantity_matches_lc_qty else "ERP net weight"
+            return {
+                "status": "",
+                "decision_reasons": lower_reasons + [f"Dashboard quantity matched {matched_reference}."],
+            }
     if quantity_relation == "lower":
         lower_reasons.append(
             "Quantity mismatch: dashboard total "

@@ -51,6 +51,37 @@ class ComparisonEvidenceTests(unittest.TestCase):
         self.assertIs(returned_snapshot, snapshot)
         self.assertTrue(writes_dates)
 
+    def test_lower_value_with_matching_quantity_retains_only_value_failure(self):
+        for quantity, reference in (("100", "ERP LC quantity"), ("100.01", "ERP LC quantity"),
+                                    ("80", "ERP net weight"), ("80.8", "ERP net weight")):
+            for foreign_mismatch in (False, True):
+                with self.subTest(quantity=quantity, foreign_mismatch=foreign_mismatch):
+                    snapshot = replace(
+                        self.snapshot, lc_value="900", commodity_quantities=[quantity],
+                        foreign_lc_numbers=["OTHER" if foreign_mismatch else "MLC-1"],
+                    )
+                    decision, status, reasons, returned_snapshot, writes_dates = _evaluate_lookup_result(
+                        family=self.family, aggregate=self.erp,
+                        lookup_result=DashboardLookupResult(outcome="resolved", attempts=[], snapshot=snapshot),
+                    )
+                    self.assertEqual(decision, FinalDecision.WARNING)
+                    self.assertEqual(status, "Foreign LC No, Value mismatch" if foreign_mismatch else "Value mismatch")
+                    self.assertIn("LC Value mismatch: dashboard '900' was lower than ERP '1000'.", reasons)
+                    self.assertIn(f"Dashboard quantity matched {reference}.", reasons)
+                    self.assertFalse(any(reason.startswith("Quantity mismatch:") for reason in reasons))
+                    self.assertIs(returned_snapshot, snapshot)
+                    self.assertTrue(writes_dates)
+
+    def test_lower_value_still_reports_unmatched_quantity(self):
+        for quantity, net_weight in (("80.81", Decimal("80")), ("80", None), ("90", Decimal("80"))):
+            with self.subTest(quantity=quantity, net_weight=net_weight):
+                comparison = _compare_dashboard_snapshot(
+                    family=self.family, aggregate=replace(self.erp, net_weight=net_weight),
+                    snapshot=replace(self.snapshot, lc_value="900", commodity_quantities=[quantity]),
+                )
+                self.assertEqual(comparison["status"], "Value, Quantity mismatch")
+                self.assertTrue(any(reason.startswith("Quantity mismatch:") for reason in comparison["decision_reasons"]))
+
     def test_accepted_differences_retain_rule_result_and_delta(self):
         for value, quantity, expected in (("1000", "80.79", "OK (KGS)"), ("1100", "120", "OK"), ("900", "90", "mismatch")):
             with self.subTest(expected=expected):
