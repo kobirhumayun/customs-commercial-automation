@@ -82,6 +82,37 @@ class ComparisonEvidenceTests(unittest.TestCase):
                 self.assertEqual(comparison["status"], "Value, Quantity mismatch")
                 self.assertTrue(any(reason.startswith("Quantity mismatch:") for reason in comparison["decision_reasons"]))
 
+    def test_lower_value_report_explains_quantity_match_without_accepting_kgs(self):
+        from project.workflows.bb_dashboard_verification import _build_report_html
+
+        for quantity, reference in (("80", "ERP net weight"), ("100", "ERP LC quantity")):
+            with self.subTest(quantity=quantity):
+                snapshot = replace(self.snapshot, lc_value="900", commodity_quantities=[quantity])
+                before = _compare_dashboard_snapshot(family=self.family, aggregate=self.erp, snapshot=snapshot)
+                evidence = self.evidence(snapshot)
+                rules = {rule["rule_id"]: rule for rule in evidence["rule_results"]}
+                self.assertEqual(rules["value_floor"]["status"], "fail")
+                self.assertEqual(rules["kgs_alternative"]["status"], "not_applicable")
+                self.assertEqual(evidence["decision_summary"]["numeric_path"], "No numeric acceptance path")
+                if quantity == "80":
+                    self.assertEqual(rules["lc_quantity_match"]["status"], "fail")
+                    self.assertIn("matches ERP Net Weight", rules["lc_quantity_match"]["reason"])
+                    self.assertIn("does not add Quantity to the mismatch label", rules["lc_quantity_match"]["reason"])
+                    self.assertIn("Quantity matches ERP Net Weight independently", rules["kgs_alternative"]["reason"])
+                family = {
+                    "lc_sc_no": "LC-1", "sl_no_values": ["002"], "final_decision": "warning",
+                    "final_workbook_value": before["status"], "decision_reasons": before["decision_reasons"],
+                    "comparison_evidence": evidence,
+                }
+                html = _build_report_html(report_payload={"families": [family], "family_count": 1})
+                self.assertIn("Workbook status: Value mismatch", html)
+                self.assertIn(f"Dashboard quantity matched {reference}.", html)
+                self.assertIn("Numeric acceptance path: No numeric acceptance path", html)
+                self.assertIn("Individual rule failures do not necessarily identify mismatched fields", html)
+                if quantity == "80":
+                    self.assertIn("Quantity matches ERP Net Weight independently", html)
+                self.assertEqual(before, _compare_dashboard_snapshot(family=self.family, aggregate=self.erp, snapshot=snapshot))
+
     def test_accepted_differences_retain_rule_result_and_delta(self):
         for value, quantity, expected in (("1000", "80.79", "OK (KGS)"), ("1100", "120", "OK"), ("900", "90", "mismatch")):
             with self.subTest(expected=expected):
