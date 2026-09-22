@@ -2134,6 +2134,11 @@ def _decision_reason_to_topics(reason: str) -> list[str]:
     if normalized.startswith("Dashboard quantity rows could not be parsed.") or normalized.startswith("Quantity mismatch:"):
         return ["Quantity"]
     if normalized.startswith("Excess mismatch:"):
+        # Quantity-only excess fails the combined rule even though value matches.
+        if normalized.startswith(
+            "Excess mismatch: dashboard quantity exceeded ERP LC Qty while dashboard LC Value matched ERP;"
+        ):
+            return ["Quantity"]
         return ["Value", "Quantity"]
     return []
 

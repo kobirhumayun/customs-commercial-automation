@@ -1046,6 +1046,7 @@ Rows where:
 - if both `IRC Details` and `ERC Details` contain data, one passing and the other failing rejects the family
 - if both `IRC Details` and `ERC Details` are empty, buyer verification fails
 - otherwise keep verbose discrepancy detail in `Decision Reasons`, but write a compact comma-separated topic label ending in `mismatch` into `Bangladesh Bank Dashboard` and report `Final Workbook Value` for comparison-based mismatch families; for example `Value, Quantity mismatch`
+- When dashboard LC Value matches ERP but dashboard quantity exceeds ERP LC Qty and neither the exact nor KGS path accepts it, the existing single-field excess failure contributes only `Quantity` to the compact label. An independent foreign-LC failure therefore produces `Foreign LC No, Quantity mismatch`. This label correction preserves the warning decision, verbose reasons, numeric rules, date writeback, and other excess labels.
 
 ### No-data result handling
 - Blank dashboard commodity quantity cells and blank ERP `LC Qty` cells are skipped; all populated numeric quantity cells on each side are summed and the two family totals are compared. Blank rows alone are not discrepancies. An entirely blank quantity list is unavailable, not numeric zero; an explicit zero is numeric data. Existing quantity tolerances, KGS fallback, excess rules, and normal workbook write selection are retained. Populated malformed/nonfinite quantities remain invalid input, not blank rows.
