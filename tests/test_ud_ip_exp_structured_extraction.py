@@ -9,6 +9,56 @@ from project.workflows.ud_ip_exp.structured_extraction import (
 
 
 class UDIPEXPStructuredExtractionTests(unittest.TestCase):
+    def test_new_amendment_continuation_layouts_preserve_values_and_provenance(self) -> None:
+        for width in (12, 15):
+            for header_only in (False, True):
+                for increase, expected in (("USD 0.00", "89675"), ("USD 87,696.00", "87696"), ("", None)):
+                    with self.subTest(width=width, header_only=header_only, increase=increase):
+                        report = _new_continuation_report(width, header_only)
+                        column = 7 if width == 12 else 8
+                        report["pages"][1]["tables"][0]["rows"][0][column] = increase
+                        analysis = extract_structured_ud_analysis(
+                            report=report,
+                            context=StructuredUDExtractionContext("ERP-LC", "000201260400935"),
+                        )
+                        self.assertEqual(analysis.extracted_lc_sc_value, expected)
+                        self.assertEqual(analysis.extracted_quantity_by_unit, {"YDS": "21390"})
+                        if expected is not None:
+                            self.assertEqual(analysis.extracted_lc_sc_number, "ERP-LC")
+                            self.assertEqual(analysis.extracted_lc_sc_date, "2026-03-09")
+                            provenance = analysis.extracted_lc_sc_provenance
+                            self.assertEqual(provenance["page_number"], 2)
+                            self.assertEqual(provenance["row_index"], 0)
+                            self.assertEqual(provenance["value_column_index"], 5 if increase == "USD 0.00" else column)
+
+    def test_new_continuation_layouts_reject_unsafe_section_evidence(self) -> None:
+        for width in (12, 15):
+            for header_only in (False, True):
+                for defect in ("no_header", "serial_gap", "page_gap", "spacer_value", "subtotal", "new_section", "bad_date", "bad_money"):
+                    with self.subTest(width=width, header_only=header_only, defect=defect):
+                        report = _new_continuation_report(width, header_only)
+                        previous = report["pages"][0]["tables"][2]["rows"]
+                        page = report["pages"][1]
+                        rows = page["tables"][0]["rows"]
+                        if defect == "no_header":
+                            previous[0][1] = "Other table"
+                        elif defect == "serial_gap":
+                            rows[0][0] = "9"
+                        elif defect == "page_gap":
+                            page["page_number"] = 4
+                        elif defect == "spacer_value":
+                            rows[0][2] = "Unexpected value"
+                        elif defect == "bad_date":
+                            rows[0][4] = "not a date"
+                        elif defect == "bad_money":
+                            rows[0][5] = "not money"
+                        else:
+                            previous.append(["Total Value: USD 100" if defect == "subtotal" else "(2) FTT"] + [""] * (len(previous[0]) - 1))
+                        analysis = extract_structured_ud_analysis(
+                            report=report, context=StructuredUDExtractionContext("201260400935"),
+                        )
+                        self.assertIsNone(analysis.extracted_lc_sc_value)
+
     def test_amendment_headerless_continuation_with_changed_grid(self) -> None:
         for repeated_header in (False, True):
             with self.subTest(repeated_header=repeated_header):
@@ -495,6 +545,24 @@ class UDIPEXPStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(analysis.extracted_lc_sc_value, "78255.5")
         self.assertEqual(analysis.extracted_lc_sc_provenance["table_index"], 31)
         self.assertEqual(analysis.extracted_lc_sc_provenance["row_index"], 0)
+
+
+def _new_continuation_report(width: int, header_only: bool) -> dict:
+    report = _headerless_amendment_report(True)
+    previous = report["pages"][0]["tables"][2]["rows"]
+    if header_only:
+        # Tusuka/Agami: recognized header followed only by blank/footer rows.
+        previous[1] = [""] * len(previous[1])
+        report["pages"][1]["tables"][0]["rows"][0][0] = "1"
+    if width == 15:
+        # Dekko/Agami/A.K.M: page-wide 15-column grid with monetary spacers.
+        rows = report["pages"][1]["tables"][0]["rows"]
+        for index, row in enumerate(rows):
+            expanded = [""] * 15
+            for source, target in zip([0, 1, 4, 5, 7, 9, 11], [0, 1, 4, 5, 8, 11, 14]):
+                expanded[target] = row[source]
+            rows[index] = expanded
+    return report
 
 
 def _headerless_amendment_report(repeated_header: bool) -> dict:
