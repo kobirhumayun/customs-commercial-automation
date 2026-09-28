@@ -31,6 +31,37 @@ from project.workflows.validation import validate_run_snapshot
 
 
 class UDIPEXPLiveDocumentTests(unittest.TestCase):
+    def test_square_extra_lc_filename_token_remains_a_hard_block(self) -> None:
+        filename = "UD-LC-1210-LC-SQUARE DENIMS LTD.pdf"
+        mail = _mail("entry-square-regression", "Subject ignored", attachments=[{"attachment_name": filename}])
+
+        class Provider:
+            def analyze(self, *, saved_document):
+                return SavedDocumentAnalysis(
+                    analysis_basis="fixture",
+                    extracted_document_number="BGMEA/DHK/AM/2026/6182/029-072",
+                    extracted_document_date="2026-09-10",
+                    extracted_lc_sc_number="1546260401210",
+                    extracted_quantity="5700",
+                    extracted_quantity_unit="YDS",
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = prepare_live_ud_ip_exp_documents(
+                run_id="run-square-regression", mail=mail, workbook_snapshot=None,
+                document_root=Path(temp_dir),
+                provider=SimulatedAttachmentContentProvider(
+                    content_by_key={(mail.entry_id, 0): b"%PDF-1.4\nsquare regression\n"},
+                ),
+                analysis_provider=Provider(),
+                verified_family=ERPFamily(
+                    lc_sc_number="1546260401210", buyer_name="SQUARE DENIMS LTD",
+                    lc_sc_date="2026-08-01", folder_buyer_name="SQUARE DENIMS LTD",
+                ),
+            )
+        issue = next(issue for issue in result.document_save_result.issues if issue.code == "ud_filename_lc_suffix_mismatch")
+        self.assertEqual(issue.details["mismatched_filename_suffixes"][0]["filename_suffix"], "1210-LC")
+
     def test_prepare_live_ud_ip_exp_documents_saves_into_family_directory(self) -> None:
         mail = _mail(
             "entry-live-001",

@@ -208,23 +208,29 @@ def _extract_lc_table_row(
 
 
 def _amendment_continuation_tables(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """Recover the observed 12-column page grid without collapsing empty values.
+    """Recover observed continuation page grids without collapsing empty values.
 
     A recognized LC header and consecutive serials on the preceding page establish
-    section ownership. Only the leading continuation rows are projected; a new
+    section ownership (a header-only page expects serial 1). Only leading rows
+    are projected; a new
     section, subtotal, or unexpected row ends the continuation.
     """
-    columns = [0, 1, 4, 5, 7, 9, 11]
-    spacers = [2, 3, 6, 8, 10]
+    layouts = {
+        12: [0, 1, 4, 5, 7, 9, 11],
+        15: [0, 1, 4, 5, 8, 11, 14],
+    }
     result: list[dict[str, Any]] = []
     previous_page = 0
     last_serial: int | None = None
     for table in _iter_tables(report):
         rows = table["rows"]
         continuation_rows = []
-        if table["page_number"] == previous_page + 1 and last_serial is not None:
+        width = len(rows[0]) if rows else 0
+        columns = layouts.get(width)
+        if columns is not None and table["page_number"] == previous_page + 1 and last_serial is not None:
+            spacers = [i for i in range(width) if i not in columns]
             for row in rows:
-                if len(row) != 12 or any(_clean_cell(row[i]) for i in spacers):
+                if len(row) != width or any(_clean_cell(row[i]) for i in spacers):
                     break
                 projected = [row[i] for i in columns]
                 if not _amendment_lc_data_row(projected, last_serial + 1):
@@ -255,7 +261,7 @@ def _amendment_continuation_tables(report: dict[str, Any]) -> list[dict[str, Any
                 and cells[6].upper() == "TOLERANCE"
             ):
                 active_columns = populated
-                last_serial = None
+                last_serial = 0
                 continue
             if not cells or (len(cells) == 1 and "SIGNATURE OF BONDER" in cells[0].upper()):
                 continue
